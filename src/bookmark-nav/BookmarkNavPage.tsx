@@ -461,6 +461,7 @@ export function BookmarkNavPage() {
 
   return (
     <main className="bookmark-nav-shell">
+      <div className="bookmark-nav-chrome">
       <header className="bookmark-nav-header">
         <div className="bookmark-nav-brand">
           <div className="bookmark-nav-mark" aria-hidden="true">
@@ -476,30 +477,6 @@ export function BookmarkNavPage() {
           <span>刷新</span>
         </button>
       </header>
-
-      <section className="bookmark-nav-hero" aria-label="导航概览">
-        <div className="bookmark-nav-hero__inner">
-          <div>
-            <p className="bookmark-nav-hero__kicker">Dynamic Glass Navigation</p>
-            <h2>通透轻盈的书签浏览空间</h2>
-            <p>读取浏览器真实书签树，结合 AI 摘要与标签，在银白冰蓝的玻璃层级中快速定位内容。</p>
-          </div>
-          <div className="bookmark-nav-hero__metrics" aria-label="核心指标">
-            <div className="bookmark-nav-metric">
-              <strong>{bookmarks.length}</strong>
-              <span>书签总数</span>
-            </div>
-            <div className="bookmark-nav-metric">
-              <strong>{totalFolders}</strong>
-              <span>文件夹集合</span>
-            </div>
-            <div className="bookmark-nav-metric">
-              <strong>{visibleBookmarks.length}</strong>
-              <span>当前可见结果</span>
-            </div>
-          </div>
-        </div>
-      </section>
 
       <section className="bookmark-nav-toolbar" aria-label="书签筛选">
         <div className="bookmark-nav-search">
@@ -520,6 +497,7 @@ export function BookmarkNavPage() {
           <span>{totalFolders} 个文件夹</span>
         </div>
       </section>
+      </div>
 
       <div className="bookmark-nav-content">
         <aside className="bookmark-folder-sidebar" aria-label="浏览器书签树">

@@ -167,7 +167,7 @@ body {
 }
 
 .page-nav-btn:hover {
-  background: var(--bg-primary);
+  background: var(--bg-page-gradient, var(--bg-primary));
   color: var(--text-primary);
 }
 

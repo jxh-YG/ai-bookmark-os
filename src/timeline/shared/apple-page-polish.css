@@ -823,3 +823,152 @@ html body.theme-dark {
     animation: none !important;
   }
 }
+
+/* residual solid surface neutralization */
+html body,
+html body .app,
+html body .popup,
+html body .container,
+html body .main,
+html body .content,
+html body .page,
+html body .settings-layout,
+html body .checker-container,
+html body .graph-container,
+html body .sa-layout,
+html body .sa-main {
+  background: var(--bg-page-gradient, var(--bg-primary)) !important;
+}
+
+html body .topbar,
+html body .toolbar,
+html body .header,
+html body .footer,
+html body .search-bar,
+html body .filter-bar,
+html body .action-bar,
+html body .summary-bar,
+html body .settings-header,
+html body .checker-header,
+html body .graph-header,
+html body .sa-topbar,
+html body .sa-toolbar {
+  background: var(--bg-glass-strong) !important;
+  border-color: var(--border-glass) !important;
+  backdrop-filter: saturate(var(--glass-saturate, 180%)) blur(var(--glass-blur, 20px));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate, 180%)) blur(var(--glass-blur, 20px));
+  box-shadow: var(--shadow-sm);
+}
+
+html body .card,
+html body .panel,
+html body .modal,
+html body .preview,
+html body .settings-panel,
+html body .settings-nav,
+html body .setting-card,
+html body .result-item,
+html body .bookmark-item,
+html body .folder-item,
+html body .list-item,
+html body .graph-sidebar,
+html body .graph-panel,
+html body .sa-sidebar,
+html body .sa-card,
+html body .sa-bookmark-card,
+html body .sa-feed-article,
+html body .mdi-window,
+html body .state-view {
+  background: var(--bg-glass) !important;
+  border-color: var(--border-glass) !important;
+  border-radius: var(--radius-lg, 18px);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: saturate(var(--glass-saturate, 180%)) blur(var(--glass-blur, 20px));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate, 180%)) blur(var(--glass-blur, 20px));
+}
+
+html body input,
+html body select,
+html body textarea,
+html body .search-input,
+html body .edit-input {
+  background: var(--bg-glass-soft) !important;
+  border-color: var(--border-glass) !important;
+}
+
+html body .btn,
+html body button:not(.primary):not(.btn-primary):not(.icon-btn) {
+  border-radius: var(--radius-md, 12px);
+}
+
+html body .primary,
+html body .btn-primary,
+html body .btn.primary,
+html body button.primary,
+html body .modal-btn--save,
+html body .save-btn,
+html body .test-btn {
+  color: #fff !important;
+  border-color: transparent !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 82%, white), var(--accent-hover)) !important;
+  box-shadow: var(--shadow-glow);
+}
+
+/* continuous hover lift for interactive rows */
+html body .bookmark-item,
+html body .folder-item,
+html body .result-item,
+html body .list-item,
+html body .setting-card,
+html body .sa-bookmark-card,
+html body .sa-feed-article {
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+html body .bookmark-item:hover,
+html body .folder-item:hover,
+html body .result-item:hover,
+html body .list-item:hover,
+html body .setting-card:hover,
+html body .sa-bookmark-card:hover,
+html body .sa-feed-article:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border-glass)) !important;
+  box-shadow: var(--shadow-md);
+}
+
+/* press feedback on chrome buttons */
+html body button:not(:disabled):active,
+html body .btn:not(:disabled):active,
+html body .icon-btn:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html body .topbar,
+  html body .toolbar,
+  html body .header,
+  html body .card,
+  html body .panel,
+  html body .modal,
+  html body .settings-panel,
+  html body .settings-nav,
+  html body .sa-sidebar,
+  html body .sa-card {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(255, 255, 255, 0.98) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html body .bookmark-item:hover,
+  html body .folder-item:hover,
+  html body .result-item:hover,
+  html body .list-item:hover,
+  html body .setting-card:hover,
+  html body .sa-bookmark-card:hover,
+  html body .sa-feed-article:hover {
+    transform: none;
+  }
+}

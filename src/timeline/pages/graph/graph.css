@@ -84,7 +84,7 @@ html, body {
   font-family: var(--font-sans);
   font-size: 14px;
   color: var(--text-primary);
-  background: var(--bg-primary);
+  background: var(--bg-page-gradient, var(--bg-primary));
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -249,7 +249,7 @@ html, body {
   padding: 0 var(--space-sm) 0 var(--space-md);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-md);
-  background: var(--bg-primary);
+  background: var(--bg-page-gradient, var(--bg-primary));
   color: var(--text-primary);
   font-size: 12px;
   font-family: var(--font-sans);
@@ -690,7 +690,7 @@ html, body {
   padding: 0 var(--space-sm) 0 28px;
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-md);
-  background: var(--bg-primary);
+  background: var(--bg-page-gradient, var(--bg-primary));
   color: var(--text-primary);
   font-size: 12px;
   font-family: var(--font-sans);

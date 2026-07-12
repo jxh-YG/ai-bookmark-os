@@ -62,7 +62,7 @@ body.standalone-mode {
   font-size: 14px;
   line-height: 1.5;
   color: var(--text-primary);
-  background: var(--bg-primary);
+  background: var(--bg-page-gradient, var(--bg-primary));
   overflow: clip;
   display: flex;
   flex-direction: column;
@@ -448,7 +448,7 @@ body.theme-dark #saThemeBtn .theme-icon-light { display: none; }
 }
 
 .sa-sidebar-tab.active {
-  background: var(--bg-primary);
+  background: var(--bg-page-gradient, var(--bg-primary));
   color: var(--text-primary);
   box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
 }

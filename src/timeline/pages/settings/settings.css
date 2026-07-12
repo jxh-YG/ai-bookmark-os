@@ -475,7 +475,7 @@ body {
   height: 16px;
   left: 3px;
   bottom: 3px;
-  background: white;
+  background: var(--bg-glass-soft, rgba(255,255,255,0.72));
   border-radius: 50%;
   transition: transform var(--transition-fast);
   box-shadow: 0 1px 2px rgba(0,0,0,.2);
@@ -522,7 +522,7 @@ body {
   gap: var(--space-md);
   margin: var(--space-md) var(--space-xl);
   padding: var(--space-md);
-  background: #fff3e0;
+  background: color-mix(in srgb, #fff3e0 78%, transparent);
   border: 1px solid #ffe0b2;
   border-radius: var(--radius-md);
 }

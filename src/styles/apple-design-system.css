@@ -486,3 +486,54 @@ button:not(:disabled):hover,
     --radius-xl: 20px;
   }
 }
+
+/* Accessibility: materials & contrast */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --bg-glass: rgba(255, 255, 255, 0.94);
+    --bg-glass-strong: rgba(255, 255, 255, 0.98);
+    --bg-glass-soft: rgba(248, 250, 252, 0.96);
+    --bg-secondary: rgba(255, 255, 255, 0.96);
+    --glass-blur: 0px;
+  }
+  .ab-glass,
+  .ab-glass-panel,
+  .ab-glass-surface,
+  .glass-surface,
+  .glass-card,
+  .floating-panel,
+  .topbar,
+  .toolbar,
+  .header,
+  .modal,
+  .panel,
+  .card {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --bg-glass: rgba(255, 255, 255, 0.98);
+    --bg-glass-strong: #ffffff;
+    --border-glass: rgba(60, 60, 67, 0.36);
+    --border-light: rgba(60, 60, 67, 0.36);
+    --text-secondary: #3A3A3C;
+  }
+  .ab-glass-panel,
+  .card,
+  .panel,
+  .modal {
+    border-width: 1.5px;
+  }
+}
+
+/* Press feedback: respond on pointer-down */
+button:not(:disabled):active,
+.ab-btn:not(:disabled):active,
+.btn:not(:disabled):active,
+.icon-btn:not(:disabled):active {
+  transform: scale(0.97);
+  transition: transform 100ms ease-out, filter 100ms ease-out, background 100ms ease-out;
+}

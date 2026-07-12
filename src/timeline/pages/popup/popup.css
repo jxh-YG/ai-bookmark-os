@@ -1,51 +1,55 @@
 /* ===== Design Tokens ===== */
 :root {
-  /* Colors */
-  --bg-primary: #ffffff;
-  --bg-secondary: #F2F2F7;
-  --bg-tertiary: #E5E5EA;
-  --bg-hover: #F2F2F7;
-  --bg-active: rgba(60, 60, 67, 0.12);
-  
+  /* Colors — Dynamic Glass tokens (popup) */
+  --bg-primary: #EEF4FB;
+  --bg-secondary: rgba(255, 255, 255, 0.72);
+  --bg-tertiary: rgba(236, 243, 251, 0.78);
+  --bg-hover: rgba(255, 255, 255, 0.78);
+  --bg-active: rgba(10, 132, 255, 0.12);
+  --bg-glass: rgba(255, 255, 255, 0.58);
+  --bg-glass-strong: rgba(255, 255, 255, 0.78);
+  --bg-glass-soft: rgba(245, 249, 255, 0.48);
+
   --text-primary: #1C1C1E;
-  --text-secondary: #636366;
-  --text-tertiary: #8E8E93;
-  --text-disabled: #AEAEB2;
-  
-  --border-light: rgba(60, 60, 67, 0.12);
-  --border-medium: rgba(60, 60, 67, 0.18);
-  
+  --text-secondary: #53606F;
+  --text-tertiary: #7B8796;
+  --text-disabled: #A7B0BD;
+
+  --border-light: rgba(112, 137, 171, 0.18);
+  --border-medium: rgba(112, 137, 171, 0.26);
+  --border-glass: rgba(255, 255, 255, 0.72);
+
   --accent: #0A84FF;
   --accent-hover: #0077ED;
   --accent-light: rgba(10,132,255,0.12);
-  
+
   --danger: #FF3B30;
   --danger-hover: #E0342B;
   --danger-light: rgba(255, 59, 48, 0.12);
-  
+
   --success: #34C759;
   --success-light: rgba(52, 199, 89, 0.14);
-  
+
   /* Shadows */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.10), 0 2px 6px rgba(0, 0, 0, 0.04);
-  
+  --shadow-sm: 0 10px 28px rgba(35, 66, 112, 0.08), 0 1px 0 rgba(255, 255, 255, 0.78) inset;
+  --shadow-md: 0 18px 48px rgba(35, 66, 112, 0.12), 0 1px 0 rgba(255, 255, 255, 0.82) inset;
+
   /* Spacing */
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 12px;
   --space-lg: 16px;
   --space-xl: 20px;
-  
+
   /* Radius */
   --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
   --radius-full: 9999px;
-  
+
   /* Transitions */
-  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: 160ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  --transition-normal: 240ms cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 /* ===== Reset ===== */
@@ -63,7 +67,7 @@ body {
   font-size: 14px;
   line-height: 1.5;
   color: var(--text-primary);
-  background: var(--bg-primary);
+  background: var(--bg-page-gradient, var(--bg-primary));
   overflow: clip;
   display: flex;
   flex-direction: column;
@@ -99,7 +103,7 @@ body {
   gap: 8px;
   padding: var(--space-md) var(--space-lg);
   border-bottom: 1px solid var(--border-light);
-  background: var(--bg-primary);
+  background: var(--bg-glass-strong, rgba(255,255,255,.78));
   flex-shrink: 0;
   min-width: 0;
 }
@@ -236,7 +240,7 @@ body {
 .search-bar {
   position: relative;
   padding: var(--space-sm) var(--space-lg);
-  background: var(--bg-primary);
+  background: var(--bg-glass-strong, rgba(255,255,255,.78));
   border-bottom: 1px solid var(--border-light);
   flex-shrink: 0;
 }
@@ -591,12 +595,12 @@ body.theme-dark .sort-dropdown-menu {
   --line-top: 0;
 }
 
-/* 热度排序时：去掉时间轴竖线 */
+/* 鐑害鎺掑簭鏃讹細鍘绘帀鏃堕棿杞寸珫绾?*/
 .timeline--flat::before {
   display: none;
 }
 
-/* 时间轴竖线 */
+/* 鏃堕棿杞寸珫绾?*/
 .timeline::before {
   content: '';
   position: absolute;
@@ -628,7 +632,7 @@ body.theme-dark .sort-dropdown-menu {
   position: relative;
 }
 
-/* 日期节点圆点 */
+/* 鏃ユ湡鑺傜偣鍦嗙偣 */
 .date-header::before {
   content: '';
   position: absolute;
@@ -672,7 +676,7 @@ body.theme-dark .sort-dropdown-menu {
   background: var(--bg-active);
 }
 
-/* 热力背景（暖橙由 JS 计算 inline） */
+/* 鐑姏鑳屾櫙锛堟殩姗欑敱 JS 璁＄畻 inline锛?*/
 .bookmark-item--heat {
   border-radius: var(--radius-md);
   margin: 3px 0;
@@ -685,7 +689,7 @@ body.theme-dark .sort-dropdown-menu {
   box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
 
-/* 热力背景下文字对比度优化：使用 JS 动态计算的 CSS 变量 */
+/* 鐑姏鑳屾櫙涓嬫枃瀛楀姣斿害浼樺寲锛氫娇鐢?JS 鍔ㄦ€佽绠楃殑 CSS 鍙橀噺 */
 .bookmark-item--heat .bookmark-title {
   color: var(--heat-title-color, var(--text-primary));
 }
@@ -707,7 +711,7 @@ body.theme-dark .sort-dropdown-menu {
   opacity: 0.85;
 }
 
-/* 点击次数标签 */
+/* 鐐瑰嚮娆℃暟鏍囩 */
 .bookmark-heat-info {
   display: inline-flex;
   align-items: center;
@@ -727,7 +731,7 @@ body.theme-dark .sort-dropdown-menu {
   flex-shrink: 0;
 }
 
-/* 书签节点：网站图标在时间轴上 */
+/* 涔︾鑺傜偣锛氱綉绔欏浘鏍囧湪鏃堕棿杞翠笂 */
 .bookmark-item::before {
   display: none;
 }
@@ -840,12 +844,12 @@ body.theme-dark .sort-dropdown-menu {
   color: var(--text-primary);
 }
 
-/* 多选模式：隐藏单本操作入口 */
+/* 澶氶€夋ā寮忥細闅愯棌鍗曟湰鎿嶄綔鍏ュ彛 */
 .bookmark-item--bulk .bookmark-actions {
   display: none;
 }
 
-/* ===== 单本操作菜单（极简三点弹出） ===== */
+/* ===== 鍗曟湰鎿嶄綔鑿滃崟锛堟瀬绠€涓夌偣寮瑰嚭锛?===== */
 .bookmark-menu {
   position: fixed;
   z-index: 10000;
@@ -1089,7 +1093,7 @@ body.theme-dark .bookmark-menu {
 
 .edit-input:focus {
   border-color: var(--accent);
-  background: var(--bg-primary);
+  background: var(--bg-page-gradient, var(--bg-primary));
   box-shadow: 0 0 0 2px var(--accent-light);
 }
 
@@ -1301,7 +1305,7 @@ body.theme-dark .bookmark-menu {
   background: var(--bg-hover);
 }
 
-/* ===== Folder Selector (编辑弹窗) ===== */
+/* ===== Folder Selector (缂栬緫寮圭獥) ===== */
 .edit-folder-selector {
   display: flex;
   align-items: center;
@@ -1795,7 +1799,7 @@ mark.hl {
 }
 .bookmark-item--bulk { padding-left: 16px; }
 .bookmark-item--bulk .bookmark-favicon {
-  /* 回到 flex 流，避免和 bookmark-info 重叠 */
+  /* 鍥炲埌 flex 娴侊紝閬垮厤鍜?bookmark-info 閲嶅彔 */
   position: static;
   top: auto;
   left: auto;
@@ -2091,7 +2095,7 @@ mark.hl {
   border-color: var(--danger, #dc2626);
 }
 
-/* ===== Hover 预览卡片 (Readability) — 横版紧凑布局 ===== */
+/* ===== Hover 棰勮鍗＄墖 (Readability) 鈥?妯増绱у噾甯冨眬 ===== */
 .preview-card {
   position: fixed;
   z-index: 9999;
@@ -2100,7 +2104,7 @@ mark.hl {
   visibility: hidden;
   opacity: 0;
   will-change: transform, opacity;
-  /* 宽度自适应：媒体 + 文案，min 220 / max 360 */
+  /* 瀹藉害鑷€傚簲锛氬獟浣?+ 鏂囨锛宮in 220 / max 360 */
   width: auto;
   min-width: 220px;
   max-width: 360px;
@@ -2121,7 +2125,7 @@ mark.hl {
 }
 
 
-/* 媒体区：宽高由 JS 按图片原比例动态设置（无留白） */
+/* 濯掍綋鍖猴細瀹介珮鐢?JS 鎸夊浘鐗囧師姣斾緥鍔ㄦ€佽缃紙鏃犵暀鐧斤級 */
 .preview-media {
   flex-shrink: 0;
   background: var(--bg-tertiary);
@@ -2131,7 +2135,7 @@ mark.hl {
   align-items: center;
   justify-content: center;
   align-self: center;
-  /* 默认 100×100；JS 加载完图片后会覆盖。占位预留空间避免布局抖动 */
+  /* 榛樿 100脳100锛汮S 鍔犺浇瀹屽浘鐗囧悗浼氳鐩栥€傚崰浣嶉鐣欑┖闂撮伩鍏嶅竷灞€鎶栧姩 */
   width: 100px;
   height: 100px;
 }
@@ -2139,15 +2143,15 @@ mark.hl {
 .preview-img {
   width: 100%;
   height: 100%;
-  /* 等比缩放，完整显示原图，不裁切 */
+  /* 绛夋瘮缂╂斁锛屽畬鏁存樉绀哄師鍥撅紝涓嶈鍒?*/
   object-fit: contain;
   background: var(--bg-secondary);
   display: block;
-  /* 异步解码，避免阻塞主线程 */
+  /* 寮傛瑙ｇ爜锛岄伩鍏嶉樆濉炰富绾跨▼ */
   decoding: async;
 }
 
-/* 无图占位：站点首字母 + host（小尺寸版） */
+/* 鏃犲浘鍗犱綅锛氱珯鐐归瀛楁瘝 + host锛堝皬灏哄鐗堬級 */
 .preview-placeholder {
   width: 100%;
   height: 100%;
@@ -2176,7 +2180,7 @@ mark.hl {
   white-space: nowrap;
 }
 
-/* 文字区：右半部分，弹性占据剩余空间 */
+/* 鏂囧瓧鍖猴細鍙冲崐閮ㄥ垎锛屽脊鎬у崰鎹墿浣欑┖闂?*/
 .preview-body {
   flex: 1 1 0;
   min-width: 140px;
@@ -2222,7 +2226,7 @@ mark.hl {
   margin-top: auto;
 }
 
-/* Loading skeleton —— 适配横版右半区 */
+/* Loading skeleton 鈥斺€?閫傞厤妯増鍙冲崐鍖?*/
 .preview-card--loading .preview-body {
   gap: 5px;
   padding: 10px;
@@ -2241,7 +2245,7 @@ mark.hl {
   to   { background-position: -200% 0; }
 }
 
-/* Empty / disabled / error 状态：宽度自动收缩 */
+/* Empty / disabled / error 鐘舵€侊細瀹藉害鑷姩鏀剁缉 */
 .preview-card--empty,
 .preview-card--disabled,
 .preview-card--error {
@@ -2264,7 +2268,7 @@ mark.hl {
 }
 .preview-card--error .preview-empty-msg { color: var(--danger, #dc2626); }
 
-/* 即时占位（悬停立即出现，含 title/host）—— 保持 100px 高度 */
+/* 鍗虫椂鍗犱綅锛堟偓鍋滅珛鍗冲嚭鐜帮紝鍚?title/host锛夆€斺€?淇濇寔 100px 楂樺害 */
 .preview-card--placeholder {
   height: 100px;
 }
@@ -2409,5 +2413,113 @@ body.ai-mode {
 }
 .ai-entry-banner {
   border-color: rgba(10,132,255,.22) !important;
+}
+
+/* ===== Apple Dynamic Glassmorphism final pass ===== */
+:root {
+  --bg-primary: #EEF4FB;
+  --bg-secondary: rgba(255, 255, 255, 0.72);
+  --bg-tertiary: rgba(236, 243, 251, 0.78);
+  --bg-hover: rgba(255, 255, 255, 0.78);
+  --bg-active: rgba(10, 132, 255, 0.12);
+  --bg-glass: rgba(255, 255, 255, 0.68);
+  --bg-glass-strong: rgba(255, 255, 255, 0.84);
+  --bg-glass-soft: rgba(245, 249, 255, 0.58);
+  --bg-page-gradient: linear-gradient(180deg, #F8FBFF 0%, #EDF4FB 48%, #F6F8FB 100%);
+  --border-glass: rgba(255, 255, 255, 0.68);
+  --shadow-sm: 0 12px 34px rgba(35, 66, 112, 0.10), 0 1px 0 rgba(255, 255, 255, 0.74) inset;
+  --shadow-md: 0 18px 52px rgba(35, 66, 112, 0.14), 0 1px 0 rgba(255, 255, 255, 0.78) inset;
+  --shadow-glow: 0 18px 52px rgba(93, 151, 255, 0.18);
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+}
+
+body,
+.ai-workspace,
+.ai-workspace__frame {
+  background: var(--bg-page-gradient, #EEF4FB);
+}
+
+.topbar,
+.search-bar,
+.ai-entry-banner,
+.ai-workspace__bar,
+.sort-dropdown,
+.footer-menu,
+.modal,
+.preview-card,
+.site-card,
+.folder-card,
+.health-card {
+  background: var(--bg-glass, rgba(255, 255, 255, 0.68));
+  border-color: var(--border-glass, rgba(255, 255, 255, 0.68));
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: saturate(170%) blur(18px);
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+}
+
+.topbar,
+.ai-workspace__bar {
+  background: var(--bg-glass-strong, rgba(255, 255, 255, 0.84));
+}
+
+.ai-entry-banner,
+.modal,
+.preview-card,
+.site-card,
+.folder-card,
+.health-card {
+  border-radius: var(--radius-lg, 16px);
+}
+
+.ai-workspace__back,
+.ai-workspace__btn,
+.ai-entry-banner__btn,
+.icon-btn,
+.sort-dropdown-btn,
+.bookmark-nav-btn,
+.ai-classify-btn {
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast), filter var(--transition-fast), color var(--transition-fast);
+}
+
+.ai-workspace__back,
+.icon-btn,
+.sort-dropdown-btn {
+  background: var(--bg-glass-soft, rgba(245, 249, 255, 0.58));
+}
+
+.ai-workspace__btn,
+.ai-entry-banner__btn {
+  color: var(--text-on-accent, #fff);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 82%, white), var(--accent-hover));
+  box-shadow: var(--shadow-glow, 0 18px 52px rgba(93, 151, 255, 0.18));
+}
+
+.ai-workspace__btn:hover,
+.ai-entry-banner__btn:hover,
+.ai-workspace__back:hover,
+.icon-btn:hover,
+.sort-dropdown-btn:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.ai-workspace__title strong,
+.ai-entry-banner__text strong {
+  color: var(--text-primary, #1C1C1E);
+}
+
+.ai-workspace__title span,
+.ai-entry-banner__text span {
+  color: var(--text-secondary, #636366);
+}
+
+input,
+select,
+textarea,
+.search-bar input {
+  background: var(--bg-glass-soft, rgba(245, 249, 255, 0.58));
+  border-color: var(--border-glass, rgba(255, 255, 255, 0.68));
 }
 

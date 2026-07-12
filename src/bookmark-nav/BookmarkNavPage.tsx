@@ -13,6 +13,8 @@ import {
   Search,
   Sparkles,
   X,
+  PanelLeft,
+  LayoutGrid,
 } from 'lucide-react';
 import { getFlatBookmarks } from '../core/bookmarks';
 import { hashUrl } from '../core/cache';
@@ -475,6 +477,30 @@ export function BookmarkNavPage() {
         </button>
       </header>
 
+      <section className="bookmark-nav-hero" aria-label="导航概览">
+        <div className="bookmark-nav-hero__inner">
+          <div>
+            <p className="bookmark-nav-hero__kicker">Dynamic Glass Navigation</p>
+            <h2>通透轻盈的书签浏览空间</h2>
+            <p>读取浏览器真实书签树，结合 AI 摘要与标签，在银白冰蓝的玻璃层级中快速定位内容。</p>
+          </div>
+          <div className="bookmark-nav-hero__metrics" aria-label="核心指标">
+            <div className="bookmark-nav-metric">
+              <strong>{bookmarks.length}</strong>
+              <span>书签总数</span>
+            </div>
+            <div className="bookmark-nav-metric">
+              <strong>{totalFolders}</strong>
+              <span>文件夹集合</span>
+            </div>
+            <div className="bookmark-nav-metric">
+              <strong>{visibleBookmarks.length}</strong>
+              <span>当前可见结果</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="bookmark-nav-toolbar" aria-label="书签筛选">
         <div className="bookmark-nav-search">
           <Search size={18} strokeWidth={2} aria-hidden="true" />
@@ -596,6 +622,28 @@ export function BookmarkNavPage() {
           ) : null}
         </div>
       </div>
+
+      <div className="bookmark-nav-float-actions" aria-label="快捷操作">
+        <div className="bookmark-nav-float-actions__inner">
+          <button type="button" onClick={() => setActiveFolderId('all')}>
+            <LayoutGrid size={15} aria-hidden="true" />
+            <span>全部书签</span>
+          </button>
+          <button type="button" onClick={allFoldersExpanded ? collapseAllFolders : expandAllFolders} disabled={!totalFolders}>
+            <PanelLeft size={15} aria-hidden="true" />
+            <span>{allFoldersExpanded ? '收起目录' : '展开目录'}</span>
+          </button>
+          <button type="button" className="is-primary" onClick={loadBookmarks} disabled={status === 'loading'}>
+            {status === 'loading' ? <Loader2 size={15} className="spin" aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
+            <span>刷新</span>
+          </button>
+        </div>
+      </div>
+
+      <footer className="bookmark-nav-footer">
+        <strong>AI Bookmark OS</strong>
+        · 真实书签树 · 玻璃拟态导航 · 本地优先
+      </footer>
     </main>
   );
 }

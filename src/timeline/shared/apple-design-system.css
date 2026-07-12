@@ -1,35 +1,38 @@
-/* AI Bookmark OS ? Apple HIG Design System
+/* AI Bookmark OS — Apple Dynamic Glassmorphism Design System
    Shared visual language for timeline + AI surfaces.
    Import first; page CSS may override local layout only. */
 
 :root {
-  /* Surfaces */
+  /* Surfaces — cool silver / ice-blue glass */
   --bg-primary: #EEF4FB;
-  --bg-secondary: rgba(255, 255, 255, 0.78);
-  --bg-tertiary: rgba(229, 235, 244, 0.82);
-  --bg-hover: rgba(0, 0, 0, 0.04);
-  --bg-active: rgba(0, 0, 0, 0.08);
-  --bg-elevated: rgba(255, 255, 255, 0.82);
-  --bg-glass: rgba(255, 255, 255, 0.64);
-  --bg-glass-strong: rgba(255, 255, 255, 0.84);
-  --bg-glass-soft: rgba(245, 249, 255, 0.52);
-  --bg-page-gradient: linear-gradient(180deg, #f8fbff 0%, #edf4fb 46%, #f6f8fb 100%);
+  --bg-secondary: rgba(255, 255, 255, 0.72);
+  --bg-tertiary: rgba(229, 235, 244, 0.78);
+  --bg-hover: rgba(255, 255, 255, 0.78);
+  --bg-active: rgba(10, 132, 255, 0.12);
+  --bg-elevated: rgba(255, 255, 255, 0.84);
+  --bg-glass: rgba(255, 255, 255, 0.58);
+  --bg-glass-strong: rgba(255, 255, 255, 0.78);
+  --bg-glass-soft: rgba(245, 249, 255, 0.48);
+  --bg-page-gradient:
+    radial-gradient(1200px 560px at 12% -8%, rgba(186, 220, 255, 0.55), transparent 58%),
+    radial-gradient(900px 480px at 88% 0%, rgba(214, 230, 255, 0.42), transparent 52%),
+    linear-gradient(180deg, #F8FBFF 0%, #EDF4FB 46%, #F4F7FB 100%);
 
-  /* Text */
+  /* Text — high readability on glass */
   --text-primary: #1C1C1E;
-  --text-secondary: #636366;
-  --text-tertiary: #8E8E93;
-  --text-disabled: #AEAEB2;
+  --text-secondary: #53606F;
+  --text-tertiary: #7B8796;
+  --text-disabled: #A7B0BD;
   --text-on-accent: #FFFFFF;
 
   /* Borders */
-  --border-light: rgba(60, 60, 67, 0.12);
-  --border-medium: rgba(60, 60, 67, 0.18);
-  --border-strong: rgba(60, 60, 67, 0.29);
-  --border-glass: rgba(255, 255, 255, 0.68);
+  --border-light: rgba(112, 137, 171, 0.18);
+  --border-medium: rgba(112, 137, 171, 0.26);
+  --border-strong: rgba(112, 137, 171, 0.36);
+  --border-glass: rgba(255, 255, 255, 0.72);
   --separator: rgba(60, 60, 67, 0.12);
 
-  /* Brand */
+  /* Brand — ice blue accent, restrained */
   --accent: #0A84FF;
   --accent-hover: #0077ED;
   --accent-pressed: #0066CC;
@@ -47,12 +50,13 @@
   --warning: #FF9F0A;
   --warning-light: rgba(255, 159, 10, 0.14);
 
-  /* Shadows (soft, Apple-like) */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-sm: 0 8px 22px rgba(35, 66, 112, 0.08), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
-  --shadow-md: 0 18px 44px rgba(35, 66, 112, 0.12), 0 1px 0 rgba(255, 255, 255, 0.78) inset;
-  --shadow-lg: 0 28px 70px rgba(35, 66, 112, 0.16), 0 1px 0 rgba(255, 255, 255, 0.82) inset;
-  --shadow-glow: 0 18px 52px rgba(93, 151, 255, 0.18);
+  /* Shadows — soft, Apple-like with inner highlight */
+  --shadow-xs: 0 1px 2px rgba(35, 66, 112, 0.05);
+  --shadow-sm: 0 10px 28px rgba(35, 66, 112, 0.08), 0 1px 0 rgba(255, 255, 255, 0.78) inset;
+  --shadow-md: 0 18px 48px rgba(35, 66, 112, 0.12), 0 1px 0 rgba(255, 255, 255, 0.82) inset;
+  --shadow-lg: 0 28px 70px rgba(35, 66, 112, 0.16), 0 1px 0 rgba(255, 255, 255, 0.86) inset;
+  --shadow-glow: 0 16px 44px rgba(93, 151, 255, 0.18);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 
   /* Spacing scale (4pt) */
   --space-2xs: 2px;
@@ -64,16 +68,16 @@
   --space-2xl: 24px;
   --space-3xl: 32px;
 
-  /* Radius */
+  /* Radius — large, consistent */
   --radius-xs: 6px;
   --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
-  --radius-xl: 22px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
   --radius-2xl: 28px;
   --radius-full: 9999px;
 
-  /* Typography */
+  /* Typography — SF / system stack */
   --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-size-xs: 11px;
@@ -83,19 +87,25 @@
   --font-size-lg: 16px;
   --font-size-xl: 20px;
   --font-size-2xl: 24px;
+  --font-size-3xl: 32px;
   --line-height-tight: 1.25;
-  --line-height-normal: 1.45;
+  --line-height-normal: 1.5;
   --font-weight-regular: 400;
   --font-weight-medium: 510;
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
 
-  /* Motion */
+  /* Motion — 150–500ms, restrained */
   --ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
   --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
   --transition-fast: 160ms var(--ease-standard);
   --transition-normal: 240ms var(--ease-standard);
-  --transition-slow: 360ms var(--ease-emphasized);
+  --transition-slow: 380ms var(--ease-emphasized);
+
+  /* Glass material */
+  --glass-blur: 20px;
+  --glass-saturate: 180%;
+  --glass-blur-soft: 12px;
 
   /* Control metrics */
   --control-height-sm: 28px;
@@ -105,12 +115,12 @@
 
   /* Compat aliases used by older page CSS */
   --bg: var(--bg-primary);
-  --panel: var(--bg-secondary);
-  --card: var(--bg-secondary);
+  --panel: var(--bg-glass);
+  --card: var(--bg-glass);
   --text: var(--text-primary);
   --muted: var(--text-secondary);
   --border: var(--border-light);
-  --input-bg: var(--bg-secondary);
+  --input-bg: var(--bg-glass-soft);
   --primary-btn-text: var(--text-on-accent);
   --app-font: var(--font-family);
   --app-font-size: var(--font-size-base);
@@ -119,15 +129,18 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --bg-primary: #0B111A;
-    --bg-secondary: rgba(28, 32, 42, 0.82);
-    --bg-tertiary: rgba(44, 48, 58, 0.86);
+    --bg-secondary: rgba(28, 32, 42, 0.72);
+    --bg-tertiary: rgba(44, 48, 58, 0.78);
     --bg-hover: rgba(255, 255, 255, 0.06);
-    --bg-active: rgba(255, 255, 255, 0.10);
+    --bg-active: rgba(10, 132, 255, 0.20);
     --bg-elevated: rgba(28, 28, 30, 0.86);
-    --bg-glass: rgba(28, 32, 42, 0.66);
-    --bg-glass-strong: rgba(28, 32, 42, 0.86);
-    --bg-glass-soft: rgba(38, 44, 56, 0.52);
-    --bg-page-gradient: linear-gradient(180deg, #111827 0%, #0b111a 54%, #111827 100%);
+    --bg-glass: rgba(22, 28, 39, 0.58);
+    --bg-glass-strong: rgba(22, 28, 39, 0.78);
+    --bg-glass-soft: rgba(38, 44, 56, 0.46);
+    --bg-page-gradient:
+      radial-gradient(1000px 520px at 14% -10%, rgba(10, 132, 255, 0.16), transparent 56%),
+      radial-gradient(800px 420px at 90% 0%, rgba(94, 140, 255, 0.10), transparent 50%),
+      linear-gradient(180deg, #111827 0%, #0B111A 54%, #0F1622 100%);
 
     --text-primary: #F5F5F7;
     --text-secondary: #A1A1A6;
@@ -137,7 +150,7 @@
     --border-light: rgba(84, 84, 88, 0.45);
     --border-medium: rgba(84, 84, 88, 0.55);
     --border-strong: rgba(84, 84, 88, 0.72);
-    --border-glass: rgba(255, 255, 255, 0.08);
+    --border-glass: rgba(255, 255, 255, 0.10);
     --separator: rgba(84, 84, 88, 0.45);
 
     --accent-light: rgba(10, 132, 255, 0.22);
@@ -147,17 +160,18 @@
     --warning-light: rgba(255, 159, 10, 0.18);
 
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
-    --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.34), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
-    --shadow-md: 0 18px 48px rgba(0, 0, 0, 0.42), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
+    --shadow-sm: 0 10px 28px rgba(0, 0, 0, 0.34), 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+    --shadow-md: 0 18px 48px rgba(0, 0, 0, 0.42), 0 1px 0 rgba(255, 255, 255, 0.07) inset;
     --shadow-lg: 0 28px 72px rgba(0, 0, 0, 0.52), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
+    --shadow-glow: 0 16px 44px rgba(10, 132, 255, 0.18);
 
     --bg: var(--bg-primary);
-    --panel: var(--bg-secondary);
-    --card: var(--bg-secondary);
+    --panel: var(--bg-glass);
+    --card: var(--bg-glass);
     --text: var(--text-primary);
     --muted: var(--text-secondary);
     --border: var(--border-light);
-    --input-bg: var(--bg-tertiary);
+    --input-bg: var(--bg-glass-soft);
   }
 }
 
@@ -170,6 +184,12 @@
 
 html {
   color-scheme: light dark;
+}
+
+@supports (scroll-behavior: smooth) {
+  html {
+    scroll-behavior: smooth;
+  }
 }
 
 body {
@@ -185,6 +205,7 @@ body {
   letter-spacing: 0;
 }
 
+/* Soft atmosphere layer — no discrete orbs */
 body::before {
   content: "";
   position: fixed;
@@ -192,8 +213,15 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    linear-gradient(120deg, rgba(255, 255, 255, 0.72), rgba(224, 237, 255, 0.28) 42%, transparent 78%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(238, 244, 251, 0));
+    linear-gradient(125deg, rgba(255, 255, 255, 0.72), rgba(214, 233, 255, 0.28) 42%, transparent 76%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(238, 244, 251, 0));
+}
+
+body.theme-dark::before,
+:root[data-theme='dark'] body::before {
+  background:
+    linear-gradient(125deg, rgba(255, 255, 255, 0.04), rgba(10, 132, 255, 0.10) 42%, transparent 76%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(8, 14, 24, 0));
 }
 
 button,
@@ -202,6 +230,11 @@ select,
 textarea {
   font: inherit;
   color: inherit;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--text-primary);
 }
 
 /* Shared controls */
@@ -235,6 +268,7 @@ textarea:focus-visible,
 a:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 70%, white);
   outline-offset: 2px;
+  box-shadow: var(--focus-ring);
 }
 
 button:disabled,
@@ -246,7 +280,7 @@ textarea:disabled {
   cursor: not-allowed;
 }
 
-/* Glass bars */
+/* Floating glass bars / nav */
 .ab-glass,
 .topbar,
 .toolbar,
@@ -256,11 +290,11 @@ textarea:disabled {
 .settings-header {
   background: var(--bg-glass-strong);
   border-color: var(--border-glass);
-  backdrop-filter: saturate(180%) blur(18px);
-  -webkit-backdrop-filter: saturate(180%) blur(18px);
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
 }
 
-/* Card language */
+/* Card / panel language */
 .ab-card,
 .card,
 .modal,
@@ -287,8 +321,8 @@ textarea:disabled {
   background: var(--bg-glass);
   border: 1px solid var(--border-glass);
   box-shadow: var(--shadow-sm);
-  backdrop-filter: saturate(170%) blur(18px);
-  -webkit-backdrop-filter: saturate(170%) blur(18px);
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
 }
 
 .ab-interactive,
@@ -360,4 +394,95 @@ textarea,
 }
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* Dynamic glass utilities */
+.ab-glass-surface,
+.glass-surface,
+.glass-card,
+.floating-panel {
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+}
+
+.ab-raised-hover,
+.glass-card,
+.floating-panel {
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast),
+    opacity var(--transition-fast),
+    filter var(--transition-fast);
+}
+
+.ab-raised-hover:hover,
+.glass-card:hover,
+.floating-panel:hover {
+  background: var(--bg-glass-strong);
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border-glass));
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+button:not(:disabled):hover,
+.btn:not(:disabled):hover,
+.icon-btn:not(:disabled):hover,
+.ab-btn:not(:disabled):hover {
+  filter: saturate(1.04);
+}
+
+@keyframes ab-glass-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+.ab-animate-in {
+  animation: ab-glass-enter 360ms var(--ease-emphasized) both;
+}
+
+/* Staggered enter for card grids */
+.ab-stagger > * {
+  animation: ab-glass-enter 380ms var(--ease-emphasized) both;
+}
+.ab-stagger > *:nth-child(1) { animation-delay: 20ms; }
+.ab-stagger > *:nth-child(2) { animation-delay: 50ms; }
+.ab-stagger > *:nth-child(3) { animation-delay: 80ms; }
+.ab-stagger > *:nth-child(4) { animation-delay: 110ms; }
+.ab-stagger > *:nth-child(5) { animation-delay: 140ms; }
+.ab-stagger > *:nth-child(6) { animation-delay: 170ms; }
+.ab-stagger > *:nth-child(7) { animation-delay: 200ms; }
+.ab-stagger > *:nth-child(8) { animation-delay: 230ms; }
+.ab-stagger > *:nth-child(n+9) { animation-delay: 250ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --glass-blur: 14px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+  }
 }

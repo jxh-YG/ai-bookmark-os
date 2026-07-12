@@ -1024,3 +1024,74 @@
 body.theme-dark .sa-feed-article-thumb {
   border: 1px solid var(--border-light);
 }
+
+/* ===== Unified product surface polish ===== */
+.sa-feed-layout,
+.sa-feed-sidebar,
+.sa-feed-main,
+.sa-feed-detail,
+.sa-feed-card,
+.sa-feed-overview,
+.sa-feed-toolbar,
+.sa-feed-search,
+.sa-feed-context-menu {
+  background: var(--bg-glass, rgba(255, 255, 255, 0.68));
+  border-color: var(--border-glass, rgba(255, 255, 255, 0.68));
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: saturate(170%) blur(18px);
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+}
+
+.sa-feed-sidebar,
+.sa-feed-main,
+.sa-feed-detail,
+.sa-feed-overview {
+  border-radius: var(--radius-xl, 22px);
+  overflow: hidden;
+}
+
+.sa-feed-card,
+.sa-feed-item,
+.sa-feed-source,
+.sa-feed-article,
+.sa-feed-overview-item,
+.sa-feed-context-menu {
+  border-radius: var(--radius-lg, 16px);
+}
+
+.sa-feed-item:hover,
+.sa-feed-item.active,
+.sa-feed-source:hover,
+.sa-feed-source.active,
+.sa-feed-overview-item:hover,
+.sa-feed-overview-item.active,
+.sa-feed-filter.active,
+.sa-feed-tab.active {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.78));
+}
+
+.sa-feed-item.active,
+.sa-feed-source.active,
+.sa-feed-overview-item.active,
+.sa-feed-filter.active,
+.sa-feed-tab.active {
+  color: var(--accent, #0A84FF);
+  border-color: color-mix(in srgb, var(--accent, #0A84FF) 22%, var(--border-glass, rgba(255, 255, 255, 0.68)));
+}
+
+.sa-feed-search input,
+.sa-feed-input,
+.sa-feed-url-input,
+.sa-feed-select,
+.sa-feed-textarea {
+  background: var(--bg-glass-soft, rgba(245, 249, 255, 0.58));
+  border-color: var(--border-glass, rgba(255, 255, 255, 0.68));
+}
+
+.sa-feed-primary,
+.sa-feed-add-btn,
+.sa-feed-save-btn,
+.sa-feed-refresh-btn.primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent, #0A84FF) 82%, white), var(--accent-hover, #0077ED));
+  box-shadow: var(--shadow-glow, 0 18px 52px rgba(93, 151, 255, 0.18));
+}

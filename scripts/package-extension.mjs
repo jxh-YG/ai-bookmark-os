@@ -75,12 +75,21 @@ const aiOptionsRedirect = `<!doctype html>
     location.replace('../pages/settings/settings.html#ai');
   </script>
   <style>
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f5f7;color:#1d1d1f}
-    a{color:#0a84ff;text-decoration:none;font-weight:600}
+    :root{color-scheme:light dark}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:linear-gradient(180deg,#f8fbff 0%,#edf4fb 48%,#f6f8fb 100%);color:#1d1d1f}
+    body::before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(120deg,rgba(255,255,255,.78),rgba(224,237,255,.28) 42%,transparent 76%),linear-gradient(180deg,rgba(255,255,255,.52),rgba(238,244,251,0));}
+    main{width:min(640px,100%);padding:28px;background:rgba(255,255,255,.76);border:1px solid rgba(255,255,255,.72);border-radius:24px;box-shadow:0 18px 52px rgba(35,66,112,.12),0 1px 0 rgba(255,255,255,.8) inset;backdrop-filter:blur(18px) saturate(170%);-webkit-backdrop-filter:blur(18px) saturate(170%)}
+    h1{margin:0 0 10px;font-size:24px;line-height:1.2;letter-spacing:0}
+    p{margin:0;color:#53606f;line-height:1.6}
+    a{display:inline-flex;margin-top:20px;padding:12px 16px;border-radius:14px;background:linear-gradient(180deg,#4f89ff,#0a84ff);color:#fff;text-decoration:none;font-weight:600;box-shadow:0 18px 52px rgba(93,151,255,.18)}
   </style>
 </head>
 <body>
-  <a href="../pages/settings/settings.html#ai">打开统一设置</a>
+  <main>
+    <h1>AI Bookmark OS</h1>
+    <p>统一设置入口已收口到系统设置页，继续后将进入 AI 分类与书签管理的统一面板。</p>
+    <a href="../pages/settings/settings.html#ai">打开统一设置</a>
+  </main>
 </body>
 </html>`;
 writeFileSync(path.join(dist, 'ai', 'options.html'), aiOptionsRedirect, 'utf8');
@@ -218,17 +227,20 @@ const launchHtml = `<!doctype html>
   <title>AI Bookmark OS</title>
   <style>
     :root{color-scheme:light dark}
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;background:#f5f5f7;color:#1d1d1f;display:grid;place-items:center;padding:24px;box-sizing:border-box}
-    main{width:min(760px,100%);padding:28px;background:rgba(255,255,255,.86);border:1px solid rgba(0,0,0,.08);border-radius:22px;box-shadow:0 18px 60px rgba(0,0,0,.1);backdrop-filter:blur(18px)}
-    .brand{display:flex;align-items:center;gap:12px;margin-bottom:14px}
-    .mark{width:36px;height:36px;border-radius:12px;background:#0a84ff;color:white;display:grid;place-items:center;font-weight:800}
-    h1{margin:0;font-size:24px;letter-spacing:0}
-    p{color:#636366;line-height:1.6;margin:8px 0 0}
-    .primary{display:block;margin-top:22px;padding:15px 18px;border-radius:14px;background:#0a84ff;color:#fff;text-decoration:none;font-weight:700;text-align:center;box-shadow:0 10px 26px rgba(10,132,255,.24)}
+    *{box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;background:linear-gradient(180deg,#f8fbff 0%,#edf4fb 48%,#f6f8fb 100%);color:#1d1d1f;display:grid;place-items:center;padding:24px;letter-spacing:0}
+    body::before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(120deg,rgba(255,255,255,.78),rgba(224,237,255,.28) 42%,transparent 76%),linear-gradient(180deg,rgba(255,255,255,.52),rgba(238,244,251,0))}
+    main{position:relative;width:min(820px,100%);padding:30px;background:rgba(255,255,255,.74);border:1px solid rgba(255,255,255,.74);border-radius:28px;box-shadow:0 28px 70px rgba(35,66,112,.16),0 1px 0 rgba(255,255,255,.82) inset;backdrop-filter:blur(22px) saturate(170%);-webkit-backdrop-filter:blur(22px) saturate(170%)}
+    .brand{display:flex;align-items:center;gap:13px;margin-bottom:14px;min-width:0}
+    .mark{width:42px;height:42px;border-radius:15px;background:linear-gradient(135deg,#10213c,#1f78ff 56%,#8fc7ff);color:white;display:grid;place-items:center;font-weight:800;box-shadow:0 16px 38px rgba(10,132,255,.28),0 1px 0 rgba(255,255,255,.38) inset}
+    h1{margin:0;font-size:28px;line-height:1.16;letter-spacing:0}
+    p{color:#53606f;line-height:1.6;margin:8px 0 0}
+    .primary{display:block;margin-top:24px;padding:15px 18px;border-radius:16px;background:linear-gradient(180deg,#4f89ff,#0a84ff);color:#fff;text-decoration:none;font-weight:700;text-align:center;box-shadow:0 18px 52px rgba(93,151,255,.2),0 1px 0 rgba(255,255,255,.28) inset}
     .secondary{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px}
-    .secondary a{display:block;padding:13px 14px;border-radius:14px;background:rgba(118,118,128,.12);color:#0a84ff;text-decoration:none;font-weight:650;text-align:center}
-    .note{margin-top:18px;font-size:13px;color:#8e8e93}
-    @media(max-width:560px){.secondary{grid-template-columns:1fr}main{padding:22px}}
+    .secondary a{display:block;min-width:0;padding:13px 14px;border:1px solid rgba(255,255,255,.68);border-radius:16px;background:rgba(255,255,255,.52);color:#0a84ff;text-decoration:none;font-weight:650;text-align:center;box-shadow:0 8px 22px rgba(35,66,112,.08),0 1px 0 rgba(255,255,255,.74) inset;transition:transform 160ms ease,box-shadow 160ms ease,background 160ms ease}
+    .secondary a:hover{transform:translateY(-1px);background:rgba(255,255,255,.74);box-shadow:0 18px 44px rgba(35,66,112,.12)}
+    .note{margin-top:18px;font-size:13px;color:#7b8796}
+    @media(max-width:560px){body{padding:12px}.secondary{grid-template-columns:1fr}main{padding:22px;border-radius:22px}h1{font-size:24px}}
   </style>
 </head>
 <body>

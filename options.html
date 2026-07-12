@@ -8,11 +8,20 @@
       location.replace('src/timeline/pages/settings/settings.html#ai');
     </script>
     <style>
-      body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f5f7;color:#1d1d1f}
-      a{color:#0a84ff;text-decoration:none;font-weight:600}
+      :root{color-scheme:light dark}
+      body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:linear-gradient(180deg,#f8fbff 0%,#edf4fb 48%,#f6f8fb 100%);color:#1d1d1f}
+      body::before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(120deg,rgba(255,255,255,.78),rgba(224,237,255,.28) 42%,transparent 76%),linear-gradient(180deg,rgba(255,255,255,.52),rgba(238,244,251,0));}
+      main{width:min(640px,100%);padding:28px;background:rgba(255,255,255,.76);border:1px solid rgba(255,255,255,.72);border-radius:24px;box-shadow:0 18px 52px rgba(35,66,112,.12),0 1px 0 rgba(255,255,255,.8) inset;backdrop-filter:blur(18px) saturate(170%);-webkit-backdrop-filter:blur(18px) saturate(170%)}
+      h1{margin:0 0 10px;font-size:24px;line-height:1.2;letter-spacing:0}
+      p{margin:0;color:#53606f;line-height:1.6}
+      a{display:inline-flex;margin-top:20px;padding:12px 16px;border-radius:14px;background:linear-gradient(180deg,#4f89ff,#0a84ff);color:#fff;text-decoration:none;font-weight:600;box-shadow:0 18px 52px rgba(93,151,255,.18)}
     </style>
   </head>
   <body>
-    <a href="src/timeline/pages/settings/settings.html#ai">打开统一设置</a>
+    <main>
+      <h1>AI Bookmark OS</h1>
+      <p>统一设置入口已收口到系统设置页，继续后将进入 AI 分类与书签管理的统一面板。</p>
+      <a href="src/timeline/pages/settings/settings.html#ai">打开统一设置</a>
+    </main>
   </body>
 </html>

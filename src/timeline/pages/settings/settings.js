@@ -1361,7 +1361,7 @@ header {
 h1 {
   font-size: 17px;
   font-weight: 500;
-  letter-spacing: -0.005em;
+  letter-spacing: 0;
 }
 .meta {
   margin-top: 4px;

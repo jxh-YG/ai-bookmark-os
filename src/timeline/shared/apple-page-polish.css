@@ -287,7 +287,6 @@ textarea:focus,
   box-shadow: var(--focus-ring);
   outline: none;
 }
-.topbar,
 .sa-topbar,
 .sa-toolbar,
 .checker-header,
@@ -297,6 +296,14 @@ textarea:focus,
 .settings-header,
 .toolbar {
   background: color-mix(in srgb, var(--bg-secondary) 82%, transparent) !important;
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  border-color: var(--border-light) !important;
+  box-shadow: var(--shadow-sm);
+}
+
+.popup-chrome {
+  background: color-mix(in srgb, var(--bg-secondary) 88%, transparent) !important;
   backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   border-color: var(--border-light) !important;
@@ -759,10 +766,8 @@ html body.theme-dark {
 }
 
 /* Popup compact glass chrome */
-.topbar,
-.footer,
-.search-bar,
-.ai-entry-banner {
+.popup-chrome,
+.footer {
   background: var(--bg-glass-strong) !important;
   border-color: var(--border-glass) !important;
   backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
@@ -770,8 +775,20 @@ html body.theme-dark {
   box-shadow: var(--shadow-sm);
 }
 
-.topbar {
-  border-bottom: 1px solid var(--border-light);
+/* Nested pieces stay flat inside the unified chrome */
+.popup-chrome .topbar,
+.popup-chrome .search-bar {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.popup-chrome .ai-entry-banner {
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .bookmark-item,
@@ -840,11 +857,10 @@ html body .sa-main {
   background: var(--bg-page-gradient, var(--bg-primary)) !important;
 }
 
-html body .topbar,
+html body .popup-chrome,
 html body .toolbar,
 html body .header,
 html body .footer,
-html body .search-bar,
 html body .filter-bar,
 html body .action-bar,
 html body .summary-bar,
@@ -858,6 +874,21 @@ html body .sa-toolbar {
   backdrop-filter: saturate(var(--glass-saturate, 180%)) blur(var(--glass-blur, 20px));
   -webkit-backdrop-filter: saturate(var(--glass-saturate, 180%)) blur(var(--glass-blur, 20px));
   box-shadow: var(--shadow-sm);
+}
+
+html body .popup-chrome .topbar,
+html body .popup-chrome .search-bar {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html body .popup-chrome .ai-entry-banner {
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 html body .card,
@@ -923,6 +954,11 @@ html body .setting-card,
 html body .sa-bookmark-card,
 html body .sa-feed-article {
   transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+/* Glass cards need breathing room; rows previously had zero outer spacing */
+html body .bookmark-item {
+  margin: 0 10px 8px !important;
 }
 
 html body .bookmark-item:hover,

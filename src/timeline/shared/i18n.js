@@ -214,6 +214,7 @@ const I18N_MESSAGES = {
     cmdOpenPopup: "Open AI Bookmark OS",
     moreOptions: "More options",
     openPanel: "Open Standalone Window",
+    openWorkspace: "Open Workspace",
     // Standalone Window
     toggleSidebar: "Toggle Sidebar",
     folderTree: "Folders",
@@ -761,6 +762,7 @@ const I18N_MESSAGES = {
     cmdOpenPopup: "打开 AI Bookmark OS",
     moreOptions: "更多选项",
     openPanel: "打开独立窗口",
+    openWorkspace: "打开工作台",
     // 独立窗口
     toggleSidebar: "切换侧栏",
     folderTree: "文件夹",

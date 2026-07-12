@@ -2342,7 +2342,7 @@ function setupKeyboardShortcuts() {
 // ===== 事件绑定 =====
 syncBtn.addEventListener('click', handleSync);
 if (quickBookmarkBtn) quickBookmarkBtn.addEventListener('click', handleQuickBookmarkClick);
-clearBtn.addEventListener('click', handleClear);
+if (clearBtn) clearBtn.addEventListener('click', handleClear);
 
 // 底部栏：设置按钮
 const footerSettingsBtn = $('footerSettingsBtn');
@@ -2401,6 +2401,16 @@ function openBookmarkNavPage() {
   try { window.close(); } catch (_) {}
 }
 
+function openWorkspacePage() {
+  chrome.windows.create({
+    url: chrome.runtime.getURL('pages/standalone/standalone.html'),
+    type: 'popup',
+    width: 960,
+    height: 680
+  });
+  try { window.close(); } catch (_) {}
+}
+
 
 
 footerSettingsBtn.addEventListener('click', () => {
@@ -2431,12 +2441,7 @@ menuGraphBtn.addEventListener('click', () => {
 
 menuPanelBtn.addEventListener('click', () => {
   footerMenu.classList.remove('footer-menu--open');
-  chrome.windows.create({
-    url: chrome.runtime.getURL('pages/standalone/standalone.html'),
-    type: 'popup',
-    width: 960,
-    height: 680
-  });
+  openWorkspacePage();
 });
 
 menuStatsBtn.addEventListener('click', () => {
@@ -2446,12 +2451,14 @@ menuStatsBtn.addEventListener('click', () => {
 // AI classify entries
 const aiClassifyBtn = $('aiClassifyBtn');
 const bookmarkNavBtn = $('bookmarkNavBtn');
+const workspaceBtn = $('workspaceBtn');
 const aiEntryBannerBtn = $('aiEntryBannerBtn');
 const menuAiClassifyBtn = $('menuAiClassifyBtn');
 const menuBookmarkNavBtn = $('menuBookmarkNavBtn');
 const menuAiSettingsBtn = $('menuAiSettingsBtn');
 if (aiClassifyBtn) aiClassifyBtn.addEventListener('click', openAiClassifyPanel);
 if (bookmarkNavBtn) bookmarkNavBtn.addEventListener('click', openBookmarkNavPage);
+if (workspaceBtn) workspaceBtn.addEventListener('click', openWorkspacePage);
 if (aiEntryBannerBtn) aiEntryBannerBtn.addEventListener('click', openAiClassifyPanel);
 if (menuAiClassifyBtn) menuAiClassifyBtn.addEventListener('click', () => {
   footerMenu.classList.remove('footer-menu--open');
@@ -2464,6 +2471,11 @@ if (menuBookmarkNavBtn) menuBookmarkNavBtn.addEventListener('click', () => {
 if (menuAiSettingsBtn) menuAiSettingsBtn.addEventListener('click', () => {
   footerMenu.classList.remove('footer-menu--open');
   openAiSettingsPage();
+});
+const menuClearBtn = $('menuClearBtn');
+if (menuClearBtn) menuClearBtn.addEventListener('click', () => {
+  footerMenu.classList.remove('footer-menu--open');
+  handleClear();
 });
 
 
@@ -2478,10 +2490,20 @@ const deletedClearAllBtn = $('deletedClearAllBtn');
 const deletedRetentionHint = $('deletedRetentionHint');
 let currentDeletedList = [];
 
+function setPopupChromeVisible(visible) {
+  const chrome = document.querySelector('.popup-chrome');
+  const searchBar = document.querySelector('.search-bar');
+  const viewToolbar = document.querySelector('.view-toolbar');
+  const tagBar = document.querySelector('.tag-bar');
+  const display = visible ? '' : 'none';
+  if (chrome) chrome.style.display = display;
+  if (searchBar) searchBar.style.display = display;
+  if (viewToolbar) viewToolbar.style.display = display;
+  if (tagBar) tagBar.style.display = display;
+}
+
 function showDeletedView() {
-  document.querySelector('.search-bar').style.display = 'none';
-  document.querySelector('.view-toolbar').style.display = 'none';
-  document.querySelector('.tag-bar').style.display = 'none';
+  setPopupChromeVisible(false);
   document.getElementById('timelineLoading').style.display = 'none';
   document.getElementById('timelineEmpty').style.display = 'none';
   document.getElementById('timelineContent').style.display = 'none';
@@ -2492,9 +2514,7 @@ function showDeletedView() {
 
 function hideDeletedView() {
   deletedView.style.display = 'none';
-  document.querySelector('.search-bar').style.display = '';
-  document.querySelector('.view-toolbar').style.display = '';
-  document.querySelector('.tag-bar').style.display = '';
+  setPopupChromeVisible(true);
   // 返回时强制重新加载并渲染主页，避免与 deleted 视图状态不一致
   loadBookmarks();
 }

@@ -33,9 +33,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--nav-text);
   background:
-    radial-gradient(circle at 16% 12%, rgba(155, 198, 255, 0.42), transparent 36%),
-    radial-gradient(circle at 82% 8%, rgba(222, 233, 255, 0.9), transparent 34%),
-    radial-gradient(circle at 55% 92%, rgba(198, 240, 255, 0.38), transparent 38%),
+    linear-gradient(120deg, rgba(255, 255, 255, 0.78), rgba(221, 236, 255, 0.36) 42%, transparent 76%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(238, 244, 251, 0.84) 260px),
     var(--nav-bg);
   background-attachment: fixed;

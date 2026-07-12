@@ -2080,3 +2080,91 @@ body.theme-dark {
   color: #fff; background: #0A84FF; cursor: pointer;
 }
 .ai-workspace__frame { flex: 1; width: 100%; border: 0; background: #F2F2F7; }
+
+/* ===== Dynamic Glassmorphism polish ===== */
+body.standalone-mode {
+  background: var(--bg-page-gradient, var(--bg-primary));
+}
+
+.sa-toolbar,
+.sa-sidebar,
+.sa-main,
+.sa-detail-panel,
+.sa-filter-bar,
+.sa-bookmark-item,
+.sa-grid-card,
+.sa-preview-card,
+.sa-command-palette,
+.sa-modal,
+.ai-workspace__bar {
+  background: var(--bg-glass, rgba(255,255,255,.66));
+  border-color: var(--border-glass, rgba(255,255,255,.68));
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: saturate(170%) blur(18px);
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+}
+
+.sa-toolbar {
+  margin: 10px;
+  width: calc(100% - 20px);
+  border: 1px solid var(--border-glass, rgba(255,255,255,.68));
+  border-radius: var(--radius-xl, 22px);
+}
+
+.sa-main,
+.sa-sidebar,
+.sa-detail-panel {
+  border-radius: var(--radius-xl, 22px);
+  overflow: hidden;
+}
+
+.sa-bookmark-item,
+.sa-grid-card,
+.sa-preview-card,
+.sa-modal,
+.sa-command-palette {
+  border-radius: var(--radius-lg, 16px);
+}
+
+.sa-bookmark-item:hover,
+.sa-grid-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border-glass));
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.sa-search-wrap input,
+.sa-edit-input,
+.sa-modal input,
+.sa-modal textarea,
+.sa-edit-folder-selector,
+.sa-edit-tag-suggestion {
+  background: var(--bg-glass-soft, rgba(245,249,255,.58));
+  border-color: var(--border-glass, rgba(255,255,255,.68));
+}
+
+.sa-view-switch,
+.sa-tag-bar,
+.sa-folder-tree,
+.sa-empty,
+.sa-stats-card {
+  background: color-mix(in srgb, var(--bg-glass) 84%, transparent);
+  border-color: var(--border-glass, rgba(255,255,255,.68));
+}
+
+.ai-workspace {
+  background: var(--bg-page-gradient, #eef4fb);
+}
+
+.ai-workspace__btn {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 82%, white), var(--accent-hover));
+  box-shadow: var(--shadow-glow, 0 18px 52px rgba(93,151,255,.18));
+}
+
+@media (max-width: 760px) {
+  .sa-toolbar {
+    margin: 0;
+    width: 100%;
+    border-radius: 0 0 var(--radius-lg, 16px) var(--radius-lg, 16px);
+  }
+}

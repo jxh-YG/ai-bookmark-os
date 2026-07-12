@@ -2163,7 +2163,7 @@ mark.hl {
   font-weight: 700;
   line-height: 1;
   color: var(--text-secondary);
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 .preview-placeholder-host {
   font-size: 9px;

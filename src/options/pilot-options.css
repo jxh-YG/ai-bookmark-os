@@ -807,3 +807,78 @@ body {
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+/* ===== Dynamic Glassmorphism polish ===== */
+body {
+  background: var(--bg-page-gradient, var(--bg-secondary));
+}
+
+.page,
+.page.embed,
+.header,
+.embed-back-bar,
+.sidebar,
+.content,
+.card,
+.preview,
+.unified-settings-banner {
+  background: var(--bg-glass, rgba(255,255,255,.66));
+  border-color: var(--border-glass, rgba(255,255,255,.68));
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: saturate(170%) blur(18px);
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+}
+
+.page:not(.embed) {
+  border-radius: var(--radius-xl, 22px);
+  box-shadow: var(--shadow-lg);
+}
+
+.header,
+.embed-back-bar {
+  background: var(--bg-glass-strong, rgba(255,255,255,.82));
+}
+
+.sidebar,
+.card,
+.preview,
+.unified-settings-banner {
+  border-radius: var(--radius-lg, 16px);
+}
+
+.nav-item {
+  border-radius: var(--radius-md, 10px);
+}
+
+.nav-item.active {
+  background: linear-gradient(135deg, var(--accent-light), rgba(255,255,255,.42));
+}
+
+.content {
+  min-width: 0;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+select,
+textarea,
+.prompt-editor,
+.ob-key-input {
+  background: var(--bg-glass-soft, rgba(245,249,255,.58));
+  border-color: var(--border-glass, rgba(255,255,255,.68));
+}
+
+.btn.btn-primary,
+button.primary,
+.save-btn {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 82%, white), var(--accent-hover));
+  box-shadow: var(--shadow-glow, 0 18px 52px rgba(93,151,255,.18));
+}
+
+@media (max-width: 720px) {
+  .page:not(.embed) {
+    border-radius: 0;
+    margin: 0;
+  }
+}

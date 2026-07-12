@@ -1759,3 +1759,109 @@ body.theme-dark .ai-hint-card {
   #panel-ai .tree-url-input { width: 100%; min-width: 0; }
   #panel-ai .ai-subhead { flex-direction: column; }
 }
+
+/* ===== Dynamic Glassmorphism polish ===== */
+body {
+  background: var(--bg-page-gradient, var(--bg-secondary));
+}
+
+.settings-layout {
+  max-width: 1180px;
+  gap: 16px;
+  padding: 18px;
+}
+
+.settings-header,
+.settings-nav,
+.settings-panel,
+.setting-card,
+.card,
+.review-card,
+.stats-favorite-card,
+.cache-stat-card,
+.import-export-card {
+  background: var(--bg-glass, rgba(255,255,255,.68));
+  border: 1px solid var(--border-glass, rgba(255,255,255,.68));
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: saturate(170%) blur(18px);
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+}
+
+.settings-header {
+  position: sticky;
+  top: 12px;
+  z-index: 20;
+  margin-bottom: 14px;
+  border-radius: var(--radius-xl, 22px);
+}
+
+.settings-nav,
+.settings-panel {
+  border-radius: var(--radius-xl, 22px);
+}
+
+.settings-panel {
+  max-width: none;
+  min-width: 0;
+}
+
+.setting-card,
+.card,
+.review-card,
+.stats-favorite-card,
+.cache-stat-card,
+.import-export-card {
+  border-radius: var(--radius-lg, 16px);
+  overflow: hidden;
+}
+
+.nav-item {
+  margin: 3px 8px;
+  width: calc(100% - 16px);
+  border-radius: var(--radius-md, 10px);
+}
+
+.nav-item.active {
+  background: linear-gradient(135deg, var(--accent-light), rgba(255,255,255,.42));
+  box-shadow: 0 1px 0 rgba(255,255,255,.7) inset;
+}
+
+.setting-row:hover,
+.nav-item:hover {
+  background: rgba(255,255,255,.48);
+}
+
+input[type="text"],
+input[type="number"],
+input[type="password"],
+select,
+textarea,
+.api-key-input {
+  background: var(--bg-glass-soft, rgba(245,249,255,.58));
+  border-color: var(--border-glass, rgba(255,255,255,.68));
+}
+
+.primary-btn,
+.action-btn.primary,
+.test-btn,
+.save-btn {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 82%, white), var(--accent-hover));
+  box-shadow: var(--shadow-glow, 0 18px 52px rgba(93,151,255,.18));
+}
+
+@media (max-width: 700px) {
+  .settings-layout {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .settings-header {
+    top: 0;
+    border-radius: 0 0 var(--radius-lg, 16px) var(--radius-lg, 16px);
+  }
+
+  .settings-nav,
+  .settings-panel {
+    border-radius: var(--radius-lg, 16px);
+  }
+}

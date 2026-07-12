@@ -387,7 +387,10 @@ body {
 /* ===== Result List ===== */
 .result-list {
   flex: 1;
-  padding: var(--space-sm) 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 14px;
   overflow-y: auto;
 }
 
@@ -395,14 +398,22 @@ body {
   display: flex;
   align-items: flex-start;
   gap: var(--space-md);
-  padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--border-light);
-  transition: background var(--transition-fast);
+  padding: 12px 14px;
+  margin: 0;
+  border: 1px solid var(--border-glass, var(--border-light));
+  border-bottom: 1px solid var(--border-glass, var(--border-light));
+  border-radius: var(--radius-md, 12px);
+  background: var(--bg-glass, rgba(255, 255, 255, 0.68));
+  box-shadow: var(--shadow-sm);
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
   animation: slide-in 150ms ease-out both;
 }
 
 .result-item:hover {
   background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border-glass, var(--border-light)));
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .result-item--broken {
@@ -419,6 +430,10 @@ body {
 
 .result-item--checking {
   border-left: 3px solid var(--accent);
+}
+
+.result-item + .result-item {
+  margin-top: 0;
 }
 
 .result-status-icon {
@@ -724,7 +739,6 @@ body {
 .summary-bar,
 .action-bar,
 .filter-bar,
-.result-list,
 .result-item,
 .toast {
   background: var(--bg-glass, rgba(255,255,255,.66));
@@ -732,6 +746,18 @@ body {
   box-shadow: var(--shadow-sm);
   backdrop-filter: saturate(170%) blur(18px);
   -webkit-backdrop-filter: saturate(170%) blur(18px);
+}
+
+.result-list {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  display: flex !important;
+  flex-direction: column;
+  gap: 8px !important;
+  padding: 10px 12px 14px !important;
 }
 
 .checker-header {

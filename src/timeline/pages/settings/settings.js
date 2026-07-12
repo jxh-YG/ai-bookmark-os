@@ -1249,7 +1249,7 @@ function escapeHtmlForExport(s) {
 
 function pad2(n) { return String(n).padStart(2, '0'); }
 
-function formatTime(ts) {
+function formatExportTime(ts) {
   const t = new Date(ts);
   return pad2(t.getHours()) + ':' + pad2(t.getMinutes());
 }
@@ -1264,7 +1264,7 @@ function formatDateHeader(timestamp, latestTs, lang, now = Date.now()) {
   if (diffDays === 0) return isCN ? '今天' : 'Today';
   if (diffDays === 1) return isCN ? '昨天' : 'Yesterday';
   if (diffDays < 7) {
-    const time = latestTs ? ' ' + formatTime(latestTs) : '';
+    const time = latestTs ? ' ' + formatExportTime(latestTs) : '';
     return (isCN
       ? pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + time
       : M[d.getMonth()] + ' ' + d.getDate() + time);
@@ -1578,29 +1578,29 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // ===== 初始化 =====
 
-// ===== AI 金字塔分类设置（与 AI 辅助标签统一入口，独立存储 settings） =====
+// ===== AI 金字塔分类设置（交互对齐 AI 辅助标签） =====
 const TREE_PROVIDERS = {
   agnes: {
     id: 'agnes', label: 'Agnes AI', apiStyle: 'openai',
-    baseUrl: 'https://apihub.agnes-ai.com/v1/chat/completions',
+    baseUrl: 'https://apihub.agnes-ai.com/v1',
     defaultModel: 'agnes-2.0-flash',
     models: ['agnes-2.0-flash', 'agnes-1.5-flash'],
   },
   openrouter: {
     id: 'openrouter', label: 'OpenRouter', apiStyle: 'openai',
-    baseUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    baseUrl: 'https://openrouter.ai/api/v1',
     defaultModel: 'openai/gpt-4o-mini',
     models: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-haiku', 'google/gemini-2.0-flash-001', 'deepseek/deepseek-chat'],
   },
   openai: {
     id: 'openai', label: 'OpenAI (Codex)', apiStyle: 'openai',
-    baseUrl: 'https://api.openai.com/v1/chat/completions',
+    baseUrl: 'https://api.openai.com/v1',
     defaultModel: 'gpt-4o-mini',
     models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'],
   },
   claude: {
     id: 'claude', label: 'Claude (Anthropic)', apiStyle: 'anthropic',
-    baseUrl: 'https://api.anthropic.com/v1/messages',
+    baseUrl: 'https://api.anthropic.com/v1',
     defaultModel: 'claude-3-5-haiku-latest',
     models: ['claude-3-5-haiku-latest', 'claude-sonnet-4-20250514'],
   },
@@ -1612,25 +1612,25 @@ const TREE_PROVIDERS = {
   },
   deepseek: {
     id: 'deepseek', label: 'DeepSeek', apiStyle: 'openai',
-    baseUrl: 'https://api.deepseek.com/v1/chat/completions',
+    baseUrl: 'https://api.deepseek.com/v1',
     defaultModel: 'deepseek-chat',
     models: ['deepseek-chat', 'deepseek-reasoner'],
   },
   custom: {
-    id: 'custom', label: '自定义提供商', apiStyle: 'openai',
-    baseUrl: 'https://api.openai.com/v1/chat/completions',
+    id: 'custom', label: '自定义', apiStyle: 'openai',
+    baseUrl: '',
     defaultModel: 'gpt-4o-mini',
     models: ['gpt-4o-mini', 'gpt-4o', 'deepseek-chat'],
   },
 };
 
 const DEFAULT_TREE_PROMPTS = {
-  label: `你是书签分析助手。请根据每条书签提供的「标题」「域名」「原文件夹」三类信息，推断该网页最可能的用途，并为每条书签生成结构化结果。
+  label: `你是书签分析助手。请根据每条书签提供的“标题”“域名”“原文件夹”三类信息，推断该网页最可能的用途，并为每条书签生成结构化结果。
 
 处理要求：
-1. 逐条分析书签，不遗漏、不合并、不新增书签。
+1. 逐条分析书签，不漏项、不合并、不新增书签。
 2. 优先根据标题判断用途；标题信息不足时，结合域名和原文件夹推断。
-3. summary 必须用中文概括网页用途，控制在 15 个汉字以内，表达具体、清晰，例如“查看前端文档”“管理项目任务”“下载设计素材”。
+3. summary 必须用中文概括网页用途，控制在 15 个汉字以内，表达具体、清楚，例如“查看前端文档”“管理项目任务”“下载设计素材”。
 4. tags 必须为 1-3 个中文通用领域词，避免过细、过长或重复。
 5. tags 可参考但不限于：前端开发、后端开发、设计资源、新闻资讯、学习教程、效率工具、开发工具、数据分析、云服务、产品运营、娱乐、购物、社交媒体、文档资料。
 6. 如果无法准确判断用途，请根据最可能的领域给出保守推断，不要使用“未知”“其他”等空泛标签。
@@ -1647,7 +1647,7 @@ const DEFAULT_TREE_PROMPTS = {
   buildTree: `你是“书签信息架构与分类体系设计专家”。请根据输入的书签数据（包括书签标题、URL 链接、已有书签路径/分类，以及可获取到的页面内容摘要或正文），为这些书签设计一个清晰、稳定、可扩展的金字塔式分类树。
 
 分类目标与范围：
-1. 仅设计分类树结构，不需要逐条输出书签归属。
+1. 只设计分类树结构，不需要逐条输出书签归属。
 2. 分类树最多包含 3 层：一级大类 → 二级子类 → 三级子类。
 3. 一级大类数量不超过 10 个。
 4. 任意一级或二级分类下的直接子类数量不超过 10 个。
@@ -1663,7 +1663,7 @@ const DEFAULT_TREE_PROMPTS = {
    - 书签标题中的公司名称、品牌名、系统名；
    - URL 域名、子域名或页面内容中出现的组织名称。
 4. 如果原有书签分类中已经存在某个公司文件夹，并且多个该公司相关书签已被放在该文件夹下，则应沿用该公司分类名称作为分类依据。
-5. 公司类分类可作为一级大类下的子类，例如“办公 / 公司 / 项目”相关大类下按公司名称划分；如果公司类书签数量较多，也可以将“公司与办公”作为一级大类。
+5. 公司类分类可作为一级大类下的子类，例如“办公 / 公司 / 项目”相关大类下按公司名称划分；如果公司类书签数量较大，也可以将“公司与办公”作为一级大类。
 
 分类设计原则：
 1. 优先保证分类对用户查找书签有帮助，而不是机械按网站类型拆分。
@@ -1693,7 +1693,7 @@ const DEFAULT_TREE_PROMPTS = {
 3. 没有子类的分类可以省略 children 字段。
 4. children 字段只能包含同样结构的分类对象。
 5. 不要输出 JSON 以外的任何文字、注释、Markdown 代码块或说明。`,
-  assign: '根据我提供的书签列表和分类编号说明，将每个书签分配到语义最匹配的一个分类编号。判断依据按优先级依次为：书签标题、URL 域名与路径、描述/摘要、标签或备注；若信息不足，则根据可识别的关键词、网站类型或内容主题进行合理归类。每个书签必须且只能分配一个分类编号，不要遗漏、重复或新增书签 id；分类编号必须来自我提供的分类列表，不得自创编号。最终只输出合法 JSON 数组，格式严格为：[{"id":"书签id","cat":分类编号}]。不要输出任何解释、Markdown、代码块或其他文字。',
+  assign: '根据我提供的书签列表和分类编号说明，将每个书签分配到语义最匹配的一个分类编号。判断依据按优先级依次为：书签标题、URL 域名与路径、描述/摘要、标签或备注；若信息不足，则根据可识别的关键词、网站类型或内容主题进行合理归类。每个书签必须且只能分配一个分类编号，不要漏项、重复或新增书签 id；分类编号必须来自我提供的分类列表，不得自创编号。最终只输出合法 JSON 数组，格式严格为：[{"id":"书签id","cat":分类编号}]。不要输出任何解释、Markdown、代码块或其他文字。',
 };
 
 const LEGACY_TREE_PROMPTS = {
@@ -1711,12 +1711,6 @@ function migrateTreeDefaultPrompts(prompts) {
   };
 }
 
-const TREE_ROOT_FOLDER_ALIASES = new Set([
-  '书签栏', '书签菜单', '其他书签', '移动设备书签',
-  'bookmarks bar', 'bookmarks menu', 'other bookmarks', 'mobile bookmarks',
-  '收藏夹栏', '其他收藏夹',
-]);
-
 const DEFAULT_TREE_SETTINGS = {
   provider: 'agnes',
   apiKey: '',
@@ -1728,6 +1722,7 @@ const DEFAULT_TREE_SETTINGS = {
   language: 'auto',
   colorMode: 'system',
   customApiStyle: 'openai',
+  customFullUrl: false,
   classifyPrompts: { ...DEFAULT_TREE_PROMPTS },
   respectExistingFolders: true,
   preservedFolderPaths: [],
@@ -1743,7 +1738,11 @@ const treeProviderSelect = document.getElementById('treeProviderSelect');
 const treeApiStyleSelect = document.getElementById('treeApiStyleSelect');
 const treeCustomFields = document.getElementById('treeCustomFields');
 const treeBaseUrlInput = document.getElementById('treeBaseUrlInput');
+const treeFullUrlToggle = document.getElementById('treeFullUrlToggle');
+const treeEndpointHintText = document.getElementById('treeEndpointHintText');
+const treeEndpointHintFullUrl = document.getElementById('treeEndpointHintFullUrl');
 const treeApiKeyInput = document.getElementById('treeApiKeyInput');
+const treeModelInput = document.getElementById('treeModelInput');
 const treeModelSelect = document.getElementById('treeModelSelect');
 const treeModelCustomInput = document.getElementById('treeModelCustomInput');
 const treePromptLabel = document.getElementById('treePromptLabel');
@@ -1764,93 +1763,18 @@ const treeCacheToggle = document.getElementById('treeCacheToggle');
 const treeMetadataToggle = document.getElementById('treeMetadataToggle');
 const treeRetryCountInput = document.getElementById('treeRetryCountInput');
 const treeRequestTimeoutInput = document.getElementById('treeRequestTimeoutInput');
+
 let treeFolderOptions = [];
-
-function normalizeTreeFolderPath(parts) {
-  return (parts || [])
-    .map((p) => String(p || '').trim())
-    .filter(Boolean)
-    .filter((p) => !TREE_ROOT_FOLDER_ALIASES.has(p.toLowerCase()) && !TREE_ROOT_FOLDER_ALIASES.has(p))
-    .join('/');
-}
-
-function countTreeBookmarkLeaves(node) {
-  if (node.url) return /^(https?|ftp):/.test(node.url) ? 1 : 0;
-  return (node.children || []).reduce((sum, child) => sum + countTreeBookmarkLeaves(child), 0);
-}
-
-async function loadTreeFolderOptions() {
-  try {
-    const tree = await chrome.bookmarks.getTree();
-    const options = [];
-    const walk = (nodes, path) => {
-      for (const node of nodes || []) {
-        if (node.url) continue;
-        const nextPath = node.title ? [...path, node.title] : path;
-        const normalized = normalizeTreeFolderPath(nextPath);
-        const count = countTreeBookmarkLeaves(node);
-        if (normalized && count > 0) options.push({ path: normalized, count });
-        if (node.children) walk(node.children, nextPath);
-      }
-    };
-    walk(tree, []);
-    treeFolderOptions = options.sort((a, b) => a.path.localeCompare(b.path, 'zh'));
-  } catch (e) {
-    console.warn('loadTreeFolderOptions failed', e);
-    treeFolderOptions = [];
-  }
-}
-
-function getSelectedPreservedFoldersFromUI() {
-  if (!treePreserveFoldersList) return [];
-  return Array.from(treePreserveFoldersList.querySelectorAll('input[type="checkbox"]:checked'))
-    .map((input) => input.dataset.path)
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b, 'zh'));
-}
-
-function renderTreePreserveFolders(selectedPaths) {
-  if (!treePreserveFoldersList) return;
-  const selected = new Set(selectedPaths || []);
-  treePreserveFoldersList.innerHTML = '';
-  if (!treeFolderOptions.length) {
-    const empty = document.createElement('div');
-    empty.className = 'tree-preserve-empty';
-    empty.textContent = '未读取到可选择的书签夹';
-    treePreserveFoldersList.appendChild(empty);
-    return;
-  }
-  for (const folder of treeFolderOptions) {
-    const label = document.createElement('label');
-    label.className = 'tree-preserve-item';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.dataset.path = folder.path;
-    input.checked = selected.has(folder.path);
-    input.addEventListener('change', () => { saveTreeSettings(); });
-    const name = document.createElement('span');
-    name.textContent = folder.path;
-    name.title = folder.path;
-    const count = document.createElement('em');
-    count.textContent = String(folder.count);
-    label.append(input, name, count);
-    treePreserveFoldersList.appendChild(label);
-  }
-}
-
-function updateTreePreserveVisibility() {
-  if (!treePreserveFoldersRow || !treeRespectFoldersToggle) return;
-  treePreserveFoldersRow.style.display = treeRespectFoldersToggle.checked ? '' : 'none';
-}
-
-function clampTreeNumber(value, fallback, min, max) {
-  const n = Math.floor(Number(value));
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
-}
+let _treeProviderInputCache = {};
 
 function getTreeProvider(id) {
   return TREE_PROVIDERS[id] || TREE_PROVIDERS.custom;
+}
+
+function clampTreeNumber(value, fallback, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(n)));
 }
 
 function setTreeStatus(text, kind) {
@@ -1861,77 +1785,193 @@ function setTreeStatus(text, kind) {
   if (kind === 'err') treeStatusDesc.classList.add('tree-status-err');
 }
 
-function fillTreeModelOptions(providerId, currentModel) {
-  if (!treeModelSelect) return;
-  const p = getTreeProvider(providerId);
-  const models = p.models || [];
-  const isPreset = models.includes(currentModel);
-  treeModelSelect.innerHTML = '';
-  models.forEach((m) => {
-    const opt = document.createElement('option');
-    opt.value = m;
-    opt.textContent = m;
-    treeModelSelect.appendChild(opt);
-  });
-  const customOpt = document.createElement('option');
-  customOpt.value = '__custom__';
-  customOpt.textContent = '自定义模型…';
-  treeModelSelect.appendChild(customOpt);
+function normalizeTreeEndpointBase(url) {
+  let value = String(url || '').trim().replace(/\/+$/, '');
+  if (!value) return '';
+  value = value
+    .replace(/\/chat\/completions$/i, '')
+    .replace(/\/v1\/messages$/i, '/v1')
+    .replace(/\/messages$/i, '');
+  return value.replace(/\/+$/, '');
+}
 
-  if (isPreset) {
-    treeModelSelect.value = currentModel;
-    if (treeModelCustomInput) {
-      treeModelCustomInput.style.display = 'none';
-      treeModelCustomInput.value = '';
-    }
+function resolveTreeRequestUrl(settings) {
+  const provider = settings.provider || 'agnes';
+  const p = getTreeProvider(provider);
+  const style = provider === 'custom'
+    ? (settings.customApiStyle || 'openai')
+    : (p.apiStyle || 'openai');
+  const raw = String(settings.baseUrl || p.baseUrl || '').trim().replace(/\/+$/, '');
+  if (!raw) return '';
+
+  if (provider !== 'custom') {
+    if (style === 'openai') return /\/chat\/completions$/i.test(raw) ? raw : `${raw}/chat/completions`;
+    if (style === 'anthropic') return /\/messages$/i.test(raw) ? raw : `${raw}/messages`;
+    return raw;
+  }
+
+  if (settings.customFullUrl) return raw;
+  if (style === 'openai') return /\/chat\/completions$/i.test(raw) ? raw : `${raw}/chat/completions`;
+  if (style === 'anthropic') {
+    if (/\/v1\/messages$/i.test(raw) || /\/messages$/i.test(raw)) return raw;
+    return `${raw}/v1/messages`;
+  }
+  return raw;
+}
+
+function toggleTreeCustomFields() {
+  const isCustom = !!(treeProviderSelect && treeProviderSelect.value === 'custom');
+  if (treeCustomFields) treeCustomFields.style.display = isCustom ? '' : 'none';
+}
+
+function updateTreeEndpointHint() {
+  if (!treeEndpointHintText || !treeEndpointHintFullUrl) return;
+  const isFullUrl = !!(treeFullUrlToggle && treeFullUrlToggle.checked);
+  treeEndpointHintText.style.display = isFullUrl ? 'none' : '';
+  treeEndpointHintFullUrl.style.display = isFullUrl ? '' : 'none';
+  if (isFullUrl) return;
+
+  const style = (treeApiStyleSelect && treeApiStyleSelect.value) || 'openai';
+  if (style === 'anthropic') {
+    treeEndpointHintText.textContent = '请填写兼容 Anthropic API 的服务端点地址，不要以斜杠结尾。/v1/messages 将会被补充到你填写的地址末尾。';
+  } else if (style === 'gemini') {
+    treeEndpointHintText.textContent = '请填写 Gemini API 根地址（通常到 /v1beta）。模型路径会在请求时自动拼接。';
   } else {
-    treeModelSelect.value = '__custom__';
-    if (treeModelCustomInput) {
-      treeModelCustomInput.style.display = '';
-      treeModelCustomInput.value = currentModel || '';
-    }
+    treeEndpointHintText.textContent = '请填写兼容 OpenAI API 的服务端点地址，不要以斜杠结尾。/chat/completions 将会被补充到你填写的地址末尾。';
   }
 }
 
-function applyTreeProviderToUI(providerId, keepUrl) {
-  const p = getTreeProvider(providerId);
-  if (treeCustomFields) treeCustomFields.style.display = providerId === 'custom' ? '' : 'none';
-  if (treeApiStyleSelect && providerId === 'custom') {
-    // keep existing
-  } else if (treeApiStyleSelect) {
-    treeApiStyleSelect.value = p.apiStyle || 'openai';
+function switchTreeProvider(newProvider) {
+  if (!treeProviderSelect) return;
+  const previousProvider = treeProviderSelect.dataset.previousProvider || treeProviderSelect.value || 'agnes';
+
+  _treeProviderInputCache[previousProvider] = {
+    apiKey: treeApiKeyInput ? treeApiKeyInput.value : '',
+    model: treeModelInput ? treeModelInput.value : '',
+    endpoint: treeBaseUrlInput ? treeBaseUrlInput.value : '',
+    apiStyle: treeApiStyleSelect ? treeApiStyleSelect.value : 'openai',
+    fullUrl: !!(treeFullUrlToggle && treeFullUrlToggle.checked),
+  };
+
+  const cached = _treeProviderInputCache[newProvider] || {};
+  const p = getTreeProvider(newProvider);
+
+  if (treeApiKeyInput) treeApiKeyInput.value = cached.apiKey || '';
+  if (treeModelInput) {
+    treeModelInput.value = cached.model || '';
+    treeModelInput.placeholder = p.defaultModel || 'model-name';
   }
-  if (treeBaseUrlInput && !keepUrl) {
-    treeBaseUrlInput.value = p.baseUrl;
+  if (treeApiStyleSelect) treeApiStyleSelect.value = cached.apiStyle || p.apiStyle || 'openai';
+  if (treeFullUrlToggle) treeFullUrlToggle.checked = !!cached.fullUrl;
+  if (treeBaseUrlInput) {
+    treeBaseUrlInput.value = newProvider === 'custom' ? (cached.endpoint || '') : '';
   }
-  fillTreeModelOptions(providerId, p.defaultModel);
+
+  // 同步隐藏兼容字段
+  if (treeModelSelect) {
+    treeModelSelect.innerHTML = '';
+    const opt = document.createElement('option');
+    const model = (treeModelInput && treeModelInput.value.trim()) || p.defaultModel || '';
+    opt.value = model;
+    opt.textContent = model;
+    treeModelSelect.appendChild(opt);
+    treeModelSelect.value = model;
+  }
+  if (treeModelCustomInput) {
+    treeModelCustomInput.value = (treeModelInput && treeModelInput.value) || '';
+    treeModelCustomInput.style.display = 'none';
+  }
+
+  treeProviderSelect.dataset.previousProvider = newProvider;
+  toggleTreeCustomFields();
+  updateTreeEndpointHint();
 }
 
-function readTreeSettingsFromUI(base) {
+async function loadTreeFolderOptions() {
+  try {
+    const tree = await chrome.bookmarks.getTree();
+    const options = [];
+    const walk = (nodes, pathParts) => {
+      for (const n of nodes || []) {
+        if (n.url) continue;
+        const next = pathParts.concat(n.title || '');
+        const path = next.filter(Boolean).join(' / ');
+        if (path) options.push({ id: n.id, path });
+        if (n.children && n.children.length) walk(n.children, next);
+      }
+    };
+    walk(tree, []);
+    treeFolderOptions = options.sort((a, b) => a.path.localeCompare(b.path, 'zh'));
+  } catch (_) {
+    treeFolderOptions = [];
+  }
+}
+
+function getSelectedPreservedFolders() {
+  if (!treePreserveFoldersList) return [];
+  return Array.from(treePreserveFoldersList.querySelectorAll('input[type="checkbox"]:checked'))
+    .map((el) => el.value)
+    .filter(Boolean);
+}
+
+function renderTreePreserveFolders(selectedPaths) {
+  if (!treePreserveFoldersList) return;
+  const selected = new Set(selectedPaths || []);
+  treePreserveFoldersList.innerHTML = '';
+  if (!treeFolderOptions.length) {
+    const empty = document.createElement('div');
+    empty.className = 'tree-preserve-empty';
+    empty.textContent = '暂无可选文件夹';
+    treePreserveFoldersList.appendChild(empty);
+    return;
+  }
+  for (const folder of treeFolderOptions) {
+    const label = document.createElement('label');
+    label.className = 'tree-preserve-item';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = folder.path;
+    input.checked = selected.has(folder.path);
+    const span = document.createElement('span');
+    span.textContent = folder.path;
+    label.appendChild(input);
+    label.appendChild(span);
+    treePreserveFoldersList.appendChild(label);
+  }
+}
+
+function updateTreePreserveVisibility() {
+  if (!treePreserveFoldersRow || !treeRespectFoldersToggle) return;
+  treePreserveFoldersRow.style.display = treeRespectFoldersToggle.checked ? '' : 'none';
+}
+
+function readTreeSettingsFromUI(prev) {
   const provider = (treeProviderSelect && treeProviderSelect.value) || 'agnes';
   const p = getTreeProvider(provider);
-  let model = '';
-  if (treeModelSelect && treeModelSelect.value === '__custom__') {
-    model = (treeModelCustomInput && treeModelCustomInput.value.trim()) || '';
-  } else {
-    model = (treeModelSelect && treeModelSelect.value) || p.defaultModel;
-  }
+  const model = ((treeModelInput && treeModelInput.value.trim()) || p.defaultModel || '').trim();
   const prompts = {
     label: (treePromptLabel && treePromptLabel.value.trim()) || DEFAULT_TREE_PROMPTS.label,
     buildTree: (treePromptBuild && treePromptBuild.value.trim()) || DEFAULT_TREE_PROMPTS.buildTree,
     assign: (treePromptAssign && treePromptAssign.value.trim()) || DEFAULT_TREE_PROMPTS.assign,
   };
+  const baseUrl = provider === 'custom'
+    ? normalizeTreeEndpointBase((treeBaseUrlInput && treeBaseUrlInput.value) || '')
+    : p.baseUrl;
+
   return {
     ...DEFAULT_TREE_SETTINGS,
-    ...(base || {}),
+    ...(prev || {}),
     provider,
     apiKey: (treeApiKeyInput && treeApiKeyInput.value.trim()) || '',
-    baseUrl: (treeBaseUrlInput && treeBaseUrlInput.value.trim()) || p.baseUrl,
+    baseUrl,
     model,
-    customApiStyle: (treeApiStyleSelect && treeApiStyleSelect.value) || p.apiStyle || 'openai',
+    customApiStyle: provider === 'custom'
+      ? ((treeApiStyleSelect && treeApiStyleSelect.value) || 'openai')
+      : (p.apiStyle || 'openai'),
+    customFullUrl: provider === 'custom' ? !!(treeFullUrlToggle && treeFullUrlToggle.checked) : false,
     classifyPrompts: prompts,
     respectExistingFolders: treeRespectFoldersToggle ? !!treeRespectFoldersToggle.checked : true,
-    preservedFolderPaths: getSelectedPreservedFoldersFromUI(),
+    preservedFolderPaths: getSelectedPreservedFolders(),
     reusePreviousAiTree: treeReusePreviousToggle ? !!treeReusePreviousToggle.checked : false,
     useBuiltInClassificationRules: treeBuiltInRulesToggle ? !!treeBuiltInRulesToggle.checked : true,
     useClassificationCache: treeCacheToggle ? !!treeCacheToggle.checked : true,
@@ -1948,76 +1988,87 @@ async function loadTreeSettings() {
     const s = { ...DEFAULT_TREE_SETTINGS, ...(data.settings || {}) };
     s.classifyPrompts = migrateTreeDefaultPrompts(s.classifyPrompts || {});
 
-    treeProviderSelect.value = s.provider in TREE_PROVIDERS ? s.provider : 'custom';
-    if (treeCustomFields) treeCustomFields.style.display = treeProviderSelect.value === 'custom' ? '' : 'none';
-    if (treeApiStyleSelect) treeApiStyleSelect.value = s.customApiStyle || getTreeProvider(s.provider).apiStyle || 'openai';
-    if (treeBaseUrlInput) treeBaseUrlInput.value = s.baseUrl || getTreeProvider(s.provider).baseUrl;
+    const provider = s.provider in TREE_PROVIDERS ? s.provider : 'custom';
+    const p = getTreeProvider(provider);
+    treeProviderSelect.value = provider;
+    treeProviderSelect.dataset.previousProvider = provider;
+
+    if (treeApiStyleSelect) treeApiStyleSelect.value = s.customApiStyle || p.apiStyle || 'openai';
+    if (treeFullUrlToggle) treeFullUrlToggle.checked = !!s.customFullUrl;
     if (treeApiKeyInput) treeApiKeyInput.value = s.apiKey || '';
-    fillTreeModelOptions(treeProviderSelect.value, s.model || getTreeProvider(s.provider).defaultModel);
+    if (treeModelInput) {
+      treeModelInput.value = s.model || p.defaultModel || '';
+      treeModelInput.placeholder = p.defaultModel || 'model-name';
+    }
+    if (treeBaseUrlInput) {
+      treeBaseUrlInput.value = provider === 'custom' ? normalizeTreeEndpointBase(s.baseUrl || '') : '';
+    }
+
+    _treeProviderInputCache = {
+      [provider]: {
+        apiKey: s.apiKey || '',
+        model: s.model || '',
+        endpoint: provider === 'custom' ? normalizeTreeEndpointBase(s.baseUrl || '') : '',
+        apiStyle: s.customApiStyle || p.apiStyle || 'openai',
+        fullUrl: !!s.customFullUrl,
+      }
+    };
+
     if (treePromptLabel) treePromptLabel.value = s.classifyPrompts.label || DEFAULT_TREE_PROMPTS.label;
     if (treePromptBuild) treePromptBuild.value = s.classifyPrompts.buildTree || DEFAULT_TREE_PROMPTS.buildTree;
     if (treePromptAssign) treePromptAssign.value = s.classifyPrompts.assign || DEFAULT_TREE_PROMPTS.assign;
-    if (treeRespectFoldersToggle) {
-      treeRespectFoldersToggle.checked = s.respectExistingFolders !== false;
-    }
+    if (treeRespectFoldersToggle) treeRespectFoldersToggle.checked = s.respectExistingFolders !== false;
     await loadTreeFolderOptions();
     renderTreePreserveFolders(s.preservedFolderPaths || []);
     updateTreePreserveVisibility();
-    if (treeReusePreviousToggle) {
-      treeReusePreviousToggle.checked = s.reusePreviousAiTree === true;
-    }
-    if (treeBuiltInRulesToggle) {
-      treeBuiltInRulesToggle.checked = s.useBuiltInClassificationRules !== false;
-    }
-    if (treeCacheToggle) {
-      treeCacheToggle.checked = s.useClassificationCache !== false;
-    }
-    if (treeMetadataToggle) {
-      treeMetadataToggle.checked = s.usePageMetadata !== false;
-    }
-    if (treeRetryCountInput) {
-      treeRetryCountInput.value = String(clampTreeNumber(s.aiRetryCount, DEFAULT_TREE_SETTINGS.aiRetryCount, 0, 20));
-    }
-    if (treeRequestTimeoutInput) {
-      treeRequestTimeoutInput.value = String(clampTreeNumber(s.aiRequestTimeoutSeconds, DEFAULT_TREE_SETTINGS.aiRequestTimeoutSeconds, 5, 600));
-    }
+    if (treeReusePreviousToggle) treeReusePreviousToggle.checked = s.reusePreviousAiTree === true;
+    if (treeBuiltInRulesToggle) treeBuiltInRulesToggle.checked = s.useBuiltInClassificationRules !== false;
+    if (treeCacheToggle) treeCacheToggle.checked = s.useClassificationCache !== false;
+    if (treeMetadataToggle) treeMetadataToggle.checked = s.usePageMetadata !== false;
+    if (treeRetryCountInput) treeRetryCountInput.value = String(clampTreeNumber(s.aiRetryCount, DEFAULT_TREE_SETTINGS.aiRetryCount, 0, 20));
+    if (treeRequestTimeoutInput) treeRequestTimeoutInput.value = String(clampTreeNumber(s.aiRequestTimeoutSeconds, DEFAULT_TREE_SETTINGS.aiRequestTimeoutSeconds, 5, 600));
 
-    const configured = !!(s.apiKey && s.baseUrl);
-    const mode = s.respectExistingFolders !== false ? '参照原夹' : '纯链接识别';
-    const history = s.reusePreviousAiTree === true ? '沿用旧树' : '不沿用旧树';
-    const rules = s.useBuiltInClassificationRules !== false ? '内置规则开' : '内置规则关';
-    const cache = s.useClassificationCache !== false ? '缓存开' : '缓存关';
-    const preserved = (s.preservedFolderPaths || []).length;
-    setTreeStatus(configured ? `已配置 · ${mode} · 保持 ${preserved} 个原夹 · ${history} · ${rules} · ${cache} · ${getTreeProvider(s.provider).label} · ${s.model || ''}` : '未配置 API Key', configured ? 'ok' : null);
+    toggleTreeCustomFields();
+    updateTreeEndpointHint();
+
+    const configured = !!(s.apiKey && (provider !== 'custom' || s.baseUrl));
+    setTreeStatus(
+      configured
+        ? `已配置 · ${p.label} · ${s.model || p.defaultModel || ''}`
+        : '未配置 API Key',
+      configured ? 'ok' : null
+    );
   } catch (e) {
     console.warn('loadTreeSettings failed', e);
     setTreeStatus('加载失败', 'err');
   }
 }
 
-async function saveTreeSettings() {
+async function saveTreeSettings(options = {}) {
+  const quiet = !!options.quiet;
   const data = await chrome.storage.local.get('settings');
   const next = readTreeSettingsFromUI(data.settings || {});
   const missing = [];
   if (!next.apiKey) missing.push('API Key');
-  if (!next.baseUrl) missing.push('API Base URL');
+  if (next.provider === 'custom' && !next.baseUrl) missing.push('API Base URL');
   if (!next.model) missing.push('模型名');
+
   await chrome.storage.local.set({ settings: next });
-  // mirror non-secret fields to sync if possible
   try {
     const { apiKey, ...safe } = next;
     await chrome.storage.sync.set({ settings: safe });
   } catch (_) {}
-  const mode = next.respectExistingFolders !== false ? '参照原夹' : '纯链接识别';
-  const rules = next.useBuiltInClassificationRules !== false ? '内置规则开' : '内置规则关';
-  const cache = next.useClassificationCache !== false ? '缓存开' : '缓存关';
-  const preserved = (next.preservedFolderPaths || []).length;
+
   if (missing.length) {
-    setTreeStatus(`已保存 · ${mode} · 保持 ${preserved} 个原夹 · ${rules} · ${cache} · 仍需填写：${missing.join('、')}`, 'err');
-    return true;
+    setTreeStatus(`已保存 · 仍需填写：${missing.join('、')}`, 'err');
+    if (!quiet && typeof showToast === 'function') showToast(`请填写：${missing.join('、')}`, 'error');
+    return false;
   }
-  setTreeStatus(`已保存 · ${mode} · 保持 ${preserved} 个原夹 · ${rules} · ${cache} · ${getTreeProvider(next.provider).label} · ${next.model}`, 'ok');
-  if (typeof showToast === 'function') showToast(typeof i18n === 'function' ? (i18n('settingsSaved') || '已保存') : '已保存', 'success');
+
+  setTreeStatus(`已保存 · ${getTreeProvider(next.provider).label} · ${next.model}`, 'ok');
+  if (!quiet && typeof showToast === 'function') {
+    showToast(typeof i18n === 'function' ? (i18n('settingsSaved') || '已保存') : '已保存', 'success');
+  }
   return true;
 }
 
@@ -2025,26 +2076,29 @@ function buildTreeChatRequest(settings, userText) {
   const style = settings.provider === 'custom'
     ? (settings.customApiStyle || 'openai')
     : (getTreeProvider(settings.provider).apiStyle || 'openai');
+  const requestUrl = resolveTreeRequestUrl(settings);
+  const model = settings.model || getTreeProvider(settings.provider).defaultModel;
 
   if (style === 'anthropic') {
     return {
-      url: settings.baseUrl,
+      url: requestUrl,
       headers: {
         'content-type': 'application/json',
         'x-api-key': settings.apiKey,
         'anthropic-version': '2023-06-01',
       },
       body: {
-        model: settings.model,
+        model,
         max_tokens: 32,
         messages: [{ role: 'user', content: userText }],
       },
     };
   }
+
   if (style === 'gemini') {
-    const base = settings.baseUrl.replace(/\/$/, '');
+    const base = String(settings.baseUrl || getTreeProvider(settings.provider).baseUrl || '').replace(/\/$/, '');
     return {
-      url: `${base}/models/${settings.model}:generateContent`,
+      url: `${base}/models/${encodeURIComponent(model)}:generateContent`,
       headers: {
         'content-type': 'application/json',
         'x-goog-api-key': settings.apiKey,
@@ -2055,38 +2109,86 @@ function buildTreeChatRequest(settings, userText) {
       },
     };
   }
+
   return {
-    url: settings.baseUrl,
+    url: requestUrl,
     headers: {
       'content-type': 'application/json',
       Authorization: `Bearer ${settings.apiKey}`,
     },
     body: {
-      model: settings.model,
+      model,
       max_tokens: 32,
       messages: [{ role: 'user', content: userText }],
     },
   };
 }
 
+function extractTreeTestSample(style, payloadText) {
+  try {
+    const data = JSON.parse(payloadText);
+    if (style === 'anthropic') {
+      const parts = data?.content;
+      if (Array.isArray(parts)) {
+        return parts.map((p) => p?.text || '').join('').trim();
+      }
+      return String(data?.content || '').trim();
+    }
+    if (style === 'gemini') {
+      const parts = data?.candidates?.[0]?.content?.parts;
+      if (Array.isArray(parts)) {
+        return parts.map((p) => p?.text || '').join('').trim();
+      }
+      return '';
+    }
+    return String(data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
 async function testTreeConnection() {
+  if (!treeTestBtn) return;
+
   const data = await chrome.storage.local.get('settings');
   const settings = readTreeSettingsFromUI(data.settings || {});
+  const style = settings.provider === 'custom'
+    ? (settings.customApiStyle || 'openai')
+    : (getTreeProvider(settings.provider).apiStyle || 'openai');
+
   if (!settings.apiKey) {
     setTreeStatus('请先填写 API Key', 'err');
+    if (typeof showToast === 'function') showToast('请先填写 API Key', 'error');
     return;
   }
-  if (!settings.baseUrl) {
+  if (settings.provider === 'custom' && !settings.baseUrl) {
     setTreeStatus('请先填写 API Base URL', 'err');
+    if (typeof showToast === 'function') showToast('请先填写 API Base URL', 'error');
     return;
   }
-  setTreeStatus('测试中…');
-  if (treeTestBtn) treeTestBtn.disabled = true;
+  if (!settings.model) {
+    setTreeStatus('请先填写模型名', 'err');
+    if (typeof showToast === 'function') showToast('请先填写模型名', 'error');
+    return;
+  }
+
+  const req = buildTreeChatRequest(settings, '回复"OK"两个字母即可。');
+  if (!req.url) {
+    setTreeStatus('API 地址无效', 'err');
+    if (typeof showToast === 'function') showToast('API 地址无效', 'error');
+    return;
+  }
+
+  const originalText = treeTestBtn.textContent;
+  treeTestBtn.disabled = true;
+  treeTestBtn.textContent = (typeof i18n === 'function' ? (i18n('aiTesting') || '测试中...') : '测试中...');
+  setTreeStatus('测试中...');
+
   const timeoutMs = clampTreeNumber(settings.aiRequestTimeoutSeconds, DEFAULT_TREE_SETTINGS.aiRequestTimeoutSeconds, 5, 600) * 1000;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    const req = buildTreeChatRequest(settings, '回复"OK"两个字母即可。');
     const res = await fetch(req.url, {
       method: 'POST',
       headers: req.headers,
@@ -2097,20 +2199,28 @@ async function testTreeConnection() {
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${text.slice(0, 180)}`);
     }
-    setTreeStatus('连接成功', 'ok');
-    if (typeof showToast === 'function') showToast('连接成功', 'success');
-    // auto-save successful config for convenience
+
+    const sample = extractTreeTestSample(style, text);
     await chrome.storage.local.set({ settings });
+    try {
+      const { apiKey, ...safe } = settings;
+      await chrome.storage.sync.set({ settings: safe });
+    } catch (_) {}
+
+    setTreeStatus(`连接成功 · ${getTreeProvider(settings.provider).label} · ${settings.model}`, 'ok');
+    if (typeof showToast === 'function') {
+      showToast(sample ? `连接成功：${sample.slice(0, 40)}` : '连接成功', 'success');
+    }
   } catch (e) {
-    const timeoutMessage = e && e.name === 'AbortError' ? `请求超时（${Math.round(timeoutMs / 1000)} 秒）` : ((e && e.message) || e);
-    setTreeStatus(`连接失败：${(e && e.message) || e}`, 'err');
-    if (typeof showToast === 'function') showToast('连接失败', 'error');
-    setTreeStatus(`连接失败：${timeoutMessage}`, 'err');
-    const readableTreeError = e && e.name === 'AbortError' ? `\u8bf7\u6c42\u8d85\u65f6\uff08${Math.round(timeoutMs / 1000)} \u79d2\uff09` : ((e && e.message) || e);
-    setTreeStatus(`\u8fde\u63a5\u5931\u8d25\uff1a${readableTreeError}`, 'err');
+    const readable = e && e.name === 'AbortError'
+      ? `请求超时（${Math.round(timeoutMs / 1000)} 秒）`
+      : ((e && e.message) || String(e));
+    setTreeStatus(`连接失败：${readable}`, 'err');
+    if (typeof showToast === 'function') showToast(`连接失败：${readable}`, 'error');
   } finally {
     clearTimeout(timeoutId);
-    if (treeTestBtn) treeTestBtn.disabled = false;
+    treeTestBtn.disabled = false;
+    treeTestBtn.textContent = originalText || (typeof i18n === 'function' ? (i18n('aiTest') || '测试连接') : '测试连接');
   }
 }
 
@@ -2118,56 +2228,55 @@ function bindTreeSettings() {
   if (!treeProviderSelect) return;
 
   treeProviderSelect.addEventListener('change', () => {
-    applyTreeProviderToUI(treeProviderSelect.value, treeProviderSelect.value === 'custom');
-    if (treeProviderSelect.value !== 'custom' && treeBaseUrlInput) {
-      treeBaseUrlInput.value = getTreeProvider(treeProviderSelect.value).baseUrl;
-    }
+    switchTreeProvider(treeProviderSelect.value);
   });
 
-  if (treeModelSelect) {
-    treeModelSelect.addEventListener('change', () => {
-      if (!treeModelCustomInput) return;
-      if (treeModelSelect.value === '__custom__') {
-        treeModelCustomInput.style.display = '';
-        treeModelCustomInput.focus();
-      } else {
-        treeModelCustomInput.style.display = 'none';
-      }
+  if (treeApiStyleSelect) {
+    treeApiStyleSelect.addEventListener('change', () => {
+      updateTreeEndpointHint();
     });
   }
-
-  if (treeSaveBtn) treeSaveBtn.addEventListener('click', () => { saveTreeSettings(); });
+  if (treeFullUrlToggle) {
+    treeFullUrlToggle.addEventListener('change', () => {
+      updateTreeEndpointHint();
+    });
+  }
+  if (treeSaveBtn) {
+    treeSaveBtn.addEventListener('click', () => { saveTreeSettings(); });
+  }
+  if (treeTestBtn) {
+    treeTestBtn.addEventListener('click', () => { testTreeConnection(); });
+  }
   if (treeRespectFoldersToggle) {
     treeRespectFoldersToggle.addEventListener('change', () => {
       updateTreePreserveVisibility();
-      saveTreeSettings();
+      saveTreeSettings({ quiet: true });
     });
   }
   if (treeClearPreservedFoldersBtn) {
     treeClearPreservedFoldersBtn.addEventListener('click', () => {
       renderTreePreserveFolders([]);
-      saveTreeSettings();
+      saveTreeSettings({ quiet: true });
     });
   }
   if (treeReusePreviousToggle) {
-    treeReusePreviousToggle.addEventListener('change', () => { saveTreeSettings(); });
+    treeReusePreviousToggle.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
   }
   if (treeBuiltInRulesToggle) {
-    treeBuiltInRulesToggle.addEventListener('change', () => { saveTreeSettings(); });
+    treeBuiltInRulesToggle.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
   }
   if (treeCacheToggle) {
-    treeCacheToggle.addEventListener('change', () => { saveTreeSettings(); });
+    treeCacheToggle.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
   }
   if (treeMetadataToggle) {
-    treeMetadataToggle.addEventListener('change', () => { saveTreeSettings(); });
+    treeMetadataToggle.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
   }
   if (treeRetryCountInput) {
-    treeRetryCountInput.addEventListener('change', () => { saveTreeSettings(); });
+    treeRetryCountInput.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
   }
   if (treeRequestTimeoutInput) {
-    treeRequestTimeoutInput.addEventListener('change', () => { saveTreeSettings(); });
+    treeRequestTimeoutInput.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
   }
-  if (treeTestBtn) treeTestBtn.addEventListener('click', () => { testTreeConnection(); });
   if (treeResetPromptsBtn) {
     treeResetPromptsBtn.addEventListener('click', () => {
       if (treePromptLabel) treePromptLabel.value = DEFAULT_TREE_PROMPTS.label;

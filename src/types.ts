@@ -59,7 +59,7 @@ export const PROVIDERS: Provider[] = [
     id: 'agnes',
     label: 'Agnes AI',
     apiStyle: 'openai',
-    baseUrl: 'https://apihub.agnes-ai.com/v1/chat/completions',
+    baseUrl: 'https://apihub.agnes-ai.com/v1',
     defaultModel: 'agnes-2.0-flash',
     models: ['agnes-2.0-flash', 'agnes-1.5-flash'],
     keyUrl: 'https://platform.agnes-ai.com/settings/apiKeys',
@@ -69,7 +69,7 @@ export const PROVIDERS: Provider[] = [
     id: 'openrouter',
     label: 'OpenRouter',
     apiStyle: 'openai',
-    baseUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    baseUrl: 'https://openrouter.ai/api/v1',
     defaultModel: 'openai/gpt-4o-mini',
     models: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-haiku', 'google/gemini-2.0-flash-001', 'deepseek/deepseek-chat'],
     keyUrl: 'https://openrouter.ai/settings/keys',
@@ -79,7 +79,7 @@ export const PROVIDERS: Provider[] = [
     id: 'openai',
     label: 'OpenAI (Codex)',
     apiStyle: 'openai',
-    baseUrl: 'https://api.openai.com/v1/chat/completions',
+    baseUrl: 'https://api.openai.com/v1',
     defaultModel: 'gpt-4o-mini',
     models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'],
     keyUrl: 'https://platform.openai.com/api-keys',
@@ -89,7 +89,7 @@ export const PROVIDERS: Provider[] = [
     id: 'claude',
     label: 'Claude (Anthropic)',
     apiStyle: 'anthropic',
-    baseUrl: 'https://api.anthropic.com/v1/messages',
+    baseUrl: 'https://api.anthropic.com/v1',
     defaultModel: 'claude-3-5-haiku-latest',
     models: ['claude-3-5-haiku-latest', 'claude-sonnet-4-20250514'],
     keyUrl: 'https://console.anthropic.com/settings/keys',
@@ -109,7 +109,7 @@ export const PROVIDERS: Provider[] = [
     id: 'deepseek',
     label: 'DeepSeek',
     apiStyle: 'openai',
-    baseUrl: 'https://api.deepseek.com/v1/chat/completions',
+    baseUrl: 'https://api.deepseek.com/v1',
     defaultModel: 'deepseek-chat',
     models: ['deepseek-chat', 'deepseek-reasoner'],
     keyUrl: 'https://platform.deepseek.com/api_keys',
@@ -117,9 +117,9 @@ export const PROVIDERS: Provider[] = [
   },
   {
     id: 'custom',
-    label: '\u81ea\u5b9a\u4e49\u63d0\u4f9b\u5546',
+    label: '自定义',
     apiStyle: 'openai',
-    baseUrl: 'https://api.openai.com/v1/chat/completions',
+    baseUrl: '',
     defaultModel: 'gpt-4o-mini',
     models: ['gpt-4o-mini', 'gpt-4o', 'deepseek-chat'],
     keyUrl: '',
@@ -227,6 +227,8 @@ export interface Settings {
   colorMode: 'system' | 'light' | 'dark';
   /** Custom provider API style */
   customApiStyle?: ApiStyle;
+  /** custom endpoint is full request URL (no path append) */
+  customFullUrl?: boolean;
   /** Classify prompts (override defaults) */
   classifyPrompts?: ClassifyPrompts;
   /** 参照浏览器原有书签夹结构进行分类（公司/业务夹优先保留） */
@@ -250,7 +252,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'agnes',
   apiKey: '',
-  baseUrl: 'https://apihub.agnes-ai.com/v1/chat/completions',
+  baseUrl: 'https://apihub.agnes-ai.com/v1',
   model: 'agnes-2.0-flash',
   fontFamily: 'system',
   fontSize: 14,
@@ -258,6 +260,7 @@ export const DEFAULT_SETTINGS: Settings = {
   language: 'auto',
   colorMode: 'system',
   customApiStyle: 'openai',
+  customFullUrl: false,
   classifyPrompts: { ...DEFAULT_CLASSIFY_PROMPTS },
   respectExistingFolders: true,
   preservedFolderPaths: [],
@@ -281,6 +284,40 @@ export function resolveProvider(settings: Settings): Provider {
     };
   }
   return base;
+}
+
+
+/** Normalize/resolve final chat request URL (align with AI assist custom endpoint UX). */
+export function resolveRequestUrl(settings: Settings): string {
+  const provider = resolveProvider(settings);
+  const style = provider.apiStyle;
+  const raw = String(settings.baseUrl || provider.baseUrl || '').trim().replace(/\/+$/, '');
+  if (!raw) return '';
+
+  // Built-in providers always use known path rules.
+  if (settings.provider !== 'custom') {
+    if (style === 'openai') {
+      if (/\/chat\/completions$/i.test(raw)) return raw;
+      return `${raw}/chat/completions`;
+    }
+    if (style === 'anthropic') {
+      if (/\/messages$/i.test(raw)) return raw;
+      return `${raw}/messages`;
+    }
+    return raw;
+  }
+
+  // Custom provider: optional full URL mode.
+  if (settings.customFullUrl) return raw;
+  if (style === 'openai') {
+    if (/\/chat\/completions$/i.test(raw)) return raw;
+    return `${raw}/chat/completions`;
+  }
+  if (style === 'anthropic') {
+    if (/\/v1\/messages$/i.test(raw) || /\/messages$/i.test(raw)) return raw;
+    return `${raw}/v1/messages`;
+  }
+  return raw;
 }
 
 export function resolveClassifyPrompts(settings: Settings): ClassifyPrompts {

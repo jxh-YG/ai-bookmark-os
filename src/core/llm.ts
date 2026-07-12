@@ -1,5 +1,5 @@
 // 多供应商 LLM 客户端：OpenAI / Anthropic / Gemini 协议，限流、重试、JSON 解析
-import { resolveProvider, type Settings } from '../types';
+import { resolveProvider, resolveRequestUrl, type Settings } from '../types';
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -110,13 +110,14 @@ function normalizeMessageContent(content: unknown): string {
 
 function buildRequest(settings: Settings, messages: ChatMessage[], opts: ChatOptions): RequestSpec {
   const style = resolveProvider(settings).apiStyle;
+  const requestUrl = resolveRequestUrl(settings);
   const temperature = opts.temperature ?? 0.2;
   const maxTokens = opts.maxTokens ?? 4096;
 
   if (style === 'anthropic') {
     const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
     return {
-      url: settings.baseUrl,
+      url: requestUrl,
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': settings.apiKey,
@@ -159,7 +160,7 @@ function buildRequest(settings: Settings, messages: ChatMessage[], opts: ChatOpt
 
   // openai 兼容（Agnes / OpenRouter / OpenAI / DeepSeek）
   return {
-    url: settings.baseUrl,
+    url: requestUrl,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${settings.apiKey}`,
@@ -349,7 +350,9 @@ export async function listModels(settings: Settings): Promise<string[]> {
   let headers: Record<string, string>;
 
   if (style === 'anthropic') {
-    url = settings.baseUrl.replace(/\/messages\/?$/, '/models');
+    const raw = resolveRequestUrl(settings) || settings.baseUrl;
+    url = raw.replace(/\/messages\/?$/, '/models').replace(/\/v1\/?$/, '/v1/models');
+    if (!/\/models$/.test(url)) url = raw.replace(/\/?$/, '') + '/models';
     headers = {
       'x-api-key': settings.apiKey,
       'anthropic-version': '2023-06-01',
@@ -359,8 +362,10 @@ export async function listModels(settings: Settings): Promise<string[]> {
     url = `${settings.baseUrl.replace(/\/$/, '')}/models?pageSize=1000`;
     headers = { 'x-goog-api-key': settings.apiKey };
   } else {
-    // openai 兼容：.../chat/completions → .../models
-    url = settings.baseUrl.replace(/\/chat\/completions\/?$/, '/models');
+    // openai 兼容：base 或 .../chat/completions → .../models
+    const raw = resolveRequestUrl(settings) || settings.baseUrl;
+    url = raw.replace(/\/chat\/completions\/?$/, '/models');
+    if (!/\/models$/.test(url)) url = raw.replace(/\/?$/, '') + '/models';
     headers = { Authorization: `Bearer ${settings.apiKey}` };
   }
 

@@ -911,8 +911,8 @@
 
           <div class="setting-row">
             <div class="setting-main">
-              <div class="setting-label">模型供应商</div>
-              <div class="setting-desc">选择后会自动填充默认 API 地址与模型</div>
+              <div class="setting-label">服务商</div>
+              <div class="setting-desc">选择内置服务商后自动使用对应接口；选“自定义”时再填写地址</div>
             </div>
             <div class="setting-control">
               <select id="treeProviderSelect" class="select-control">
@@ -922,56 +922,90 @@
                 <option value="claude">Claude (Anthropic)</option>
                 <option value="gemini">Gemini (Google)</option>
                 <option value="deepseek">DeepSeek</option>
-                <option value="custom">自定义提供商</option>
+                <option value="custom">自定义</option>
               </select>
             </div>
           </div>
 
+          <!-- 自定义 Provider 配置（仅 custom 时显示） -->
           <div id="treeCustomFields" class="ai-custom-fields" style="display:none;">
             <div class="setting-row">
               <div class="setting-main">
                 <div class="setting-label">API 协议</div>
-                <div class="setting-desc">兼容 OpenAI / Anthropic / Gemini 请求格式</div>
+                <div class="setting-desc">选择 API 协议格式</div>
               </div>
               <div class="setting-control">
                 <select id="treeApiStyleSelect" class="select-control">
-                  <option value="openai">OpenAI 兼容</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="gemini">Gemini</option>
+                  <option value="openai">OpenAI Chat Completions</option>
+                  <option value="anthropic">Anthropic Messages</option>
+                  <option value="gemini">Google Gemini</option>
                 </select>
               </div>
             </div>
-          </div>
 
-          <div class="setting-row">
-            <div class="setting-main">
-              <div class="setting-label">API Base URL</div>
-              <div class="setting-desc">完整 chat 接口地址（自定义时可手改）</div>
+            <div class="setting-row">
+              <div class="setting-main">
+                <div class="setting-label">API Base URL</div>
+                <div class="setting-desc">自定义服务端点地址</div>
+              </div>
+              <div class="setting-control">
+                <input type="text" id="treeBaseUrlInput" class="tagrule-input tree-url-input" style="width: 320px;" placeholder="https://api.example.com/v1">
+              </div>
             </div>
-            <div class="setting-control">
-              <input type="text" id="treeBaseUrlInput" class="tagrule-input tree-url-input" placeholder="https://.../v1/chat/completions">
+
+            <div class="setting-row ai-full-url-row">
+              <div class="setting-main">
+                <div class="setting-label">使用完整 URL</div>
+                <div class="setting-desc">按输入地址原样请求，不自动追加路径</div>
+              </div>
+              <div class="setting-control">
+                <label class="toggle-switch">
+                  <input type="checkbox" id="treeFullUrlToggle">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="ai-endpoint-hint">
+              <div class="ai-hint-card">
+                <svg class="ai-hint-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <div class="ai-hint-content">
+                  <div class="ai-hint-text" id="treeEndpointHintText">
+                    请填写兼容 OpenAI API 的服务端点地址，不要以斜杠结尾。/chat/completions 将会被补充到你填写的地址末尾。
+                  </div>
+                  <div class="ai-hint-text" id="treeEndpointHintFullUrl" style="display:none;">
+                    请填写完整请求 URL。请求将直接使用该地址，不会再追加任何路径。
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
           <div class="setting-row">
             <div class="setting-main">
               <div class="setting-label">API Key</div>
-              <div class="setting-desc">仅保存在本机 storage.local，不会同步或上传</div>
+              <div class="setting-desc">仅保存在本机，不会同步或上传</div>
             </div>
             <div class="setting-control">
               <input type="password" id="treeApiKeyInput" class="tagrule-input" style="width: 220px;" placeholder="sk-...">
-              <button type="button" id="treeTestBtn" class="btn btn-secondary btn-sm">测试连接</button>
+              <button type="button" id="treeTestBtn" class="btn btn-secondary btn-sm" data-i18n="aiTest">测试连接</button>
             </div>
           </div>
 
           <div class="setting-row">
             <div class="setting-main">
-              <div class="setting-label">模型</div>
-              <div class="setting-desc">可从预设选择，或切换为自定义模型名</div>
+              <div class="setting-label">自定义模型</div>
+              <div class="setting-desc">留空则使用该服务商推荐模型</div>
             </div>
-            <div class="setting-control tree-model-controls">
-              <select id="treeModelSelect" class="select-control"></select>
-              <input type="text" id="treeModelCustomInput" class="tagrule-input" style="width: 180px; display:none;" placeholder="自定义模型名">
+            <div class="setting-control">
+              <input type="text" id="treeModelInput" class="tagrule-input" style="width: 220px;" placeholder="agnes-2.0-flash">
+              <!-- 兼容旧脚本字段，隐藏保留 -->
+              <select id="treeModelSelect" class="select-control" hidden></select>
+              <input type="text" id="treeModelCustomInput" class="tagrule-input" hidden>
             </div>
           </div>
 

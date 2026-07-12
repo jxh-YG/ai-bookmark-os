@@ -1,18 +1,20 @@
 :root {
-  --nav-bg: #f5f6f8;
-  --nav-surface: #ffffff;
-  --nav-surface-soft: #f0f3f6;
-  --nav-border: rgba(27, 37, 53, 0.1);
-  --nav-border-strong: rgba(27, 37, 53, 0.16);
-  --nav-text: #1c1c1e;
-  --nav-muted: #636366;
-  --nav-faint: #8e8e93;
+  --nav-bg: #eef4fb;
+  --nav-surface: rgba(255, 255, 255, 0.72);
+  --nav-surface-strong: rgba(255, 255, 255, 0.88);
+  --nav-surface-soft: rgba(236, 243, 251, 0.72);
+  --nav-border: rgba(255, 255, 255, 0.72);
+  --nav-border-strong: rgba(112, 137, 171, 0.24);
+  --nav-text: #111827;
+  --nav-muted: #53606f;
+  --nav-faint: #7b8796;
   --nav-accent: #0a84ff;
-  --nav-accent-soft: rgba(10, 132, 255, 0.11);
-  --nav-green: #1f9d72;
-  --nav-amber: #b26b16;
-  --nav-rose: #c94f69;
-  --nav-shadow: 0 12px 34px rgba(25, 38, 61, 0.08);
+  --nav-accent-soft: rgba(10, 132, 255, 0.12);
+  --nav-green: #21876f;
+  --nav-amber: #a66b18;
+  --nav-rose: #bf4d68;
+  --nav-radius: 18px;
+  --nav-shadow: 0 24px 70px rgba(35, 66, 112, 0.16), 0 1px 0 rgba(255, 255, 255, 0.78) inset;
   color-scheme: light;
 }
 
@@ -31,11 +33,16 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--nav-text);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(245, 246, 248, 0) 220px),
+    radial-gradient(circle at 16% 12%, rgba(155, 198, 255, 0.42), transparent 36%),
+    radial-gradient(circle at 82% 8%, rgba(222, 233, 255, 0.9), transparent 34%),
+    radial-gradient(circle at 55% 92%, rgba(198, 240, 255, 0.38), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(238, 244, 251, 0.84) 260px),
     var(--nav-bg);
+  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   line-height: 1.5;
   letter-spacing: 0;
+  overflow-x: hidden;
 }
 
 button,
@@ -48,17 +55,27 @@ button {
 }
 
 .bookmark-nav-shell {
-  width: min(1180px, 100%);
+  width: min(1240px, 100%);
   margin: 0 auto;
-  padding: 22px clamp(12px, 3vw, 24px) 36px;
+  padding: 18px clamp(12px, 3vw, 28px) 36px;
 }
 
 .bookmark-nav-header {
+  position: sticky;
+  top: 12px;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
+  padding: 12px;
+  border: 1px solid var(--nav-border);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: 0 18px 46px rgba(35, 66, 112, 0.12);
+  backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
 }
 
 .bookmark-nav-brand {
@@ -70,15 +87,15 @@ button {
 }
 
 .bookmark-nav-mark {
-  width: 46px;
-  height: 46px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  border-radius: 8px;
+  border-radius: 15px;
   color: #ffffff;
-  background: linear-gradient(135deg, #0a84ff, #33a06f 58%, #b26b16);
-  box-shadow: 0 14px 34px rgba(10, 132, 255, 0.24);
+  background: linear-gradient(135deg, #10213c, #1f78ff 56%, #8fc7ff);
+  box-shadow: 0 16px 38px rgba(10, 132, 255, 0.28), 0 1px 0 rgba(255, 255, 255, 0.38) inset;
 }
 
 .bookmark-nav-eyebrow {
@@ -105,11 +122,11 @@ button {
   justify-content: center;
   gap: 8px;
   border: 1px solid var(--nav-border);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 0 14px;
   color: var(--nav-text);
-  background: rgba(255, 255, 255, 0.84);
-  box-shadow: 0 1px 2px rgba(20, 27, 40, 0.05);
+  background: var(--nav-surface-strong);
+  box-shadow: 0 10px 24px rgba(35, 66, 112, 0.08), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
   white-space: nowrap;
   transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
 }
@@ -142,9 +159,11 @@ button {
   gap: 10px;
   padding: 0 12px 0 14px;
   border: 1px solid var(--nav-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 1px 2px rgba(20, 27, 40, 0.04);
+  border-radius: 16px;
+  background: var(--nav-surface);
+  box-shadow: 0 12px 34px rgba(35, 66, 112, 0.08), 0 1px 0 rgba(255, 255, 255, 0.78) inset;
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
 }
 
 .bookmark-nav-search svg {
@@ -172,7 +191,7 @@ button {
   place-items: center;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--nav-muted);
   background: transparent;
 }
@@ -197,15 +216,16 @@ button {
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid var(--nav-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.68);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.54);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.78) inset;
 }
 
 .bookmark-nav-content {
   display: grid;
-  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 286px) minmax(0, 1fr);
   align-items: start;
-  gap: 16px;
+  gap: 18px;
 }
 
 .bookmark-folder-sidebar {
@@ -217,15 +237,67 @@ button {
   gap: 8px;
   padding: 10px;
   border: 1px solid var(--nav-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 1px 2px rgba(20, 27, 40, 0.04);
+  border-radius: var(--nav-radius);
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: var(--nav-shadow);
+  backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+}
+
+.folder-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 4px 7px;
+}
+
+.folder-sidebar-head div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.folder-sidebar-head span {
+  color: var(--nav-text);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.folder-sidebar-head strong {
+  color: var(--nav-faint);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.folder-sidebar-toggle-all {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid rgba(112, 137, 171, 0.14);
+  border-radius: 11px;
+  color: var(--nav-accent);
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.78) inset;
+}
+
+.folder-sidebar-toggle-all:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.88);
+  transform: translateY(-1px);
+}
+
+.folder-sidebar-toggle-all:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .folder-nav-scroll {
   min-height: 0;
   overflow: auto;
-  padding-right: 2px;
+  padding: 2px 2px 2px 0;
 }
 
 .folder-nav-group {
@@ -235,24 +307,24 @@ button {
 .folder-nav-row {
   --folder-depth: 0;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 2px;
-  padding-left: calc(var(--folder-depth) * 14px);
-  border-radius: 8px;
+  padding-left: min(calc(var(--folder-depth) * 12px), 72px);
+  border-radius: 13px;
 }
 
 .folder-nav-row.is-active {
-  background: var(--nav-accent-soft);
+  background: linear-gradient(135deg, rgba(10, 132, 255, 0.14), rgba(255, 255, 255, 0.34));
 }
 
 .folder-nav-toggle {
-  width: 22px;
-  height: 32px;
+  width: 24px;
+  height: 34px;
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--nav-faint);
   background: transparent;
 }
@@ -270,7 +342,7 @@ button {
 .folder-nav-item {
   width: 100%;
   min-width: 0;
-  min-height: 34px;
+  min-height: 36px;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
@@ -278,23 +350,24 @@ button {
   margin: 1px 0;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 12px;
   color: var(--nav-muted);
   background: transparent;
   text-align: left;
-  transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease, transform 140ms ease;
 }
 
 .folder-nav-item:hover {
   color: var(--nav-text);
-  background: var(--nav-surface-soft);
+  background: rgba(255, 255, 255, 0.56);
+  transform: translateX(1px);
 }
 
 .folder-nav-row.is-active .folder-nav-item,
 .folder-nav-item.is-active {
   color: var(--nav-accent);
-  border-color: rgba(10, 132, 255, 0.2);
-  background: var(--nav-accent-soft);
+  border-color: rgba(10, 132, 255, 0.22);
+  background: rgba(10, 132, 255, 0.1);
 }
 
 .folder-nav-item svg {
@@ -324,8 +397,9 @@ button {
 }
 
 .folder-nav-item--all {
-  min-height: 38px;
+  min-height: 40px;
   color: var(--nav-text);
+  background: rgba(255, 255, 255, 0.5);
 }
 
 .bookmark-nav-results {
@@ -334,20 +408,22 @@ button {
 
 .bookmark-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 238px), 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 252px), 1fr));
+  gap: 16px;
 }
 
 .bookmark-card {
-  min-height: 204px;
+  min-height: 226px;
   display: flex;
   flex-direction: column;
   gap: 13px;
-  padding: 15px;
+  padding: 16px;
   border: 1px solid var(--nav-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 1px 2px rgba(20, 27, 40, 0.04);
+  border-radius: var(--nav-radius);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.42));
+  box-shadow: 0 18px 48px rgba(35, 66, 112, 0.12), 0 1px 0 rgba(255, 255, 255, 0.84) inset;
+  backdrop-filter: blur(18px) saturate(165%);
+  -webkit-backdrop-filter: blur(18px) saturate(165%);
   outline: none;
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease;
 }
@@ -356,7 +432,7 @@ button {
 .bookmark-card:focus-visible {
   transform: translateY(-2px);
   border-color: rgba(10, 132, 255, 0.28);
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.84);
   box-shadow: var(--nav-shadow);
 }
 
@@ -368,14 +444,14 @@ button {
 }
 
 .bookmark-card__favicon {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  border-radius: 8px;
+  border-radius: 13px;
   color: var(--nav-accent);
-  background: var(--nav-accent-soft);
+  background: linear-gradient(135deg, rgba(10, 132, 255, 0.15), rgba(255, 255, 255, 0.55));
   overflow: hidden;
 }
 
@@ -403,7 +479,7 @@ button {
 
 .bookmark-card__title {
   display: -webkit-box;
-  min-height: 48px;
+  min-height: 50px;
   margin: 0;
   overflow: hidden;
   color: var(--nav-text);
@@ -417,7 +493,7 @@ button {
 
 .bookmark-card__summary {
   display: -webkit-box;
-  min-height: 58px;
+  min-height: 60px;
   margin: 0;
   overflow: hidden;
   color: var(--nav-muted);
@@ -444,9 +520,9 @@ button {
   align-items: center;
   gap: 5px;
   padding: 0 8px;
-  border-radius: 8px;
+  border-radius: 999px;
   color: var(--nav-muted);
-  background: var(--nav-surface-soft);
+  background: rgba(255, 255, 255, 0.56);
   font-size: 12px;
   font-weight: 650;
 }
@@ -466,7 +542,7 @@ button {
   max-width: 100%;
   flex: 0 1 auto;
   color: var(--nav-green);
-  background: rgba(31, 157, 114, 0.1);
+  background: rgba(33, 135, 111, 0.11);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -481,9 +557,12 @@ button {
   gap: 10px;
   padding: 30px;
   border: 1px dashed var(--nav-border-strong);
-  border-radius: 8px;
+  border-radius: var(--nav-radius);
   color: var(--nav-muted);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: 0 16px 44px rgba(35, 66, 112, 0.08), 0 1px 0 rgba(255, 255, 255, 0.74) inset;
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
   text-align: center;
 }
 
@@ -506,7 +585,7 @@ button {
 .bookmark-skeleton {
   min-height: 190px;
   border: 1px solid var(--nav-border);
-  border-radius: 8px;
+  border-radius: var(--nav-radius);
   background:
     linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0)) 0 0 / 200% 100%,
     linear-gradient(#e7ebef 0 0) 16px 18px / 34px 34px no-repeat,
@@ -533,7 +612,7 @@ button {
 
 @media (max-width: 920px) {
   .bookmark-nav-content {
-    grid-template-columns: minmax(190px, 220px) minmax(0, 1fr);
+    grid-template-columns: minmax(210px, 230px) minmax(0, 1fr);
   }
 }
 
@@ -545,6 +624,7 @@ button {
   .bookmark-nav-header {
     align-items: stretch;
     flex-direction: column;
+    position: static;
   }
 
   .bookmark-nav-brand {
@@ -575,7 +655,27 @@ button {
 
   .bookmark-folder-sidebar {
     position: static;
-    max-height: 260px;
+    max-height: none;
+  }
+
+  .folder-nav-scroll {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .folder-nav-group {
+    min-width: 190px;
+    flex: 0 0 190px;
+  }
+
+  .folder-nav-row {
+    padding-left: 0;
+  }
+
+  .folder-nav-group .folder-nav-group {
+    margin-left: 10px;
   }
 
   .bookmark-grid {
@@ -594,7 +694,7 @@ button {
   }
 
   .bookmark-folder-sidebar {
-    max-height: 240px;
+    padding: 9px;
   }
 
   .bookmark-card {

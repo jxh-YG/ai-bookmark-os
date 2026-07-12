@@ -3,6 +3,8 @@ import type { CSSProperties } from 'react';
 import {
   AlertCircle,
   Bookmark,
+  ChevronsDownUp,
+  ChevronsUpDown,
   ChevronDown,
   ChevronRight,
   FolderKanban,
@@ -21,6 +23,7 @@ type LabelLike = { summary?: string; tags?: string[] };
 type LabelCache = Record<string, LabelLike>;
 type BookmarkMeta = { title: string; description: string };
 type BookmarkMetaMap = Record<string, BookmarkMeta>;
+type BookmarkEnrichment = { summary: string; tags: string[] };
 
 interface BookmarkFolderNode {
   id: string;
@@ -67,39 +70,82 @@ function getFaviconUrl(url: string) {
 }
 
 function cleanMetaText(value = '') {
-  return value.replace(/\s+/g, ' ').replace(/&nbsp;/gi, ' ').trim();
+  return value
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function inferTags(bookmark: FlatBookmark) {
+function getUrlParts(url: string) {
+  try {
+    const parsed = new URL(url);
+    return {
+      hostname: parsed.hostname.replace(/^www\./, ''),
+      pathWords: decodeURIComponent(parsed.pathname)
+        .split(/[\W_]+/)
+        .filter((part) => part.length > 2)
+        .slice(0, 5),
+    };
+  } catch {
+    return { hostname: url, pathWords: [] as string[] };
+  }
+}
+
+function inferTags(bookmark: FlatBookmark, meta?: BookmarkMeta) {
   const text = `${bookmark.title} ${bookmark.url} ${bookmark.folderPath}`.toLowerCase();
+  const metaText = `${meta?.title ?? ''} ${meta?.description ?? ''}`.toLowerCase();
   const folderParts = bookmark.folderPath.split('/').filter(Boolean);
   const rules: Array<[RegExp, string]> = [
-    [/github|gitlab|npm|api|docs|developer|dev|code|前端|后端|开发|编程|技术|文档/, '开发技术'],
-    [/figma|design|icon|ui|ux|素材|设计|图片|photo|image/, '设计资源'],
-    [/learn|course|tutorial|教程|学习|课程|大学|school/, '学习教程'],
+    [/github|gitlab|npm|api|docs|developer|dev|code|前端|后端|开发|编程|技术|文档|framework|library/, '开发技术'],
+    [/figma|design|icon|ui|ux|素材|设计|图片|photo|image|creative|dribbble|behance/, '设计资源'],
+    [/learn|course|tutorial|教程|学习|课程|大学|school|guide|manual/, '学习教程'],
     [/news|blog|medium|日报|周刊|资讯|新闻/, '新闻资讯'],
-    [/tool|app|convert|compress|效率|工具|管理|自动化/, '效率工具'],
+    [/tool|app|convert|compress|效率|工具|管理|自动化|workflow|productivity/, '效率工具'],
     [/cloud|server|aws|azure|aliyun|腾讯云|云服务/, '云服务'],
     [/data|chart|analytics|table|数据库|数据/, '数据分析'],
     [/shop|buy|store|mall|taobao|jd|amazon|购物|商品/, '购物消费'],
     [/video|music|movie|game|bilibili|youtube|娱乐|游戏|视频/, '影音娱乐'],
+    [/ai|llm|gpt|claude|gemini|prompt|模型|智能|机器人/, 'AI 工具'],
+    [/finance|bank|stock|pay|invoice|财务|支付|股票|基金/, '财务金融'],
+    [/office|work|crm|erp|oa|会议|邮箱|文档|协作|公司|项目/, '办公协作'],
   ];
-  const matched = rules.filter(([rule]) => rule.test(text)).map(([, tag]) => tag);
-  return uniqueStrings([...matched, folderParts[folderParts.length - 1], getHostname(bookmark.url)], 3);
+  const matched = rules.filter(([rule]) => rule.test(text) || rule.test(metaText)).map(([, tag]) => tag);
+  const folderTag = folderParts[folderParts.length - 1];
+  const hostTag = getHostname(bookmark.url).split('.')[0];
+  return uniqueStrings([...matched, folderTag, hostTag], 3);
 }
 
-function buildSummary(bookmark: FlatBookmark, label?: LabelLike, meta?: BookmarkMeta) {
+function buildBookmarkEnrichment(bookmark: FlatBookmark, label?: LabelLike, meta?: BookmarkMeta): BookmarkEnrichment {
   const labelSummary = cleanMetaText(label?.summary);
-  if (labelSummary) return labelSummary;
+  const labelTags = label?.tags ?? [];
+  if (labelSummary) return { summary: labelSummary, tags: uniqueStrings([...labelTags, ...inferTags(bookmark, meta)], 3) };
+
   const metaDescription = cleanMetaText(meta?.description);
-  if (metaDescription) return metaDescription.slice(0, 120);
+  if (metaDescription) {
+    return { summary: metaDescription.slice(0, 132), tags: uniqueStrings([...labelTags, ...inferTags(bookmark, meta)], 3) };
+  }
+
   const metaTitle = cleanMetaText(meta?.title);
-  if (metaTitle && metaTitle !== bookmark.title) return `${metaTitle}。`;
+  if (metaTitle && metaTitle !== bookmark.title) {
+    return {
+      summary: `页面标题显示为「${metaTitle}」，适合从当前书签快速回到该站点内容。`,
+      tags: uniqueStrings([...labelTags, ...inferTags(bookmark, meta)], 3),
+    };
+  }
+
   const folderParts = bookmark.folderPath.split('/').filter(Boolean);
   const folder = folderParts[folderParts.length - 1];
-  const hostname = getHostname(bookmark.url);
-  if (folder) return `${folder} 文件夹中来自 ${hostname} 的收藏内容。`;
-  return `${hostname} 上收藏的「${bookmark.title || '网页'}」相关内容。`;
+  const { hostname, pathWords } = getUrlParts(bookmark.url);
+  const title = bookmark.title || hostname;
+  const pathHint = pathWords.length ? `，路径关键词包含 ${pathWords.join(' / ')}` : '';
+  const context = folder ? `归档在「${folder}」文件夹` : '来自浏览器书签树';
+  return {
+    summary: `${context}，站点为 ${hostname}${pathHint}。标题指向「${title}」相关内容。`,
+    tags: uniqueStrings([...labelTags, ...inferTags(bookmark, meta)], 3),
+  };
 }
 
 function isSupportedBookmarkUrl(url: string) {
@@ -148,6 +194,25 @@ function countFolders(nodes: BookmarkFolderNode[]): number {
   return nodes.reduce((total, node) => total + 1 + countFolders(node.children), 0);
 }
 
+function collectFolderIds(nodes: BookmarkFolderNode[], ids = new Set<string>()) {
+  for (const node of nodes) {
+    ids.add(node.id);
+    collectFolderIds(node.children, ids);
+  }
+  return ids;
+}
+
+function collectDefaultExpandedIds(nodes: BookmarkFolderNode[]) {
+  const ids = new Set<string>();
+  for (const node of nodes) {
+    ids.add(node.id);
+    for (const child of node.children) {
+      if (child.children.length) ids.add(child.id);
+    }
+  }
+  return ids;
+}
+
 function FolderNavItems({
   nodes,
   activeId,
@@ -177,7 +242,10 @@ function FolderNavItems({
               <button
                 type="button"
                 className="folder-nav-toggle"
-                onClick={() => hasChildren && onToggle(node.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (hasChildren) onToggle(node.id);
+                }}
                 disabled={!hasChildren}
                 aria-label={hasChildren ? `${isExpanded ? '收起' : '展开'} ${node.title}` : undefined}
                 aria-expanded={hasChildren ? isExpanded : undefined}
@@ -253,7 +321,7 @@ export function BookmarkNavPage() {
         };
         collect(nextFolderTree);
         const kept = new Set([...current].filter((id) => valid.has(id)));
-        if (!kept.size) nextFolderTree.forEach((node) => kept.add(node.id));
+        if (!kept.size) return collectDefaultExpandedIds(nextFolderTree);
         return kept;
       });
       setStatus(items.length ? 'ready' : 'empty');
@@ -354,6 +422,14 @@ export function BookmarkNavPage() {
     });
   }, []);
 
+  const collapseAllFolders = useCallback(() => {
+    setExpandedFolderIds(new Set());
+  }, []);
+
+  const expandAllFolders = useCallback(() => {
+    setExpandedFolderIds(collectFolderIds(folderTree));
+  }, [folderTree]);
+
   const openBookmark = useCallback((bookmark: FlatBookmark) => {
     if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
       chrome.tabs.create({ url: bookmark.url });
@@ -363,6 +439,7 @@ export function BookmarkNavPage() {
   }, []);
 
   const totalFolders = useMemo(() => countFolders(folderTree), [folderTree]);
+  const allFoldersExpanded = totalFolders > 0 && expandedFolderIds.size >= totalFolders;
 
   return (
     <main className="bookmark-nav-shell">
@@ -404,6 +481,21 @@ export function BookmarkNavPage() {
 
       <div className="bookmark-nav-content">
         <aside className="bookmark-folder-sidebar" aria-label="浏览器书签树">
+          <div className="folder-sidebar-head">
+            <div>
+              <span>真实书签树</span>
+              <strong>{totalFolders} 个集合</strong>
+            </div>
+            <button
+              type="button"
+              className="folder-sidebar-toggle-all"
+              onClick={allFoldersExpanded ? collapseAllFolders : expandAllFolders}
+              aria-label={allFoldersExpanded ? '收起全部文件夹' : '展开全部文件夹'}
+              disabled={!totalFolders}
+            >
+              {allFoldersExpanded ? <ChevronsDownUp size={15} aria-hidden="true" /> : <ChevronsUpDown size={15} aria-hidden="true" />}
+            </button>
+          </div>
           <button
             type="button"
             className={`folder-nav-item folder-nav-item--all ${activeFolderId === 'all' ? 'is-active' : ''}`}
@@ -461,13 +553,13 @@ export function BookmarkNavPage() {
               {visibleBookmarks.map((bookmark) => {
                 const label = getBookmarkLabel(bookmark);
                 const meta = bookmarkMeta[bookmark.id];
-                const tags = uniqueStrings([...(label?.tags ?? []), ...inferTags(bookmark)], 3);
+                const enrichment = buildBookmarkEnrichment(bookmark, label, meta);
                 return (
                   <BookmarkCard
                     key={bookmark.id}
                     bookmark={bookmark}
-                    summary={buildSummary(bookmark, label, meta)}
-                    tags={tags}
+                    summary={enrichment.summary}
+                    tags={enrichment.tags}
                     faviconUrl={getFaviconUrl(bookmark.url)}
                     onOpen={openBookmark}
                   />

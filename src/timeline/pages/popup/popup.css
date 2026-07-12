@@ -96,19 +96,20 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   padding: var(--space-md) var(--space-lg);
   border-bottom: 1px solid var(--border-light);
   background: var(--bg-primary);
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .topbar-left {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  min-width: 0;
-  flex: 1 1 auto;
+  min-width: 112px;
+  flex: 0 1 148px;
 }
 
 .logo-icon {
@@ -143,11 +144,12 @@ body {
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: var(--space-xs);
+  gap: 3px;
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   overflow-x: auto;
   scrollbar-width: none;
+  overscroll-behavior-inline: contain;
 }
 
 .topbar-actions::-webkit-scrollbar {
@@ -158,8 +160,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 31px;
+  height: 31px;
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
@@ -199,15 +201,32 @@ body {
 
 @media (max-width: 380px) {
   .topbar {
-    padding-inline: 12px;
+    padding-inline: 10px;
+  }
+
+  .topbar-left {
+    min-width: 96px;
+    flex-basis: 112px;
+    gap: 6px;
   }
 
   .app-name {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .count-chip {
     display: none;
+  }
+
+  .topbar-actions {
+    gap: 2px;
+  }
+
+  .icon-btn,
+  .sort-dropdown-btn {
+    width: 29px;
+    height: 29px;
+    border-radius: 9px;
   }
 }
 

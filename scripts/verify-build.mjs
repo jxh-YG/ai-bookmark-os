@@ -79,7 +79,7 @@ if (!bg.includes('ai-sw-bridge.js')) {
   console.log('OK bridge import');
 }
 
-// Full AI sidepanel bundle should include pilot i18n weight
+// Full AI sidepanel bundle should include the complete i18n/runtime payload
 const aiAssets = existsSync(join(dist, 'ai/assets')) ? readdirSync(join(dist, 'ai/assets')) : [];
 console.log('ai assets', aiAssets.length);
 if (!aiAssets.length) {
@@ -242,4 +242,4 @@ if (
 }
 
 if (!ok) process.exit(1);
-console.log('VERIFY PASS — full AI pilot UI + branded hybrid');
+console.log('VERIFY PASS — AI Bookmark OS package verified');

@@ -11,6 +11,7 @@ import {
   Loader2,
   RefreshCw,
   Search,
+  Sparkles,
   X,
 } from 'lucide-react';
 import { getFlatBookmarks } from '../core/bookmarks';
@@ -46,8 +47,9 @@ function uniqueStrings(values: Array<string | undefined>, limit = 3) {
   const result: string[] = [];
   for (const value of values) {
     const text = value?.trim();
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
+    const key = text?.toLowerCase();
+    if (!text || !key || seen.has(key)) continue;
+    seen.add(key);
     result.push(text);
     if (result.length >= limit) break;
   }
@@ -140,10 +142,10 @@ function buildBookmarkEnrichment(bookmark: FlatBookmark, label?: LabelLike, meta
   const folder = folderParts[folderParts.length - 1];
   const { hostname, pathWords } = getUrlParts(bookmark.url);
   const title = bookmark.title || hostname;
-  const pathHint = pathWords.length ? `，路径关键词包含 ${pathWords.join(' / ')}` : '';
-  const context = folder ? `归档在「${folder}」文件夹` : '来自浏览器书签树';
+  const pathHint = pathWords.length ? `，URL 路径指向 ${pathWords.join(' / ')}` : '';
+  const context = folder ? `位于「${folder}」集合` : '来自浏览器书签树';
   return {
-    summary: `${context}，站点为 ${hostname}${pathHint}。标题指向「${title}」相关内容。`,
+    summary: `${context}，站点域名为 ${hostname}${pathHint}。可从「${title}」继续查看对应页面。`,
     tags: uniqueStrings([...labelTags, ...inferTags(bookmark, meta)], 3),
   };
 }
@@ -254,7 +256,15 @@ function FolderNavItems({
                   isExpanded ? <ChevronDown size={14} strokeWidth={2.2} /> : <ChevronRight size={14} strokeWidth={2.2} />
                 ) : null}
               </button>
-              <button type="button" className="folder-nav-item" onClick={() => onSelect(node.id)} title={node.path}>
+              <button
+                type="button"
+                className="folder-nav-item"
+                onClick={() => onSelect(node.id)}
+                onDoubleClick={() => {
+                  if (hasChildren) onToggle(node.id);
+                }}
+                title={node.path}
+              >
                 <FolderKanban size={16} strokeWidth={2} aria-hidden="true" />
                 <span>{node.title}</span>
                 <strong>{node.bookmarkIds.length}</strong>
@@ -440,6 +450,12 @@ export function BookmarkNavPage() {
 
   const totalFolders = useMemo(() => countFolders(folderTree), [folderTree]);
   const allFoldersExpanded = totalFolders > 0 && expandedFolderIds.size >= totalFolders;
+  const activeFolder = useMemo(
+    () => (activeFolderId === 'all' ? null : findFolder(folderTree, activeFolderId)),
+    [activeFolderId, folderTree],
+  );
+  const activeTitle = activeFolder?.title ?? '全部书签';
+  const activePath = activeFolder?.path ?? '浏览器真实书签树';
 
   return (
     <main className="bookmark-nav-shell">
@@ -517,6 +533,17 @@ export function BookmarkNavPage() {
         </aside>
 
         <div className="bookmark-nav-results">
+          <div className="bookmark-results-head">
+            <div>
+              <span>{activePath}</span>
+              <strong>{activeTitle}</strong>
+            </div>
+            <p>
+              <Sparkles size={14} strokeWidth={2} aria-hidden="true" />
+              {visibleBookmarks.length} 条可浏览书签
+            </p>
+          </div>
+
           {status === 'loading' ? (
             <section className="bookmark-grid" aria-label="正在加载书签">
               {Array.from({ length: 8 }, (_, index) => <div className="bookmark-skeleton" key={index} />)}

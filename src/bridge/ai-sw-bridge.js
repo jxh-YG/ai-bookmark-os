@@ -1,5 +1,5 @@
 // AI Bookmark OS bridge — loaded by AI Bookmark OS service worker
-// Provides pilot AI helpers without replacing AI Bookmark OS runtime.
+// Provides AI helpers without replacing AI Bookmark OS runtime.
 
 (function initAiBookmarkBridge() {
   const SOFT_DEAD_PATTERNS = [
@@ -90,10 +90,14 @@
       const ct = res.headers.get('content-type') || '';
       if (!res.ok || !ct.includes('text/html')) return null;
       const html = (await res.text()).slice(0, 32768);
-      const title = ((/<title[^>]*>([^<]*)<\/title>/i.exec(html) || [])[1] || '').trim();
-      const desc =
-        ((/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i.exec(html) || [])[1] || '').trim() ||
-        ((/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i.exec(html) || [])[1] || '').trim();
+      const readMeta = (name) =>
+        (
+          (new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]+content=["']([^"']*)["']`, 'i').exec(html) || [])[1] ||
+          (new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:name|property)=["']${name}["']`, 'i').exec(html) || [])[1] ||
+          ''
+        ).trim();
+      const title = (readMeta('og:title') || readMeta('twitter:title') || ((/<title[^>]*>([^<]*)<\/title>/i.exec(html) || [])[1] || '')).trim();
+      const desc = readMeta('description') || readMeta('og:description') || readMeta('twitter:description');
       if (!title && !desc) return null;
       return { title, description: desc };
     } catch (_) {
@@ -184,7 +188,7 @@
   }
 
 
-  // Match pilot: after extension update, sidepanel can show changelog
+  // After extension update, sidepanel can show changelog
   try {
     chrome.runtime.onInstalled.addListener((details) => {
       if (details.reason === 'update' && details.previousVersion) {

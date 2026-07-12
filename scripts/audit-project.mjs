@@ -30,10 +30,7 @@ function mustInclude(path, needles) {
 }
 
 const requiredFiles = [
-  'AI Bookmark OS.md',
   'README.md',
-  'docs/SOURCE_ANALYSIS.md',
-  'docs/FEATURE_MERGE.md',
   'docs/UI_APPLE_OS.md',
   'dist/manifest.json',
   'dist/pages/popup/popup.html',
@@ -42,6 +39,7 @@ const requiredFiles = [
   'dist/pages/checker/checker.html',
   'dist/pages/graph/graph.html',
   'dist/ai/sidepanel.html',
+  'dist/ai/bookmark-nav.html',
   'dist/ai/options.html',
   'dist/background/background.js',
   'dist/background/ai-sw-bridge.js',
@@ -60,14 +58,14 @@ mustInclude('README.md', [
   '环境要求',
   '安装与构建',
   '本地加载',
+  '书签导航',
   'AI 配置',
   '常见问题',
+  '仓库整理',
   '请加载 `dist/`',
 ]);
 
-mustInclude('docs/SOURCE_ANALYSIS.md', ['技术栈', '目录结构', '核心能力', '合并策略', '构建与运行']);
-mustInclude('docs/FEATURE_MERGE.md', ['功能对照表', '架构整合', '入口整合', '验收证据']);
-mustInclude('docs/UI_APPLE_OS.md', ['设计原则', '统一设计变量', '组件规范', '页面改造点', '响应式与可用性']);
+mustInclude('docs/UI_APPLE_OS.md', ['设计原则', '统一设计变量', '组件规范', '书签导航页', '响应式与可用性']);
 
 const manifest = JSON.parse(text('dist/manifest.json'));
 for (const permission of ['bookmarks', 'storage', 'sidePanel', 'contextMenus', 'tabs']) {
@@ -118,6 +116,14 @@ if (['aiRetryCount', 'aiRequestTimeoutSeconds', 'AI 连接失败'].every((needle
   pass('AI reconnect assets');
 }
 
+const bookmarkNavSource = text('src/bookmark-nav/BookmarkNavPage.tsx');
+for (const needle of ['真实书签树', 'buildFolderTree', 'buildBookmarkEnrichment', 'fetchMeta']) {
+  if (!bookmarkNavSource.includes(needle)) fail(`bookmark navigation source missing ${needle}`);
+}
+if (['真实书签树', 'buildFolderTree', 'buildBookmarkEnrichment', 'fetchMeta'].every((needle) => bookmarkNavSource.includes(needle))) {
+  pass('bookmark navigation real tree assets');
+}
+
 const settingsText = text('dist/pages/settings/settings.html') + '\n' + text('dist/pages/settings/settings.js');
 for (const needle of ['失败重连次数', '请求超时', 'aiRetryCount', 'aiRequestTimeoutSeconds']) {
   if (!settingsText.includes(needle)) fail(`unified settings missing ${needle}`);
@@ -133,11 +139,19 @@ if (!popupJs.includes('openAiClassifyPanel') || !popupJs.includes('sidePanel.ope
   pass('popup AI side panel handoff');
 }
 
-const docsText = ['README.md', 'docs/SOURCE_ANALYSIS.md', 'docs/FEATURE_MERGE.md', 'docs/UI_APPLE_OS.md', 'options.html', '_locales/zh_CN/messages.json']
+const docsText = ['README.md', 'docs/UI_APPLE_OS.md', 'options.html', '_locales/zh_CN/messages.json']
   .map(text)
   .join('\n');
-for (const bad of ['�', '璁', '缁', '鍒', 'BookmarkPilot', 'github.com/BOOHHP']) {
+for (const bad of ['�', '璁', '缁', '鍒', 'BookmarkPilot', 'bookmark-pilot', 'github.com/BOOHHP']) {
   if (docsText.includes(bad)) fail(`mojibake or old brand marker found: ${bad}`);
+}
+
+const gitignore = text('.gitignore');
+for (const ignored of ['vendor/markline', 'dist', 'dist-ai', 'node_modules', '.sources']) {
+  if (!gitignore.includes(ignored)) fail(`.gitignore missing ${ignored}`);
+}
+if (['vendor/markline', 'dist', 'dist-ai', 'node_modules', '.sources'].every((ignored) => gitignore.includes(ignored))) {
+  pass('external and generated folders ignored');
 }
 
 if (!ok) process.exit(1);

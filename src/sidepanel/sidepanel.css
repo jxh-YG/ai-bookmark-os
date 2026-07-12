@@ -48,7 +48,7 @@
   --app-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --app-font-size: 14px;
 
-  /* legacy aliases */
+  /* shared aliases used by older components in this module */
   --bg: var(--bg-primary);
   --panel: var(--bg-primary);
   --input-bg: var(--bg-secondary);

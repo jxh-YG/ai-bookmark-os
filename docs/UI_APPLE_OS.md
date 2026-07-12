@@ -17,8 +17,9 @@ AI Bookmark OS 的界面目标是统一成接近 Apple Human Interface Guideline
 主要样式来源：
 
 - `src/styles/apple-design-system.css`：AI 页面设计变量。
-- `src/sidepanel/pilot.css`：AI 分类侧边栏 Apple OS 风格组件。
-- `src/timeline/pages/settings/settings.css`：统一设置页 Apple OS 风格组件；`src/options/pilot-options.css` 仅保留为历史兼容源码，不再作为用户入口打包。
+- `src/sidepanel/sidepanel.css`：AI 分类侧边栏 Apple OS 风格组件。
+- `src/bookmark-nav/bookmark-nav.css`：真实书签树导航页、书签卡片、摘要标签和响应式布局。
+- `src/timeline/pages/settings/settings.css`：统一设置页 Apple OS 风格组件。
 - `src/timeline/shared/apple-design-system.css` 与 `apple-page-polish.css`：时间线页面统一样式基础，打包后进入 `dist/shared`。
 
 核心变量包括：
@@ -62,6 +63,13 @@ AI Bookmark OS 的界面目标是统一成接近 Apple Human Interface Guideline
 - 页面只专注 AI 分类、分类树编辑、应用与撤销，不再重复放置健康检查面板。
 - 进度区展示三阶段状态，并在 AI 连接失败时展示重连提示。
 
+### 书签导航页
+
+- 左侧导航读取 Chrome 真实书签树，不使用静态集合。
+- 文件夹节点支持展开、收起、全部展开和全部收起，窄屏下保持纵向层级滚动。
+- 书签卡片优先展示 AI 摘要、页面元描述和标签；缺少元信息时使用文件夹、域名和 URL 路径生成差异化摘要。
+- 顶部当前集合栏显示所选文件夹路径和当前结果数量，避免用户迷失在大书签树中。
+
 ### AI 设置页
 
 - 统一模型供应商、自定义提供商、API Key、Base URL、模型名、分类提示词、分类规则开关、连接稳定性设置。
@@ -72,6 +80,7 @@ AI Bookmark OS 的界面目标是统一成接近 Apple Human Interface Guideline
 
 - 设置页在窄屏下侧边栏变为横向导航。
 - AI 侧边栏使用固定顶部、搜索区、操作区和可滚动树区域，避免 Popup 尺寸限制导致压缩变形。
+- Popup 顶栏品牌在窄宽度下单行省略，操作按钮横向滚动，避免标题被挤成多行。
 - 所有输入控件保留清晰 focus-visible，按钮点击区域不小于常见桌面交互尺寸。
 - 支持系统浅色/深色模式，并允许用户在设置页指定模式。
 

@@ -1,12 +1,13 @@
 # AI Bookmark OS
 
-AI Bookmark OS 是一个 Manifest V3 Chrome 扩展，融合时间线书签管理、规则/AI 标签、知识图谱、RSS、链接健康检查，以及完整的 AI 金字塔书签分类能力。项目以现有源码为基础整合，不从零重写：时间线管理能力来自 `src/timeline`，AI 分类工作台来自 `src` 下的 React + TypeScript 模块，最终统一打包到 `dist/`。
+AI Bookmark OS 是一个 Manifest V3 Chrome 扩展，提供时间线书签管理、规则/AI 标签、知识图谱、RSS、链接健康检查、真实书签树导航，以及完整的 AI 金字塔书签分类能力。项目源码按运行时模块和 AI 工作台模块组织，最终统一打包到 `dist/`。
 
 ## 核心功能
 
 - 书签时间线：弹窗与完整窗口浏览、热度排序、置顶、最近删除、右键菜单与快捷收藏。
 - 搜索与筛选：模糊搜索、命令面板、Omnibox `bk` 搜索、标签和时间线视图。
 - 书签管理：新增、编辑、删除、批量删除、导入导出、备份恢复、归档/最近删除工作流。
+- 书签导航：读取浏览器真实书签树，按文件夹层级展开/收起，并展示站点摘要、标签和 favicon。
 - 智能标签：规则标签引擎、AI 标签增强、AI 调用日志与缓存。
 - AI 金字塔分类：Map-Reduce 三阶段分类、试分类、成本预估、分类树编辑、应用到真实书签、一键撤销、自动备份、新书签增量归类。
 - 分类规则控制：可配置是否参照原有书签夹、是否沿用上一次 AI 分类树、是否使用分类缓存、是否抓取页面描述、是否启用内置分类规则增强，以及可选“保持原样”的书签夹。
@@ -29,13 +30,14 @@ AI Bookmark OS 是一个 Manifest V3 Chrome 扩展，融合时间线书签管理
 
 ```text
 .
-├─ src/                    # AI 分类工作台源码
+├─ src/                    # 项目源码
 │  ├─ core/                # LLM、分类、书签、缓存、设置、健康检查、导入导出
 │  ├─ sidepanel/           # AI 分类侧边栏 React 页面
+│  ├─ bookmark-nav/        # 真实书签树导航 React 页面
 │  ├─ options/             # AI 统一设置页 React 页面
 │  ├─ bridge/              # 注入到最终 service worker 的 AI 桥接脚本
+│  ├─ timeline/            # 扩展运行时、弹窗、完整工作台、设置、图谱、RSS、检查页
 │  └─ styles/              # Apple OS 统一设计变量
-├─ src/timeline/        # 时间线书签管理源码基底
 ├─ scripts/                # 打包、入口注入、验收脚本
 ├─ docs/                   # 源码分析、功能合并、UI 说明
 ├─ dist-ai/                # Vite 构建出的 AI 页面中间产物
@@ -104,11 +106,15 @@ npm run build           # 完整生产构建
 npm run preview:check   # 检查 dist 关键文件、入口、品牌和 AI 入口
 ```
 
-## 交付文档
+## 项目文档
 
-- [源码分析](docs/SOURCE_ANALYSIS.md)
-- [功能合并说明](docs/FEATURE_MERGE.md)
 - [Apple OS UI 说明](docs/UI_APPLE_OS.md)
+
+## 仓库整理
+
+- `vendor/`、`.sources/`、`dist/`、`dist-ai/`、`node_modules/` 和 `*.tsbuildinfo` 不纳入 git。
+- 当前构建依赖的运行时代码已保留在 `src/timeline/`，不再依赖根目录外的开源项目副本。
+- `dist/` 是构建产物，用于加载扩展；源码对照以 git 中的项目文件为准。
 
 ## 常见问题
 

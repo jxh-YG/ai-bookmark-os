@@ -108,8 +108,8 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  min-width: 112px;
-  flex: 0 1 148px;
+  min-width: 0;
+  flex: 0 0 176px;
 }
 
 .logo-icon {
@@ -122,6 +122,7 @@ body {
   font-weight: 500;
   color: var(--text-primary);
   min-width: 0;
+  max-width: 126px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -139,6 +140,7 @@ body {
   color: var(--accent);
   background: var(--accent-light);
   border-radius: var(--radius-full);
+  flex: 0 0 auto;
 }
 
 .topbar-actions {
@@ -205,13 +207,13 @@ body {
   }
 
   .topbar-left {
-    min-width: 96px;
-    flex-basis: 112px;
+    flex-basis: 124px;
     gap: 6px;
   }
 
   .app-name {
     font-size: 13px;
+    max-width: 92px;
   }
 
   .count-chip {

@@ -49,7 +49,7 @@ for (const part of ['background', 'content', 'pages', 'shared', 'rules', 'icons'
   if (existsSync(src)) copyDir(src, path.join(dist, part));
 }
 
-// 2) Full pilot AI UI under /ai
+// 2) Full AI UI under /ai
 
 // Prefer branded AI Bookmark OS icons over vendor defaults
 const projectIcons = path.join(root, 'icons');
@@ -261,5 +261,5 @@ writeFileSync(path.join(dist, 'index.html'), launchHtml, 'utf8');
 
 console.log('PACKAGED -> dist/');
 console.log('- Timeline modules at root');
-console.log('- Full pilot AI UI at dist/ai');
+console.log('- Full AI UI at dist/ai');
 console.log('- Brand: AI Bookmark OS');

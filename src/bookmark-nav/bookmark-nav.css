@@ -55,7 +55,7 @@ button {
 .bookmark-nav-shell {
   width: min(1240px, 100%);
   margin: 0 auto;
-  padding: 18px clamp(12px, 3vw, 28px) 36px;
+  padding: 16px clamp(12px, 3vw, 28px) 36px;
 }
 
 .bookmark-nav-header {
@@ -65,11 +65,11 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
+  gap: 12px;
   margin-bottom: 18px;
   padding: 12px;
   border: 1px solid var(--nav-border);
-  border-radius: 22px;
+  border-radius: 20px;
   background: rgba(255, 255, 255, 0.58);
   box-shadow: 0 18px 46px rgba(35, 66, 112, 0.12);
   backdrop-filter: blur(24px) saturate(170%);
@@ -82,6 +82,10 @@ button {
   gap: 13px;
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.bookmark-nav-brand > div:last-child {
+  min-width: 0;
 }
 
 .bookmark-nav-mark {
@@ -109,7 +113,9 @@ button {
   font-size: 28px;
   line-height: 1.18;
   letter-spacing: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bookmark-nav-refresh,
@@ -221,7 +227,7 @@ button {
 
 .bookmark-nav-content {
   display: grid;
-  grid-template-columns: minmax(240px, 286px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 286px) minmax(0, 1fr);
   align-items: start;
   gap: 18px;
 }
@@ -308,7 +314,7 @@ button {
   grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 2px;
-  padding-left: min(calc(var(--folder-depth) * 12px), 72px);
+  padding-left: min(calc(var(--folder-depth) * 10px), 64px);
   border-radius: 13px;
 }
 
@@ -325,6 +331,10 @@ button {
   border-radius: 10px;
   color: var(--nav-faint);
   background: transparent;
+}
+
+.folder-nav-toggle:not(:disabled) {
+  color: var(--nav-muted);
 }
 
 .folder-nav-toggle:hover:not(:disabled) {
@@ -402,6 +412,65 @@ button {
 
 .bookmark-nav-results {
   min-width: 0;
+}
+
+.bookmark-results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--nav-border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: 0 12px 34px rgba(35, 66, 112, 0.08), 0 1px 0 rgba(255, 255, 255, 0.78) inset;
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+}
+
+.bookmark-results-head div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bookmark-results-head span,
+.bookmark-results-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-results-head span {
+  color: var(--nav-faint);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.bookmark-results-head strong {
+  color: var(--nav-text);
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.bookmark-results-head p {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: var(--nav-accent);
+  background: var(--nav-accent-soft);
+  font-size: 12px;
+  font-weight: 720;
+  white-space: nowrap;
 }
 
 .bookmark-grid {
@@ -610,7 +679,12 @@ button {
 
 @media (max-width: 920px) {
   .bookmark-nav-content {
-    grid-template-columns: minmax(210px, 230px) minmax(0, 1fr);
+    grid-template-columns: minmax(190px, 220px) minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .bookmark-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
   }
 }
 
@@ -653,37 +727,39 @@ button {
 
   .bookmark-folder-sidebar {
     position: static;
-    max-height: none;
+    max-height: min(44vh, 360px);
   }
 
   .folder-nav-scroll {
-    display: flex;
-    gap: 8px;
-    overflow-x: auto;
-    padding-bottom: 4px;
-  }
-
-  .folder-nav-group {
-    min-width: 190px;
-    flex: 0 0 190px;
+    overflow: auto;
+    padding-right: 2px;
   }
 
   .folder-nav-row {
-    padding-left: 0;
-  }
-
-  .folder-nav-group .folder-nav-group {
-    margin-left: 10px;
+    padding-left: min(calc(var(--folder-depth) * 10px), 44px);
   }
 
   .bookmark-grid {
     grid-template-columns: 1fr;
+  }
+
+  .bookmark-results-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .bookmark-results-head p {
+    width: fit-content;
   }
 }
 
 @media (max-width: 520px) {
   .bookmark-nav-header h1 {
     font-size: 22px;
+  }
+
+  .bookmark-nav-eyebrow {
+    font-size: 11px;
   }
 
   .bookmark-nav-mark {

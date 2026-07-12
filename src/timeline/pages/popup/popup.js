@@ -2361,7 +2361,7 @@ try {
 } catch (e) {}
 
 
-// ===== AI Bookmark OS: open pilot classify side panel =====
+// ===== AI Bookmark OS: open AI classify side panel =====
 async function openAiClassifyPanel() {
   // Open AI classify in the browser side panel of the current window,
   // then close this popup so the two UIs do not overlap.

@@ -1,0 +1,850 @@
+{
+  "appName": {
+    "message": "AI Bookmark OS",
+    "description": "Extension name"
+  },
+  "appDescription": {
+    "message": "View and manage your bookmarks on a visual timeline. Search, sync, and organize — all in one click.",
+    "description": "Extension description"
+  },
+  "syncBookmarks": {
+    "message": "Sync bookmarks",
+    "description": "Sync button tooltip"
+  },
+  "clearRecords": {
+    "message": "Clear records",
+    "description": "Clear button tooltip"
+  },
+  "searchPlaceholder": {
+    "message": "Search bookmarks...",
+    "description": "Search input placeholder"
+  },
+  "emptyTitle": {
+    "message": "No bookmark records yet",
+    "description": "Empty state title"
+  },
+  "emptyHint": {
+    "message": "Click the sync button to import bookmarks",
+    "description": "Empty state hint"
+  },
+  "searchEmptyTitle": {
+    "message": "No matching bookmarks found",
+    "description": "Search empty title"
+  },
+  "searchEmptyHint": {
+    "message": "Try different keywords",
+    "description": "Search empty hint"
+  },
+  "justNow": {
+    "message": "Just now",
+    "description": "Relative time"
+  },
+  "minutesAgo": {
+    "message": "$COUNT$ min ago",
+    "description": "Relative time",
+    "placeholders": {
+      "count": { "content": "$1", "example": "5" }
+    }
+  },
+  "hoursAgo": {
+    "message": "$COUNT$ hours ago",
+    "description": "Relative time",
+    "placeholders": {
+      "count": { "content": "$1", "example": "3" }
+    }
+  },
+  "daysAgo": {
+    "message": "$COUNT$ days ago",
+    "description": "Relative time",
+    "placeholders": {
+      "count": { "content": "$1", "example": "2" }
+    }
+  },
+  "today": {
+    "message": "Today",
+    "description": "Date group label"
+  },
+  "yesterday": {
+    "message": "Yesterday",
+    "description": "Date group label"
+  },
+  "bookmarkCount": {
+    "message": "$COUNT$ bookmarks",
+    "description": "Bookmark count in date group",
+    "placeholders": {
+      "count": { "content": "$1", "example": "12" }
+    }
+  },
+  "untitled": {
+    "message": "Untitled",
+    "description": "Default title for untitled bookmarks"
+  },
+  "openLink": {
+    "message": "Open link",
+    "description": "Open button tooltip"
+  },
+  "delete": {
+    "message": "Delete",
+    "description": "Delete button tooltip"
+  },
+  "loadFailed": {
+    "message": "Failed to load",
+    "description": "Toast message"
+  },
+  "loadFailedRetry": {
+    "message": "Failed to load, please retry",
+    "description": "Toast message"
+  },
+  "syncSuccessNew": {
+    "message": "Synced, $COUNT$ new bookmarks",
+    "description": "Toast message",
+    "placeholders": {
+      "count": { "content": "$1", "example": "5" }
+    }
+  },
+  "syncSuccessTotal": {
+    "message": "Synced, $COUNT$ bookmarks total",
+    "description": "Toast message",
+    "placeholders": {
+      "count": { "content": "$1", "example": "100" }
+    }
+  },
+  "syncFailed": {
+    "message": "Sync failed",
+    "description": "Toast message"
+  },
+  "syncFailedRetry": {
+    "message": "Sync failed, please retry",
+    "description": "Toast message"
+  },
+  "deleted": {
+    "message": "Deleted",
+    "description": "Toast message"
+  },
+  "deleteFailed": {
+    "message": "Delete failed",
+    "description": "Toast message"
+  },
+  "nothingToClear": {
+    "message": "No records to clear",
+    "description": "Toast message"
+  },
+  "confirmClear": {
+    "message": "Clear all bookmark records?\n\n$COUNT$ records will be removed. This does not affect your original Chrome bookmarks.",
+    "description": "Confirm dialog",
+    "placeholders": {
+      "count": { "content": "$1", "example": "50" }
+    }
+  },
+  "allCleared": {
+    "message": "All records cleared",
+    "description": "Toast message"
+  },
+  "clearFailed": {
+    "message": "Clear failed",
+    "description": "Toast message"
+  },
+  "newBookmarkDetected": {
+    "message": "New bookmark detected",
+    "description": "Toast message"
+  },
+  "settings": {
+    "message": "Settings",
+    "description": "Settings button tooltip and page title"
+  },
+  "back": {
+    "message": "Back",
+    "description": "Back button tooltip"
+  },
+  "appearance": {
+    "message": "Appearance",
+    "description": "Settings section title"
+  },
+  "theme": {
+    "message": "Theme",
+    "description": "Theme setting label"
+  },
+  "themeDesc": {
+    "message": "Choose light or dark mode",
+    "description": "Theme setting description"
+  },
+  "systemDefault": {
+    "message": "System Default",
+    "description": "System default option"
+  },
+  "light": {
+    "message": "Light",
+    "description": "Light theme option"
+  },
+  "dark": {
+    "message": "Dark",
+    "description": "Dark theme option"
+  },
+  "language": {
+    "message": "Language",
+    "description": "Language section title"
+  },
+  "displayLanguage": {
+    "message": "Display Language",
+    "description": "Language setting label"
+  },
+  "languageDesc": {
+    "message": "Choose your preferred language",
+    "description": "Language setting description"
+  },
+  "about": {
+    "message": "About",
+    "description": "About section title"
+  },
+  "version": {
+    "message": "Version",
+    "description": "Version label"
+  },
+  "settingsSaved": {
+    "message": "Settings saved",
+    "description": "Toast message"
+  },
+  "timelineMode": {
+    "message": "Timeline",
+    "description": "Toolbar mode label"
+  },
+  "sortNewestFirst": {
+    "message": "Newest first",
+    "description": "Sort button tooltip"
+  },
+  "sortOldestFirst": {
+    "message": "Oldest first",
+    "description": "Sort button tooltip"
+  },
+  "sortBy": {
+    "message": "Sort by",
+    "description": "Sort dropdown tooltip"
+  },
+  "sortNewest": {
+    "message": "Newest",
+    "description": "Sort option: newest first"
+  },
+  "sortOldest": {
+    "message": "Oldest",
+    "description": "Sort option: oldest first"
+  },
+  "sortHottest": {
+    "message": "Hottest",
+    "description": "Sort option: most clicks first"
+  },
+  "sortColdest": {
+    "message": "Coldest",
+    "description": "Sort option: least clicks first"
+  },
+  "clickCount": {
+    "message": "$COUNT$ clicks",
+    "description": "Click count label",
+    "placeholders": {
+      "count": { "content": "$1", "example": "42" }
+    }
+  },
+  "heatLevel1": {
+    "message": "Warm",
+    "description": "Heat level label"
+  },
+  "heatLevel2": {
+    "message": "Hot",
+    "description": "Heat level label"
+  },
+  "heatLevel3": {
+    "message": "Burning",
+    "description": "Heat level label"
+  },
+  "heatLevel4": {
+    "message": "Blazing",
+    "description": "Heat level label"
+  },
+  "heatLevel5": {
+    "message": "Inferno",
+    "description": "Heat level label"
+  },
+  "cmdOpenPalette": {
+    "message": "Open command palette",
+    "description": "Command palette shortcut description"
+  },
+  "cmdOpenPopup": {
+    "message": "Open bookmark popup",
+    "description": "Popup shortcut description"
+  },
+  "moreOptions": {
+    "message": "More options",
+    "description": "Three-dot menu button tooltip"
+  },
+  "openPanel": {
+    "message": "Open Standalone Window",
+    "description": "Open panel menu item"
+  },
+  "toggleSidebar": {
+    "message": "Toggle Sidebar",
+    "description": "Sidebar toggle button"
+  },
+  "folderTree": {
+    "message": "Folders",
+    "description": "Folder tree section title"
+  },
+  "tagFilter": {
+    "message": "Tag Filter",
+    "description": "Tag filter section title"
+  },
+  "viewTimeline": {
+    "message": "Timeline",
+    "description": "Timeline view mode"
+  },
+  "viewGrid": {
+    "message": "Grid",
+    "description": "Grid view mode"
+  },
+  "viewList": {
+    "message": "List",
+    "description": "List view mode"
+  },
+  "statusReady": {
+    "message": "Ready",
+    "description": "Status bar ready text"
+  },
+  "movedToFolder": {
+    "message": "Moved to folder",
+    "description": "Toast: bookmark moved to folder"
+  },
+  "dragHint": {
+    "message": "Drag bookmarks to sidebar folders",
+    "description": "Drag hint in status bar"
+  },
+  "allFolders": {
+    "message": "All Bookmarks",
+    "description": "All bookmarks folder node"
+  },
+  "collapseAll": {
+    "message": "Collapse All",
+    "description": "Collapse all folder tree nodes"
+  },
+  "expandAll": {
+    "message": "Expand All",
+    "description": "Expand all folder tree nodes"
+  },
+  "folderCount": {
+    "message": "$1 items",
+    "description": "Folder item count"
+  },
+  "currentFolder": {
+    "message": "Folder: $1",
+    "description": "Current folder display in status bar"
+  },
+  "recentlyDeleted": {
+    "message": "Recently Deleted",
+    "description": "Recently deleted view title"
+  },
+  "retentionDays": {
+    "message": "Retention Days",
+    "description": "Retention days setting"
+  },
+  "retentionDaysDesc": {
+    "message": "How long to keep recently deleted bookmarks",
+    "description": "Retention days description"
+  },
+  "days": {
+    "message": "days",
+    "description": "Days unit"
+  },
+  "clearAllDeleted": {
+    "message": "Clear all",
+    "description": "Clear all recently deleted button"
+  },
+  "deletedEmptyTitle": {
+    "message": "No recently deleted bookmarks",
+    "description": "Empty state title"
+  },
+  "deletedEmptyHint": {
+    "message": "Deleted bookmarks will appear here",
+    "description": "Empty state hint"
+  },
+  "back": {
+    "message": "Back",
+    "description": "Back button"
+  },
+  "cmdQuickBookmark": {
+    "message": "Quick Bookmark",
+    "description": "Quick bookmark shortcut description"
+  },
+  "shortcutSection": {
+    "message": "Shortcuts",
+    "description": "Shortcuts settings section title"
+  },
+  "notificationSection": {
+    "message": "Notifications",
+    "description": "Notifications settings section title"
+  },
+  "notificationSectionDesc": {
+    "message": "Configure desktop notifications after bookmarking.",
+    "description": "Notifications settings section description"
+  },
+  "notificationEnabled": {
+    "message": "Desktop Notifications",
+    "description": "Enable desktop notifications toggle label"
+  },
+  "notificationEnabledDesc": {
+    "message": "Show a notification when a page is bookmarked successfully.",
+    "description": "Enable desktop notifications toggle description"
+  },
+  "cmdQuickBookmarkDesc": {
+    "message": "Bookmark the current page with one keystroke (auto-suggests folder)",
+    "description": "Quick bookmark shortcut description"
+  },
+  "cmdOpenPaletteDesc": {
+    "message": "Open the search palette to find any bookmark",
+    "description": "Command palette shortcut description"
+  },
+  "cmdOpenPopupDesc": {
+    "message": "Open the bookmark popup window",
+    "description": "Popup shortcut description"
+  },
+  "omniboxKeyword": {
+    "message": "Omnibox Search",
+    "description": "Omnibox search label"
+  },
+  "omniboxKeywordDesc": {
+    "message": "Type in address bar to search bookmarks directly",
+    "description": "Omnibox search description"
+  },
+  "shortcutConflictTitle": {
+    "message": "Shortcut Conflict Detected",
+    "description": "Conflict warning title"
+  },
+  "shortcutConflictInternal": {
+    "message": "duplicate binding",
+    "description": "Internal conflict hint"
+  },
+  "shortcutCustomize": {
+    "message": "Customize Shortcuts",
+    "description": "Customize shortcuts label"
+  },
+  "shortcutCustomizeDesc": {
+    "message": "Change shortcuts in Chrome's keyboard settings",
+    "description": "Customize shortcuts description"
+  },
+  "shortcutOpenSettings": {
+    "message": "Open Settings",
+    "description": "Open shortcut settings button"
+  },
+  "shortcutNotSet": {
+    "message": "Not set",
+    "description": "Shortcut not set"
+  },
+  "shortcutHint": {
+    "message": "Note: To modify shortcuts in Chromium-based browsers, go to [Extensions] -> [Manage Shortcuts]",
+    "description": "Shortcut settings hint text"
+  },
+  "shortcutHint2": {
+    "message": "Open Settings",
+    "description": "Shortcut settings link - opens chrome://extensions/shortcuts"
+  },
+  "statsSection": {
+    "message": "Statistics",
+    "description": "Statistics settings section title"
+  },
+  "statsDateRange": {
+    "message": "Date Range",
+    "description": "Statistics date range label"
+  },
+  "statsDateRangeDesc": {
+    "message": "Filter statistics by bookmark creation date",
+    "description": "Statistics date range description"
+  },
+  "statsTotalBookmarks": {
+    "message": "Bookmarks",
+    "description": "Total bookmarks label"
+  },
+  "statsTotalTags": {
+    "message": "Tags",
+    "description": "Total tags label"
+  },
+  "statsUniqueDomains": {
+    "message": "Domains",
+    "description": "Unique domains label"
+  },
+  "statsFolders": {
+    "message": "Folders",
+    "description": "Folders label"
+  },
+  "statsHealthScore": {
+    "message": "Health Score",
+    "description": "Health score title"
+  },
+  "statsHealthScoreDesc": {
+    "message": "Overall quality of your bookmark collection",
+    "description": "Health score description"
+  },
+  "statsHealthScoreEmpty": {
+    "message": "Add some bookmarks to see your health score",
+    "description": "Health score empty state"
+  },
+  "statsFavoriteScore": {
+    "message": "Favorite this score",
+    "description": "Favorite health score button"
+  },
+  "statsFavoriteExists": {
+    "message": "Already favorited today",
+    "description": "Favorite already exists message"
+  },
+  "statsNoScoreToFavorite": {
+    "message": "No score to favorite",
+    "description": "No score to favorite message"
+  },
+  "statsFavoriteScores": {
+    "message": "Favorite Health Scores",
+    "description": "Favorite health scores section title"
+  },
+  "statsAllTime": {
+    "message": "All time",
+    "description": "All time label"
+  },
+  "statsTrend": {
+    "message": "Collection Trend",
+    "description": "Collection trend chart title"
+  },
+  "statsDaily": {
+    "message": "Daily",
+    "description": "Daily trend tab"
+  },
+  "statsWeekly": {
+    "message": "Weekly",
+    "description": "Weekly trend tab"
+  },
+  "statsMonthly": {
+    "message": "Monthly",
+    "description": "Monthly trend tab"
+  },
+  "statsTopTags": {
+    "message": "Top Tags",
+    "description": "Top tags chart title"
+  },
+  "statsTopDomains": {
+    "message": "Top Domains",
+    "description": "Top domains chart title"
+  },
+  "statsHourly": {
+    "message": "Active Hours",
+    "description": "Active hours chart title"
+  },
+  "statsFolderDist": {
+    "message": "Folder Distribution",
+    "description": "Folder distribution chart title"
+  },
+  "statsAccuracyTrend": {
+    "message": "Auto-tag Accuracy Trend",
+    "description": "Auto-tag accuracy trend chart title"
+  },
+  "statsAccuracyTrendEmpty": {
+    "message": "No review data yet. Accuracy trend will appear after you confirm some tag suggestions.",
+    "description": "Accuracy trend empty state"
+  },
+  "statsExport": {
+    "message": "Export Report",
+    "description": "Export report button"
+  },
+  "statsExportDesc": {
+    "message": "Download statistics as CSV or printable PDF",
+    "description": "Export report description"
+  },
+  "statsNoData": {
+    "message": "No data to export",
+    "description": "No data to export message"
+  },
+  "statsPopupBlocked": {
+    "message": "Popup blocked. Please allow popups to print the report.",
+    "description": "Popup blocked message"
+  },
+  "reset": {
+    "message": "Reset",
+    "description": "Reset button"
+  },
+  "reasonAIAssisted": {
+    "message": "AI Assisted",
+    "description": "Active learning reason: AI assisted"
+  },
+  "aiAssistedTag": {
+    "message": "AI Assisted",
+    "description": "AI assisted source badge"
+  },
+  "aiSection": {
+    "message": "AI Classification",
+    "description": "AI settings section title"
+  },
+  "aiSectionDesc": {
+    "message": "Use cloud AI to assist tagging when the rule engine is uncertain. Only title and URL are sent, not page content.",
+    "description": "AI settings section description"
+  },
+  "aiEnabled": {
+    "message": "Enable AI Classification",
+    "description": "Enable AI toggle"
+  },
+  "aiEnabledDesc": {
+    "message": "Trigger cloud AI for low-confidence bookmarks",
+    "description": "Enable AI toggle description"
+  },
+  "aiProvider": {
+    "message": "Provider",
+    "description": "AI provider select"
+  },
+  "aiProviderDesc": {
+    "message": "Choose your AI service provider",
+    "description": "AI provider description"
+  },
+  "aiProviderZhipu": {
+    "message": "Zhipu AI (GLM-4-Flash, free)",
+    "description": "Zhipu AI option"
+  },
+  "aiProviderDeepSeek": {
+    "message": "DeepSeek",
+    "description": "DeepSeek option"
+  },
+  "aiProviderGoogle": {
+    "message": "Google Gemini",
+    "description": "Google Gemini option"
+  },
+  "aiProviderOpenAI": {
+    "message": "OpenAI",
+    "description": "OpenAI option"
+  },
+  "aiProviderTongyi": {
+    "message": "Alibaba Tongyi",
+    "description": "Alibaba Tongyi option"
+  },
+  "aiProviderCustom": {
+    "message": "Custom",
+    "description": "Custom provider option"
+  },
+  "aiCustomFormat": {
+    "message": "API Format",
+    "description": "Custom provider API format label"
+  },
+  "aiCustomFormatDesc": {
+    "message": "Choose the API protocol format",
+    "description": "Custom provider API format description"
+  },
+  "aiFormatOpenAI": {
+    "message": "OpenAI Chat Completions",
+    "description": "OpenAI format option"
+  },
+  "aiFormatAnthropic": {
+    "message": "Anthropic Messages",
+    "description": "Anthropic format option"
+  },
+  "aiCustomEndpoint": {
+    "message": "API Base URL",
+    "description": "Custom provider endpoint label"
+  },
+  "aiCustomEndpointDesc": {
+    "message": "The full API endpoint URL",
+    "description": "Custom provider endpoint description"
+  },
+  "aiCustomEndpointRequired": {
+    "message": "Please enter API Base URL",
+    "description": "Custom provider endpoint required error"
+  },
+  "aiFullUrl": {
+    "message": "Use full URL",
+    "description": "Use the URL exactly as entered without appending a path"
+  },
+  "aiFullUrlDesc": {
+    "message": "Use the URL exactly as entered without appending a path",
+    "description": "Use full URL description"
+  },
+  "aiEndpointHintOpenAI": {
+    "message": "Please enter an endpoint compatible with the OpenAI API. Do not end with a slash. /chat/completions will be appended to the URL.",
+    "description": "Endpoint hint for OpenAI format"
+  },
+  "aiEndpointHintAnthropic": {
+    "message": "Please enter an endpoint compatible with the Claude API. Do not end with a slash. /v1/messages will be appended to the URL.",
+    "description": "Endpoint hint for Anthropic format"
+  },
+  "aiEndpointHintFullUrl": {
+    "message": "Please enter the full request URL. The request will use this URL directly without appending any path.",
+    "description": "Endpoint hint when using full URL"
+  },
+  "aiApiKey": {
+    "message": "API Key",
+    "description": "API Key input label"
+  },
+  "aiApiKeyDesc": {
+    "message": "Your API key is stored locally and never synced",
+    "description": "API Key description"
+  },
+  "aiApiKeyRequired": {
+    "message": "Please enter API Key",
+    "description": "API Key required error"
+  },
+  "aiModel": {
+    "message": "Model",
+    "description": "Custom model input label"
+  },
+  "aiModelDesc": {
+    "message": "Leave empty to use the recommended model",
+    "description": "Custom model description"
+  },
+  "aiModelRequired": {
+    "message": "Please enter Model",
+    "description": "Model required error"
+  },
+  "aiTimeout": {
+    "message": "Timeout (seconds)",
+    "description": "AI request timeout"
+  },
+  "aiTimeoutDesc": {
+    "message": "Maximum wait time per AI request",
+    "description": "AI timeout description"
+  },
+  "aiStatus": {
+    "message": "Status",
+    "description": "AI status label"
+  },
+  "aiStatusNotConfigured": {
+    "message": "Not configured",
+    "description": "AI not configured status"
+  },
+  "aiStatusDisabled": {
+    "message": "AI disabled",
+    "description": "AI disabled status"
+  },
+  "aiStatusNoKey": {
+    "message": "API Key not set",
+    "description": "AI no API key status"
+  },
+  "aiStatusFormat": {
+    "message": "Triggered: $1 · Success: $2 · Fail: $3 · Avg: $4ms",
+    "description": "AI status stats format"
+  },
+  "aiTest": {
+    "message": "Test Connection",
+    "description": "Test AI connection button"
+  },
+  "aiTesting": {
+    "message": "Testing...",
+    "description": "AI testing button"
+  },
+  "aiTestSuccess": {
+    "message": "Connected. Sample tag: $1",
+    "description": "AI test success message"
+  },
+  "aiTestFailed": {
+    "message": "Connection failed: $1",
+    "description": "AI test failed message"
+  },
+  "aiClearCache": {
+    "message": "Clear Cache",
+    "description": "Clear AI cache button"
+  },
+  "aiCacheCleared": {
+    "message": "AI cache cleared",
+    "description": "AI cache cleared message"
+  },
+  "aiPrivacyNotice": {
+    "message": "When AI is enabled, bookmark titles and URLs are sent to your chosen AI provider. Page content is not sent.",
+    "description": "AI privacy notice"
+  },
+  "aiLogsTitle": {
+    "message": "AI Classification Logs",
+    "description": "AI logs card title"
+  },
+  "aiLogsStats": {
+    "message": "—",
+    "description": "AI logs stats placeholder"
+  },
+  "aiLogsStatsFormat": {
+    "message": "Total: $TOTAL$ · Success: $SUCCESS$ · Fail: $FAIL$ · Cache: $CACHE$ ($RATE$) · Avg: $AVG$",
+    "description": "AI logs stats format",
+    "placeholders": {
+      "total": { "content": "$1", "example": "36" },
+      "success": { "content": "$2", "example": "3" },
+      "fail": { "content": "$3", "example": "0" },
+      "cache": { "content": "$4", "example": "6" },
+      "avg": { "content": "$5", "example": "1.3s" },
+      "rate": { "content": "$6", "example": "16.7%" }
+    }
+  },
+  "aiRefreshLogs": {
+    "message": "Refresh",
+    "description": "Refresh AI logs button"
+  },
+  "aiClearLogs": {
+    "message": "Clear Logs",
+    "description": "Clear AI logs button"
+  },
+  "aiLogsEmpty": {
+    "message": "No logs yet",
+    "description": "AI logs empty message"
+  },
+  "aiLogsLoadFailed": {
+    "message": "Failed to load logs",
+    "description": "AI logs load failed message"
+  },
+  "aiLogsCleared": {
+    "message": "Logs cleared",
+    "description": "AI logs cleared message"
+  },
+  "aiClearLogsConfirm": {
+    "message": "Clear all AI classification logs?",
+    "description": "Clear AI logs confirmation"
+  },
+  "aiLogTrigger": {
+    "message": "Triggered",
+    "description": "AI log type: triggered"
+  },
+  "aiLogTriggerSkip": {
+    "message": "Skipped",
+    "description": "AI log type: skipped"
+  },
+  "aiLogCacheHit": {
+    "message": "Cache Hit",
+    "description": "AI log type: cache hit"
+  },
+  "aiLogClassifySuccess": {
+    "message": "Success",
+    "description": "AI log type: classify success"
+  },
+  "aiLogClassifyFail": {
+    "message": "Failed",
+    "description": "AI log type: classify fail"
+  },
+  "aiLogBackfillSuccess": {
+    "message": "Backfilled",
+    "description": "AI log type: backfill success"
+  },
+  "aiLogBackfillFail": {
+    "message": "Backfill Failed",
+    "description": "AI log type: backfill fail"
+  },
+  "aiLogBackfillSkip": {
+    "message": "Backfill Skipped",
+    "description": "AI log type: backfill skip"
+  },
+  "aiLogReason": {
+    "message": "Reason",
+    "description": "AI log reason label"
+  },
+  "aiLogDomain": {
+    "message": "Domain",
+    "description": "AI log domain label"
+  },
+  "aiLogDuration": {
+    "message": "Duration",
+    "description": "AI log duration label"
+  },
+  "aiLogTags": {
+    "message": "Tags",
+    "description": "AI log tags label"
+  },
+  "aiLogError": {
+    "message": "Error",
+    "description": "AI log error label"
+  },
+  "aiLogTime": {
+    "message": "Time",
+    "description": "AI log time label"
+  }
+}

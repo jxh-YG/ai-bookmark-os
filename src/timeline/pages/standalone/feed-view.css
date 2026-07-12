@@ -1,0 +1,1026 @@
+/* ===== RSS Feed View ===== */
+/* 复用 standalone.css 的 CSS 变量，自动适配亮/暗主题 */
+
+/* ===== 侧栏 RSS 订阅列表 ===== */
+.sa-rss-feed-list {
+  padding: 0 var(--space-xs);
+}
+
+.sa-rss-feed-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: background var(--transition-fast);
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sa-rss-feed-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sa-rss-feed-item.active {
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.sa-rss-feed-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+
+.sa-rss-feed-item.active .sa-rss-feed-icon {
+  color: var(--accent);
+}
+
+.sa-rss-feed-favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.sa-rss-feed-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.sa-rss-feed-unread {
+  font-size: 10px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.sa-rss-feed-item.active .sa-rss-feed-unread {
+  background: var(--accent);
+}
+
+.sa-rss-feed-unread.zero {
+  display: none;
+}
+
+/* 拖拽排序状态 */
+.sa-rss-feed-item[draggable="true"] {
+  -webkit-user-drag: element;
+}
+
+.sa-rss-feed-item.dragging {
+  opacity: 0.4;
+}
+
+.sa-rss-feed-item.drag-over {
+  border-top: 2px solid var(--accent);
+  margin-top: -1px;
+}
+
+/* ===== 主视图 ===== */
+.sa-view--feed {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 头部工具栏 */
+.sa-feed-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-primary);
+  flex-shrink: 0;
+}
+
+.sa-feed-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.sa-feed-header-title h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sa-feed-header-unread {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.sa-feed-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.sa-feed-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.sa-feed-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-tertiary);
+}
+
+.sa-feed-btn.sa-feed-btn--primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.sa-feed-btn.sa-feed-btn--primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.sa-feed-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sa-feed-btn.icon-only {
+  padding: 0;
+  width: 28px;
+  justify-content: center;
+}
+
+.sa-feed-btn.active {
+  background: var(--accent-light);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* 文章列表区 */
+.sa-feed-article-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+/* 文章卡片 */
+.sa-feed-article {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-light);
+  transition: background var(--transition-fast);
+  position: relative;
+}
+
+.sa-feed-article:hover {
+  background: var(--bg-hover);
+}
+
+/* 缩略图 */
+.sa-feed-article-thumb {
+  width: 80px;
+  height: 60px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--bg-tertiary);
+  align-self: center;
+}
+
+.sa-feed-article-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--transition-fast);
+}
+
+.sa-feed-article:hover .sa-feed-article-thumb img {
+  transform: scale(1.05);
+}
+
+.sa-feed-article.unread::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+.sa-feed-article-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sa-feed-article-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sa-feed-article.unread .sa-feed-article-title {
+  font-weight: 700;
+}
+
+.sa-feed-article.read .sa-feed-article-title {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.sa-feed-article-snippet {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sa-feed-article.read .sa-feed-article-snippet {
+  color: var(--text-tertiary);
+}
+
+.sa-feed-article-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.sa-feed-article-source {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+
+.sa-feed-article-source img {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.sa-feed-article-dot {
+  color: var(--text-disabled);
+}
+
+/* 文章操作区 */
+.sa-feed-article-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.sa-feed-article:hover .sa-feed-article-actions {
+  opacity: 1;
+}
+
+.sa-feed-article-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sa-feed-article-action:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.sa-feed-article-action.starred {
+  color: #f5a623;
+}
+
+.sa-feed-article-action.saved {
+  color: var(--accent);
+}
+
+/* 空状态 */
+.sa-feed-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 20px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.sa-feed-empty-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.sa-feed-empty-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.sa-feed-empty-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+/* 加载状态 */
+.sa-feed-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  min-height: 120px;
+}
+
+.sa-feed-loading .sa-loading-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.sa-feed-loading .sa-loading-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  animation: sa-feed-bounce 1.2s infinite ease-in-out;
+  will-change: transform, opacity;
+}
+
+.sa-feed-loading .sa-loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+.sa-feed-loading .sa-loading-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes sa-feed-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+/* ===== 添加订阅弹窗 ===== */
+.sa-feed-add-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: sa-feed-fade-in var(--transition-fast);
+}
+
+@keyframes sa-feed-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.sa-feed-add-dialog {
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-primary);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  animation: sa-feed-slide-in var(--transition-fast);
+}
+
+@keyframes sa-feed-slide-in {
+  from { transform: translateY(-12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.sa-feed-add-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.sa-feed-add-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sa-feed-add-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sa-feed-add-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sa-feed-add-field label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.sa-feed-add-field.sa-feed-add-toggle-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.sa-feed-edit-label {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 400;
+}
+
+.sa-feed-add-input {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.sa-feed-add-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.sa-feed-add-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.sa-feed-add-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.sa-feed-add-option input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.sa-feed-add-discover {
+  padding: 10px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.sa-feed-add-discovered {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.sa-feed-add-discovered-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sa-feed-add-discovered-item:hover {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.sa-feed-add-discovered-item-url {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.sa-feed-add-status {
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  display: none;
+}
+
+.sa-feed-add-status.error {
+  display: block;
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.sa-feed-add-status.success {
+  display: block;
+  background: var(--success-light);
+  color: var(--success);
+}
+
+/* 订阅加载进度条 */
+.sa-feed-add-status:has(.sa-feed-add-progress-wrap) {
+  display: block;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  padding: 10px 12px;
+}
+
+.sa-feed-add-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sa-feed-add-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.sa-feed-add-progress-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent));
+  background-size: 200% 100%;
+  animation: sa-feed-progress-shimmer 1.5s linear infinite;
+  transition: width 0.25s ease-out;
+}
+
+@keyframes sa-feed-progress-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.sa-feed-add-progress-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.sa-feed-add-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+}
+
+/* ===== RSS 图标 ===== */
+.sa-rss-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ===== 全部订阅：卡片概览 ===== */
+.sa-feed-overview {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.sa-feed-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.sa-feed-overview-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg, 12px);
+  overflow: hidden;
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.sa-feed-overview-card:hover {
+  border-color: var(--border-medium);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+}
+
+/* 卡片拖拽排序状态 */
+.sa-feed-overview-card[draggable="true"] {
+  cursor: grab;
+}
+
+.sa-feed-overview-card.dragging {
+  opacity: 0.4;
+}
+
+/* 拖到目标左半区 → 插到目标前（左侧高亮指示线） */
+.sa-feed-overview-card.drag-over-left {
+  border-color: var(--accent);
+  box-shadow: -3px 0 0 0 var(--accent), 0 2px 8px rgba(0, 0, 0, .06);
+}
+
+/* 拖到目标右半区 → 插到目标后（右侧高亮指示线） */
+.sa-feed-overview-card.drag-over-right {
+  border-color: var(--accent);
+  box-shadow: 3px 0 0 0 var(--accent), 0 2px 8px rgba(0, 0, 0, .06);
+}
+
+.sa-feed-overview-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+  transition: background var(--transition-fast);
+}
+
+.sa-feed-overview-header:hover {
+  background: var(--bg-hover);
+}
+
+.sa-feed-overview-favicon {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.sa-feed-overview-favicon-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.sa-feed-overview-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 标题跑马灯：溢出时悬浮完整展示 */
+.sa-feed-overview-title-text {
+  display: inline-block;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.sa-feed-overview-title.marquee:hover {
+  text-overflow: clip;
+}
+
+.sa-feed-overview-title.marquee:hover .sa-feed-overview-title-text {
+  animation: sa-feed-title-marquee var(--marquee-duration, 4s) ease-in-out 1;
+  will-change: transform;
+}
+
+@keyframes sa-feed-title-marquee {
+  0%, 8% { transform: translateX(0); }
+  44%, 56% { transform: translateX(var(--marquee-distance, 0)); }
+  92%, 100% { transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-feed-overview-title.marquee:hover .sa-feed-overview-title-text {
+    animation: none;
+  }
+}
+
+.sa-feed-overview-unread {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.sa-feed-overview-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+/* 悬浮整个卡片时浮出操作按钮 */
+.sa-feed-overview-card:hover .sa-feed-overview-actions {
+  opacity: 1;
+}
+
+/* 已收藏（starred）的收藏按钮始终可见 */
+.sa-feed-overview-action.starred {
+  opacity: 1;
+  color: #f59e0b;
+}
+
+.sa-feed-overview-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.sa-feed-overview-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sa-feed-overview-action.danger:hover {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.sa-feed-overview-items {
+  display: flex;
+  flex-direction: column;
+}
+
+.sa-feed-overview-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-light);
+  transition: background var(--transition-fast);
+}
+
+.sa-feed-overview-item:last-child {
+  border-bottom: none;
+}
+
+.sa-feed-overview-item:hover {
+  background: var(--bg-hover);
+}
+
+.sa-feed-overview-item.unread::before {
+  content: '';
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.sa-feed-overview-item.read::before {
+  content: '';
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-medium);
+  flex-shrink: 0;
+}
+
+.sa-feed-overview-item-title {
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sa-feed-overview-item.unread .sa-feed-overview-item-title {
+  font-weight: 600;
+}
+
+.sa-feed-overview-item.read .sa-feed-overview-item-title {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+/* 文章标题跑马灯：溢出时悬浮完整展示 */
+.sa-feed-overview-item-title-text {
+  display: inline-block;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.sa-feed-overview-item-title.marquee:hover {
+  text-overflow: clip;
+}
+
+.sa-feed-overview-item-title.marquee:hover .sa-feed-overview-item-title-text {
+  animation: sa-feed-title-marquee var(--marquee-duration, 4s) ease-in-out 1;
+  will-change: transform;
+}
+
+.sa-feed-overview-item-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sa-feed-overview-item-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  opacity: 0;
+  padding: 0;
+}
+
+.sa-feed-overview-item:hover .sa-feed-overview-item-star {
+  opacity: 1;
+}
+
+.sa-feed-overview-item-star:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sa-feed-overview-item-star.starred {
+  color: #f59e0b;
+  opacity: 1;
+}
+
+.sa-feed-overview-empty {
+  padding: 20px 14px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.sa-feed-overview-footer {
+  padding: 8px 14px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-top: 1px solid var(--border-light);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.sa-feed-overview-footer:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+
+/* ===== 订阅源右键菜单 ===== */
+.sa-feed-context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .12), 0 0 0 1px rgba(0, 0, 0, .04);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: sa-feed-fade-in 100ms ease-out;
+}
+
+.sa-feed-context-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 100ms ease;
+}
+
+.sa-feed-context-item:hover {
+  background: var(--bg-hover, var(--bg-secondary));
+}
+
+.sa-feed-context-item.danger {
+  color: var(--danger, #FF3B30);
+}
+
+.sa-feed-context-item.danger:hover {
+  background: var(--danger-light, rgba(255, 59, 48, 0.12));
+}
+
+/* ===== 暗色主题缩略图边框 ===== */
+body.theme-dark .sa-feed-article-thumb {
+  border: 1px solid var(--border-light);
+}

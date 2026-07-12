@@ -1,0 +1,9 @@
+{
+  "extName": { "message": "AI Bookmark OS" },
+  "extDescription": { "message": "Apple OS style bookmark manager with AI classify and timeline" },
+  "actionTitle": { "message": "Open AI Bookmark OS" },
+  "cmdOpenPalette": { "message": "Open command palette" },
+  "cmdOpenPopup": { "message": "Open AI Bookmark OS popup" },
+  "cmdQuickBookmark": { "message": "Quick bookmark current page" },
+  "cmdOpenAiSidepanel": { "message": "Open AI classify side panel" }
+}

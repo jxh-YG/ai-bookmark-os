@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title data-i18n="settings">Settings</title>
+  <link rel="stylesheet" href="../../shared/apple-design-system.css">
+  <link rel="stylesheet" href="../../shared/apple-page-polish.css">
+  <link rel="stylesheet" href="settings.css?v=2">
+</head>
+<body>
+  <!-- 顶栏：靠左 -->
+  <header class="settings-header">
+    <button id="backBtn" class="back-btn" data-i18n-title="back">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"/>
+        <polyline points="12 19 5 12 12 5"/>
+      </svg>
+    </button>
+    <h1 class="header-title" data-i18n="settings">Settings</h1>
+  </header>
+
+  <!-- 分栏布局：居中 -->
+  <div class="settings-layout">
+    <!-- 左侧导航 -->
+    <nav class="settings-nav">
+      <ul class="nav-list">
+        <li>
+          <button class="nav-item active" data-panel="shortcuts">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="4" width="20" height="16" rx="2"/>
+              <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/>
+            </svg>
+            <span data-i18n="shortcutSection">Shortcuts</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="notifications">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span data-i18n="notificationSection">Notifications</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="appearance">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="5"/>
+              <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+            </svg>
+            <span data-i18n="appearance">Appearance</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="checker">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <span data-i18n="checkerSettings">Broken Bookmarks</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="preview">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+            <span data-i18n="previewSection">Link Preview</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="deleted">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            <span data-i18n="recentlyDeleted">Recently Deleted</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="data">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <ellipse cx="12" cy="5" rx="9" ry="3"/>
+              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+            </svg>
+            <span data-i18n="dataSection">Data</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="tagrules">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+              <line x1="7" y1="7" x2="7.01" y2="7"/>
+            </svg>
+            <span data-i18n="tagRules">Tag Rules</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="ai" title="AI 辅助标签 + 金字塔分类">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a10 10 0 1 0 10 10H12V2z"/>
+              <path d="M12 12L2.1 9.9"/>
+              <path d="M12 12V2"/>
+              <path d="M21.8 12.8L12 12"/>
+            </svg>
+            <span data-i18n="aiSection">AI</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="activelearning">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"/>
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+            </svg>
+            <span data-i18n="activeLearning">Active Learning</span>
+            <span id="activeLearningBadge" class="nav-badge" style="display:none;">0</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="stats">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="20" x2="18" y2="10"/>
+              <line x1="12" y1="20" x2="12" y2="4"/>
+              <line x1="6" y1="20" x2="6" y2="14"/>
+            </svg>
+            <span data-i18n="statsSection">Statistics</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="rss">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 11a9 9 0 0 1 9 9"/>
+              <path d="M4 4a16 16 0 0 1 16 16"/>
+              <circle cx="5" cy="19" r="1"/>
+            </svg>
+            <span data-i18n="rssSettings">RSS</span>
+            <span id="rssUnreadBadge" class="nav-badge" style="display:none;">0</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-item" data-panel="about">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <span data-i18n="about">About</span>
+          </button>
+        </li>
+      </ul>
+    </nav>
+
+    <!-- 右侧内容 -->
+    <main class="settings-panel">
+
+      <!-- 快捷键 -->
+      <div class="panel-section active" id="panel-shortcuts">
+        <h2 class="panel-title" data-i18n="shortcutSection">Shortcuts</h2>
+        <div class="shortcut-hint">
+          <span data-i18n="shortcutHint">请注意：要在基于Chrome内核的浏览器中修改快捷键，请访问[扩展管理页面] -&gt; [管理快捷键]</span>
+          <a href="#" id="openShortcutsPageLink" data-i18n="shortcutHint2">去设置</a>
+        </div>
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="cmdQuickBookmark">Quick Bookmark</div>
+              <div class="setting-desc" data-i18n="cmdQuickBookmarkDesc">Bookmark the current page with one keystroke (auto-suggests folder)</div>
+            </div>
+            <div class="setting-control">
+              <kbd id="shortcutQuickBookmark" class="shortcut-key">—</kbd>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="cmdOpenPalette">Open Command Palette</div>
+              <div class="setting-desc" data-i18n="cmdOpenPaletteDesc">Open the search palette to find any bookmark</div>
+            </div>
+            <div class="setting-control">
+              <kbd id="shortcutOpenPalette" class="shortcut-key">—</kbd>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="cmdOpenPopup">Open AI Bookmark OS</div>
+              <div class="setting-desc" data-i18n="cmdOpenPopupDesc">Open the bookmark popup window</div>
+            </div>
+            <div class="setting-control">
+              <kbd id="shortcutOpenPopup" class="shortcut-key">—</kbd>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="omniboxKeyword">Omnibox Search</div>
+              <div class="setting-desc" data-i18n="omniboxKeywordDesc">Type in address bar to search bookmarks directly</div>
+            </div>
+            <div class="setting-control">
+              <kbd class="shortcut-key">mk</kbd>
+            </div>
+          </div>
+          <div id="shortcutConflicts" class="conflict-banner" style="display:none;">
+            <div class="conflict-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <div class="conflict-info">
+              <div class="conflict-title" data-i18n="shortcutConflictTitle">Shortcut Conflict Detected</div>
+              <div id="conflictDetails" class="conflict-details"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 通知设置 -->
+      <div class="panel-section" id="panel-notifications">
+        <h2 class="panel-title" data-i18n="notificationSection">Notifications</h2>
+        <div class="setting-desc tagrules-intro" data-i18n="notificationSectionDesc">Configure desktop notifications after bookmarking.</div>
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="notificationEnabled">Desktop Notifications</div>
+              <div class="setting-desc" data-i18n="notificationEnabledDesc">Show a Windows notification when a page is bookmarked successfully.</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="notificationEnabledToggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 外观主题 -->
+      <div class="panel-section" id="panel-appearance">
+        <h2 class="panel-title" data-i18n="appearance">Appearance</h2>
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="theme">Theme</div>
+              <div class="setting-desc" data-i18n="themeDesc">Choose light or dark mode</div>
+            </div>
+            <div class="setting-control">
+              <select id="themeSelect" class="select-control">
+                <option value="system" data-i18n="systemDefault">System Default</option>
+                <option value="light" data-i18n="light">Light</option>
+                <option value="dark" data-i18n="dark">Dark</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="displayLanguage">Display Language</div>
+              <div class="setting-desc" data-i18n="languageDesc">Choose your preferred language</div>
+            </div>
+            <div class="setting-control">
+              <select id="languageSelect" class="select-control">
+                <option value="system" data-i18n="systemDefault">System Default</option>
+                <option value="en">English</option>
+                <option value="zh_CN">简体中文</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="mdiWindowEnabled">Multi-Window Mode</div>
+              <div class="setting-desc" data-i18n="mdiWindowEnabledDesc">Open bookmarks in embedded windows within the standalone window instead of new browser tabs</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="mdiWindowEnabledToggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 失效检测 -->
+      <div class="panel-section" id="panel-checker">
+        <h2 class="panel-title" data-i18n="checkerSettings">Broken Bookmark Detection</h2>
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="checkerFrequency">Check Frequency</div>
+              <div class="setting-desc" data-i18n="checkerFrequencyDesc">How often to automatically check bookmarks</div>
+            </div>
+            <div class="setting-control">
+              <select id="checkerFrequencySelect" class="select-control">
+                <option value="never" data-i18n="checkerFreqNever">Never</option>
+                <option value="daily" data-i18n="checkerFreqDaily">Daily</option>
+                <option value="weekly" data-i18n="checkerFreqWeekly">Weekly</option>
+                <option value="monthly" data-i18n="checkerFreqMonthly">Monthly</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row hidden-row" id="checkerDayOfWeekRow">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="checkerDayOfWeek">Day of Week</div>
+              <div class="setting-desc" data-i18n="checkerDayOfWeekDesc">Which day to run the weekly check</div>
+            </div>
+            <div class="setting-control">
+              <select id="checkerDayOfWeekSelect" class="select-control compact">
+                <option value="1" data-i18n="checkerMonday">Monday</option>
+                <option value="2" data-i18n="checkerTuesday">Tuesday</option>
+                <option value="3" data-i18n="checkerWednesday">Wednesday</option>
+                <option value="4" data-i18n="checkerThursday">Thursday</option>
+                <option value="5" data-i18n="checkerFriday">Friday</option>
+                <option value="6" data-i18n="checkerSaturday">Saturday</option>
+                <option value="0" data-i18n="checkerSunday">Sunday</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row hidden-row" id="checkerDayOfMonthRow">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="checkerDayOfMonth">Day of Month</div>
+              <div class="setting-desc" data-i18n="checkerDayOfMonthDesc">Which day of the month to run the check</div>
+            </div>
+            <div class="setting-control">
+              <select id="checkerDayOfMonthSelect" class="select-control compact"></select>
+            </div>
+          </div>
+          <div class="setting-row hidden-row" id="checkerTimeRow">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="checkerTime">Check Time</div>
+              <div class="setting-desc" data-i18n="checkerTimeDesc">Time of day to run the automatic check</div>
+            </div>
+            <div class="setting-control">
+              <input type="time" id="checkerTimeInput" class="time-control" value="03:00">
+            </div>
+          </div>
+          <div class="setting-row hidden-row" id="checkerAutoDeleteRow">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="checkerAutoDelete">Auto Delete Broken</div>
+              <div class="setting-desc" data-i18n="checkerAutoDeleteDesc">Automatically delete broken bookmarks after scheduled check</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="checkerAutoDeleteToggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="checkerTimeout">Timeout Threshold</div>
+              <div class="setting-desc" data-i18n="checkerTimeoutDesc">Maximum wait time per link (seconds)</div>
+            </div>
+            <div class="setting-control">
+              <select id="checkerTimeoutSelect" class="select-control compact">
+                <option value="5000">5s</option>
+                <option value="10000">10s</option>
+                <option value="15000">15s</option>
+                <option value="20000">20s</option>
+                <option value="30000">30s</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="checkerConcurrency">Concurrent Checks</div>
+              <div class="setting-desc" data-i18n="checkerConcurrencyDesc">Number of links checked simultaneously</div>
+            </div>
+            <div class="setting-control">
+              <select id="checkerConcurrencySelect" class="select-control compact">
+                <option value="3">3</option>
+                <option value="5">5</option>
+                <option value="10">10</option>
+                <option value="15">15</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="checkerRetries">Retry Count</div>
+              <div class="setting-desc" data-i18n="checkerRetriesDesc">Extra GET attempts after a transient failure. 4xx client errors are not retried.</div>
+            </div>
+            <div class="setting-control">
+              <select id="checkerRetriesSelect" class="select-control compact">
+                <option value="0">0</option>
+                <option value="1">1</option>
+                <option value="2" selected>2</option>
+                <option value="3">3</option>
+                <option value="5">5</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="checkerBackoffBase">Backoff Base (ms)</div>
+              <div class="setting-desc" data-i18n="checkerBackoffBaseDesc">Base value for exponential backoff with jitter.</div>
+            </div>
+            <div class="setting-control">
+              <select id="checkerBackoffBaseSelect" class="select-control compact">
+                <option value="300">300</option>
+                <option value="500">500</option>
+                <option value="800" selected>800</option>
+                <option value="1500">1500</option>
+                <option value="2000">2000</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="checkerBackoffMax">Backoff Max (ms)</div>
+              <div class="setting-desc" data-i18n="checkerBackoffMaxDesc">Upper bound for the random backoff between retries.</div>
+            </div>
+            <div class="setting-control">
+              <select id="checkerBackoffMaxSelect" class="select-control compact">
+                <option value="1000">1000</option>
+                <option value="1500">1500</option>
+                <option value="3000" selected>3000</option>
+                <option value="5000">5000</option>
+                <option value="10000">10000</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="checkerOpenPage">Broken Bookmark Checker</div>
+              <div class="setting-desc" data-i18n="checkerOpenPageDesc">Open the dedicated page to check and manage broken bookmarks</div>
+            </div>
+            <div class="setting-control">
+              <button id="openCheckerBtn" class="btn btn-secondary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                  <polyline points="15 3 21 3 21 9"/>
+                  <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+                <span data-i18n="checkerOpen">Open</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 网页预览 -->
+      <div class="panel-section" id="panel-preview">
+        <h2 class="panel-title" data-i18n="previewSection">Link Preview</h2>
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="previewEnabled">Enable Link Preview</div>
+              <div class="setting-desc" data-i18n="previewEnabledDesc">Extract title and summary from bookmarked pages using Mozilla Readability</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="previewEnabledToggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="previewCacheTTL">Cache TTL (days)</div>
+              <div class="setting-desc" data-i18n="previewCacheTTLDesc">How long a cached preview remains valid before re-fetching</div>
+            </div>
+            <div class="setting-control">
+              <select id="previewCacheTTLSelect" class="select-control compact">
+                <option value="7">7</option>
+                <option value="14">14</option>
+                <option value="30" selected>30</option>
+                <option value="60">60</option>
+                <option value="90">90</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="previewMaxEntries">Max Cached Entries</div>
+              <div class="setting-desc" data-i18n="previewMaxEntriesDesc">Maximum number of previews stored. Oldest entries are evicted first.</div>
+            </div>
+            <div class="setting-control">
+              <select id="previewMaxEntriesSelect" class="select-control compact">
+                <option value="100">100</option>
+                <option value="300">300</option>
+                <option value="500" selected>500</option>
+                <option value="1000">1000</option>
+                <option value="2000">2000</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="previewCacheStats">Preview Cache</div>
+              <div class="setting-desc" id="previewCacheStatsDesc" data-i18n="previewCacheStatsDesc">—</div>
+            </div>
+            <div class="setting-control">
+              <button id="clearPreviewCacheBtn" class="btn btn-danger">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>
+                  <line x1="10" y1="11" x2="10" y2="17"/>
+                  <line x1="14" y1="11" x2="14" y2="17"/>
+                </svg>
+                <span data-i18n="clear">Clear</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 最近删除 -->
+      <div class="panel-section" id="panel-deleted">
+        <h2 class="panel-title" data-i18n="recentlyDeleted">Recently Deleted</h2>
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="retentionDays">Retention Days</div>
+              <div class="setting-desc" data-i18n="retentionDaysDesc">How long to keep recently deleted bookmarks</div>
+            </div>
+            <div class="setting-control">
+              <select id="retentionDaysSelect" class="select-control compact">
+                <option value="7">7 <span data-i18n="days">天</span></option>
+                <option value="15">15 <span data-i18n="days">天</span></option>
+                <option value="30">30 <span data-i18n="days">天</span></option>
+                <option value="60">60 <span data-i18n="days">天</span></option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 数据 -->
+      <div class="panel-section" id="panel-data">
+        <h2 class="panel-title" data-i18n="dataSection">Data</h2>
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="exportJson">Export JSON</div>
+              <div class="setting-desc" data-i18n="exportJsonDesc">Download all bookmarks as a JSON file</div>
+            </div>
+            <div class="setting-control">
+              <button id="exportJsonBtn" class="btn btn-secondary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                <span data-i18n="download">Download</span>
+              </button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="exportHtml">Export HTML</div>
+              <div class="setting-desc" data-i18n="exportHtmlDesc">Download as a Netscape bookmarks HTML file (compatible with browsers)</div>
+            </div>
+            <div class="setting-control">
+              <button id="exportHtmlBtn" class="btn btn-secondary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                <span data-i18n="download">Download</span>
+              </button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="importFile">Import</div>
+              <div class="setting-desc" data-i18n="importFileDesc">Import bookmarks from a JSON or HTML file</div>
+            </div>
+            <div class="setting-control">
+              <button id="importFileBtn" class="btn btn-secondary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <span data-i18n="selectFile">Select file</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <input type="file" id="importFileInput" accept=".json,.html,.htm" style="display:none;">
+      </div>
+
+      <!-- 智能标签规则 -->
+      <div class="panel-section" id="panel-tagrules">
+        <h2 class="panel-title" data-i18n="tagRules">Tag Rules</h2>
+        <div class="setting-desc tagrules-intro" data-i18n="tagRulesDesc">手动添加域名/关键词规则，或查看自动学习到的映射。规则会与内置规则合并，动态规则优先。</div>
+
+        <!-- 添加域名规则 -->
+        <div class="setting-card">
+          <div class="tagrule-card-row">
+            <div class="setting-label" data-i18n="addDomainRule">Add Domain Rule</div>
+            <div class="tagrule-form">
+              <input type="text" id="domainRuleDomains" class="tagrule-input" placeholder="example.com, sub.example.com" data-i18n-placeholder="domainPlaceholder">
+              <input type="text" id="domainRuleTag" class="tagrule-input tagrule-input--tag" placeholder="标签" data-i18n-placeholder="tagPlaceholder">
+              <button id="addDomainRuleBtn" class="btn btn-primary btn-sm">
+                <span data-i18n="add">Add</span>
+              </button>
+            </div>
+          </div>
+          <div id="domainRulesList" class="tagrule-list"></div>
+        </div>
+
+        <!-- 添加关键词规则 -->
+        <div class="setting-card">
+          <div class="tagrule-card-row">
+            <div class="setting-label" data-i18n="addKeywordRule">Add Keyword Rule</div>
+            <div class="tagrule-form">
+              <input type="text" id="keywordRuleTag" class="tagrule-input tagrule-input--tag" placeholder="标签" data-i18n-placeholder="tagPlaceholder">
+              <input type="text" id="keywordRuleKeyword" class="tagrule-input" placeholder="关键词（如 qianwen）" data-i18n-placeholder="keywordPlaceholder">
+              <button id="addKeywordRuleBtn" class="btn btn-primary btn-sm">
+                <span data-i18n="add">Add</span>
+              </button>
+            </div>
+          </div>
+          <div id="keywordRulesList" class="tagrule-list"></div>
+        </div>
+
+        <!-- 添加停用词 -->
+        <div class="setting-card">
+          <div class="tagrule-card-row">
+            <div class="setting-label" data-i18n="addStopWord">Add Stop Word</div>
+            <div class="tagrule-form">
+              <input type="text" id="stopWordInput" class="tagrule-input" placeholder="停用词" data-i18n-placeholder="stopWordPlaceholder">
+              <button id="addStopWordBtn" class="btn btn-primary btn-sm">
+                <span data-i18n="add">Add</span>
+              </button>
+            </div>
+          </div>
+          <div id="stopWordsList" class="tagrule-list"></div>
+        </div>
+
+        <!-- 自动学习记录 -->
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="learnedDomainTags">Learned Domain Tags</div>
+              <div class="setting-desc" data-i18n="learnedDomainTagsDesc">当你手动移动书签到某目录时，自动学习域名→标签映射</div>
+            </div>
+            <div class="setting-control">
+              <button id="clearLearnedTagsBtn" class="btn btn-danger btn-sm">
+                <span data-i18n="clearAll">Clear All</span>
+              </button>
+            </div>
+          </div>
+          <div id="learnedTagsList" class="tagrule-list"></div>
+        </div>
+      </div>
+
+      <!-- AI 辅助分类 -->
+      <div class="panel-section" id="panel-ai">
+        <h2 class="panel-title" data-i18n="aiSection">AI 设置</h2>
+        <div class="setting-desc tagrules-intro">在此统一配置「AI 辅助标签」与「AI 金字塔分类」。两者可使用不同服务商、URL 与 Key。</div>
+
+        <div class="ai-subhead ai-subhead--static">
+          <div>
+            <div class="setting-label">AI 辅助标签</div>
+            <div class="setting-desc" data-i18n="aiSectionDesc">规则引擎置信度不足时，调用云端 AI 辅助打标签。仅发送标题与 URL。</div>
+          </div>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="aiEnabled">Enable AI</div>
+              <div class="setting-desc" data-i18n="aiEnabledDesc">Trigger cloud AI for low-confidence bookmarks</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="aiEnabledToggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="aiProvider">Provider</div>
+              <div class="setting-desc" data-i18n="aiProviderDesc">Choose your AI service provider</div>
+            </div>
+            <div class="setting-control">
+              <select id="aiProviderSelect" class="select-control">
+                <option value="zhipu" data-i18n="aiProviderZhipu">Zhipu AI (GLM-4-Flash, free)</option>
+                <option value="deepseek" data-i18n="aiProviderDeepSeek">DeepSeek</option>
+                <option value="google" data-i18n="aiProviderGoogle">Google Gemini</option>
+                <option value="openai" data-i18n="aiProviderOpenAI">OpenAI</option>
+                <option value="tongyi" data-i18n="aiProviderTongyi">Alibaba Tongyi</option>
+                <option value="custom" data-i18n="aiProviderCustom">Custom</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 自定义 Provider 配置（仅 custom 时显示） -->
+          <div id="aiCustomFields" class="ai-custom-fields" style="display:none;">
+            <div class="setting-row">
+              <div class="setting-main">
+                <div class="setting-label" data-i18n="aiCustomFormat">API Format</div>
+                <div class="setting-desc" data-i18n="aiCustomFormatDesc">Choose the API protocol format</div>
+              </div>
+              <div class="setting-control">
+                <select id="aiCustomFormatSelect" class="select-control">
+                  <option value="openai" data-i18n="aiFormatOpenAI">OpenAI Chat Completions</option>
+                  <option value="anthropic" data-i18n="aiFormatAnthropic">Anthropic Messages</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-main">
+                <div class="setting-label" data-i18n="aiCustomEndpoint">API Base URL</div>
+                <div class="setting-desc" data-i18n="aiCustomEndpointDesc">The full API endpoint URL</div>
+              </div>
+              <div class="setting-control">
+                <input type="text" id="aiCustomEndpointInput" class="tagrule-input" style="width: 320px;" placeholder="https://api.example.com/v1">
+              </div>
+            </div>
+
+            <div class="setting-row ai-full-url-row">
+              <div class="setting-main">
+                <div class="setting-label" data-i18n="aiFullUrl">Use full URL</div>
+                <div class="setting-desc" data-i18n="aiFullUrlDesc">Use the URL exactly as entered without appending a path</div>
+              </div>
+              <div class="setting-control">
+                <label class="toggle-switch">
+                  <input type="checkbox" id="aiFullUrlToggle">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="ai-endpoint-hint">
+              <div class="ai-hint-card">
+                <svg class="ai-hint-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <div class="ai-hint-content">
+                  <div class="ai-hint-text" id="aiEndpointHintText" data-i18n="aiEndpointHintOpenAI">
+                    Please enter an endpoint compatible with the OpenAI API. Do not end with a slash. /chat/completions will be appended to the URL.
+                  </div>
+                  <div class="ai-hint-text" id="aiEndpointHintFullUrl" data-i18n="aiEndpointHintFullUrl" style="display:none;">
+                    Please enter the full request URL. The request will use this URL directly without appending any path.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="aiApiKey">API Key</div>
+              <div class="setting-desc" data-i18n="aiApiKeyDesc">Your API key is stored locally and never synced</div>
+            </div>
+            <div class="setting-control">
+              <input type="password" id="aiApiKeyInput" class="tagrule-input" style="width: 220px;" placeholder="sk-...">
+              <button id="aiTestBtn" class="btn btn-secondary btn-sm" data-i18n="aiTest">Test</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="aiModel">Custom Model</div>
+              <div class="setting-desc" data-i18n="aiModelDesc">Leave empty to use the recommended model</div>
+            </div>
+            <div class="setting-control">
+              <input type="text" id="aiModelInput" class="tagrule-input" style="width: 220px;" placeholder="glm-4-flash">
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="aiTimeout">Timeout (seconds)</div>
+              <div class="setting-desc" data-i18n="aiTimeoutDesc">Maximum wait time per AI request</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" id="aiTimeoutInput" class="tagrule-input" style="width: 80px;" min="3" max="30" value="8">
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label">启用 AI 辅助分类逻辑</div>
+              <div class="setting-desc">控制低置信度 AI 标签增强与收藏前 AI 分类建议。关闭后仍保留本地规则分类与手动确认流程。</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="aiAssistLogicToggle" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-row ai-assist-prompt-row">
+            <div class="setting-main" style="flex: 1; min-width: 0;">
+              <div class="setting-label">AI 辅助分类提示词</div>
+              <div class="setting-desc">用于单个书签的 AI 标签增强和收藏前 AI 建议。系统会在此基础上追加对应 JSON 输出格式要求。</div>
+              <textarea id="aiAssistPromptInput" class="tree-prompt-editor ai-assist-prompt-editor" rows="6"></textarea>
+              <div style="margin-top: 8px;">
+                <button id="aiResetAssistPromptBtn" class="btn btn-secondary btn-sm" type="button">恢复默认提示词</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="aiStatus">Status</div>
+              <div id="aiStatusDesc" class="setting-desc" data-i18n="aiStatusNotConfigured">Not configured</div>
+            </div>
+            <div class="setting-control">
+              <button id="aiClearCacheBtn" class="btn btn-danger btn-sm" data-i18n="aiClearCache">Clear Cache</button>
+            </div>
+          </div>
+
+          <div class="privacy-notice" data-i18n="aiPrivacyNotice" style="margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 8px; font-size: 12px; color: var(--text-secondary);">
+            When AI is enabled, bookmark titles and URLs are sent to your chosen AI provider. Page content is not sent.
+          </div>
+        </div>
+
+        
+        <!-- AI 金字塔分类树（统一设置） -->
+        <div class="setting-card ai-tree-card" id="aiTreeCard" style="margin-top: 16px;">
+          <div class="ai-subhead">
+            <div>
+              <div class="setting-label">AI 金字塔分类</div>
+              <div class="setting-desc">配置书签分类树所用的模型、API 地址与 Key。与上方「AI 辅助标签」相互独立，可使用不同服务商。</div>
+            </div>
+            <a class="btn btn-secondary btn-sm" id="aiTreeOpenSidepanelBtn" href="#">打开分类侧栏</a>
+          </div>
+
+          
+          <div class="setting-row" id="treeRespectFoldersRow">
+            <div class="setting-main">
+              <div class="setting-label">参照原有书签夹</div>
+              <div class="setting-desc">启用后：原书签夹只作为优化参考，不会把整棵原树当最终标准。关闭后：不发送原文件夹字段。</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="treeRespectFoldersToggle" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-row tree-preserve-row" id="treePreserveFoldersRow">
+            <div class="setting-main" style="flex: 1; min-width: 0;">
+              <div class="setting-label">保持原样的书签夹</div>
+              <div class="setting-desc">勾选后，该原书签夹及子夹不会参与 AI 优化，分类结果会直接按原路径展示。</div>
+              <div id="treePreserveFoldersList" class="tree-preserve-list"></div>
+            </div>
+            <div class="setting-control">
+              <button type="button" id="treeClearPreservedFoldersBtn" class="btn btn-secondary btn-sm">清空选择</button>
+            </div>
+          </div>
+
+          <div class="setting-row" id="treeReusePreviousRow">
+            <div class="setting-main">
+              <div class="setting-label">沿用上一次 AI 分类树</div>
+              <div class="setting-desc">启用后：重分类会把上一次 AI 分类树作为结构参考，适合微调旧结果。关闭后：建树不再参考旧 AI 树，更适合完全按当前提示词重新创建。</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="treeReusePreviousToggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-row" id="treeBuiltInRulesRow">
+            <div class="setting-main">
+              <div class="setting-label">启用内置分类规则增强</div>
+              <div class="setting-desc">开启后会追加公司聚合、语义分配等系统保护规则；关闭后主要按用户填写的三段提示词执行。</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="treeBuiltInRulesToggle" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-row" id="treeCacheRow">
+            <div class="setting-main">
+              <div class="setting-label">使用分类缓存</div>
+              <div class="setting-desc">开启后同 URL 复用历史打标结果以减少请求；关闭后每次重新打标，适合验证新提示词。</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="treeCacheToggle" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-row" id="treeMetadataRow">
+            <div class="setting-main">
+              <div class="setting-label">抓取页面描述增强</div>
+              <div class="setting-desc">开启后低信息标题会尝试读取页面标题/描述；关闭后只使用书签标题与域名。</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="treeMetadataToggle" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label">模型供应商</div>
+              <div class="setting-desc">选择后会自动填充默认 API 地址与模型</div>
+            </div>
+            <div class="setting-control">
+              <select id="treeProviderSelect" class="select-control">
+                <option value="agnes">Agnes AI</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="openai">OpenAI (Codex)</option>
+                <option value="claude">Claude (Anthropic)</option>
+                <option value="gemini">Gemini (Google)</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="custom">自定义提供商</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="treeCustomFields" class="ai-custom-fields" style="display:none;">
+            <div class="setting-row">
+              <div class="setting-main">
+                <div class="setting-label">API 协议</div>
+                <div class="setting-desc">兼容 OpenAI / Anthropic / Gemini 请求格式</div>
+              </div>
+              <div class="setting-control">
+                <select id="treeApiStyleSelect" class="select-control">
+                  <option value="openai">OpenAI 兼容</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label">API Base URL</div>
+              <div class="setting-desc">完整 chat 接口地址（自定义时可手改）</div>
+            </div>
+            <div class="setting-control">
+              <input type="text" id="treeBaseUrlInput" class="tagrule-input tree-url-input" placeholder="https://.../v1/chat/completions">
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label">API Key</div>
+              <div class="setting-desc">仅保存在本机 storage.local，不会同步或上传</div>
+            </div>
+            <div class="setting-control">
+              <input type="password" id="treeApiKeyInput" class="tagrule-input" style="width: 220px;" placeholder="sk-...">
+              <button type="button" id="treeTestBtn" class="btn btn-secondary btn-sm">测试连接</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label">模型</div>
+              <div class="setting-desc">可从预设选择，或切换为自定义模型名</div>
+            </div>
+            <div class="setting-control tree-model-controls">
+              <select id="treeModelSelect" class="select-control"></select>
+              <input type="text" id="treeModelCustomInput" class="tagrule-input" style="width: 180px; display:none;" placeholder="自定义模型名">
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label">AI 分类连接稳定性</div>
+              <div class="setting-desc">用于 AI 金字塔分类请求。失败重连次数不包含首次请求，默认 5 次；请求超时默认 90 秒。</div>
+            </div>
+            <div class="setting-control tree-stability-controls">
+              <label class="tree-number-field">
+                <span>失败重连次数</span>
+                <input type="number" id="treeRetryCountInput" class="tagrule-input" min="0" max="20" step="1" value="5">
+              </label>
+              <label class="tree-number-field">
+                <span>请求超时（秒）</span>
+                <input type="number" id="treeRequestTimeoutInput" class="tagrule-input" min="5" max="600" step="5" value="90">
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-row tree-prompt-row">
+            <div class="setting-main" style="flex: 1; min-width: 0;">
+              <div class="setting-label">分类提示词</div>
+              <div class="setting-desc">系统默认提示词可按阶段替换；留空保存时回退默认</div>
+              <div class="tree-prompt-grid">
+                <label class="tree-prompt-field">
+                  <span>① 打标提示词</span>
+                  <textarea id="treePromptLabel" class="tree-prompt-editor" rows="3"></textarea>
+                </label>
+                <label class="tree-prompt-field">
+                  <span>② 构建分类树提示词</span>
+                  <textarea id="treePromptBuild" class="tree-prompt-editor" rows="3"></textarea>
+                </label>
+                <label class="tree-prompt-field">
+                  <span>③ 分配分类提示词</span>
+                  <textarea id="treePromptAssign" class="tree-prompt-editor" rows="3"></textarea>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-row" style="border-bottom: none;">
+            <div class="setting-main">
+              <div id="treeStatusDesc" class="setting-desc">未保存</div>
+            </div>
+            <div class="setting-control" style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" id="treeResetPromptsBtn" class="btn btn-secondary btn-sm">恢复默认提示词</button>
+              <button type="button" id="treeSaveBtn" class="btn btn-primary btn-sm">保存分类设置</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI 辅助分类日志 -->
+        <div class="setting-card" id="aiLogsCard" style="margin-top: 16px;">
+          <div class="setting-row" id="aiLogsHeader" style="cursor: pointer;">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="aiLogsTitle">AI Classification Logs</div>
+              <div id="aiLogsStats" class="setting-desc" data-i18n="aiLogsStats">—</div>
+            </div>
+            <div class="setting-control">
+              <svg id="aiLogsToggleIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.2s;">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </div>
+          <div id="aiLogsBody" style="display: none;">
+            <div class="setting-row" style="border-bottom: none;">
+              <div class="setting-control" style="display: flex; gap: 8px;">
+                <button id="aiRefreshLogsBtn" class="btn btn-secondary btn-sm" data-i18n="aiRefreshLogs">Refresh</button>
+                <button id="aiClearLogsBtn" class="btn btn-danger btn-sm" data-i18n="aiClearLogs">Clear Logs</button>
+              </div>
+            </div>
+            <div id="aiLogsList" class="ai-logs-list" style="max-height: 320px; overflow-y: auto;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 主动学习 -->
+      <div class="panel-section" id="panel-activelearning">
+        <h2 class="panel-title" data-i18n="activeLearning">Active Learning</h2>
+        <div class="setting-desc tagrules-intro" data-i18n="activeLearningDesc">当模型对标签不确定时，会在这里列出待确认的书签。你的确认会帮助模型越用越准。</div>
+
+        <!-- 统计卡片 -->
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="learningStats">Learning Statistics</div>
+              <div id="learningStatsDesc" class="setting-desc" data-i18n="learningStatsDesc">—</div>
+            </div>
+            <div class="setting-control">
+              <button id="clearReviewQueueBtn" class="btn btn-danger btn-sm">
+                <span data-i18n="clearQueue">Clear Queue</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 待确认列表 -->
+        <div class="setting-card">
+          <div class="tagrule-card-row">
+            <div class="setting-label" data-i18n="pendingReviews">Pending Reviews</div>
+            <div id="pendingReviewsList" class="review-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 统计 -->
+      <div class="panel-section" id="panel-stats">
+        <h2 class="panel-title" data-i18n="statsSection">Statistics</h2>
+
+        <!-- 时间范围选择 -->
+        <div class="setting-card">
+          <div class="setting-row stats-date-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="statsDateRange">Date Range</div>
+              <div class="setting-desc" data-i18n="statsDateRangeDesc">Filter statistics by bookmark creation date</div>
+            </div>
+            <div class="setting-control stats-date-controls">
+              <input type="date" id="statsStartDate" class="date-control">
+              <span class="date-sep">—</span>
+              <input type="date" id="statsEndDate" class="date-control">
+              <button id="statsApplyRangeBtn" class="btn btn-secondary btn-sm" data-i18n="apply">Apply</button>
+              <button id="statsResetRangeBtn" class="btn btn-ghost btn-sm" data-i18n="reset">Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 概览卡片 -->
+        <div class="stats-overview" id="statsOverview">
+          <div class="stats-card">
+            <div class="stats-card-value" id="statTotal">0</div>
+            <div class="stats-card-label" data-i18n="statsTotalBookmarks">Bookmarks</div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-value" id="statTags">0</div>
+            <div class="stats-card-label" data-i18n="statsTotalTags">Tags</div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-value" id="statDomains">0</div>
+            <div class="stats-card-label" data-i18n="statsUniqueDomains">Domains</div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-value" id="statFolders">0</div>
+            <div class="stats-card-label" data-i18n="statsFolders">Folders</div>
+          </div>
+        </div>
+
+        <!-- 健康度评分 -->
+        <div class="setting-card stats-health-card">
+          <div class="stats-health-header">
+            <div>
+              <div class="setting-label" data-i18n="statsHealthScore">Health Score</div>
+              <div class="setting-desc" id="healthScoreDesc" data-i18n="statsHealthScoreDesc">Overall quality of your bookmark collection</div>
+            </div>
+            <div class="stats-health-score" id="healthScoreValue">—</div>
+          </div>
+          <div class="stats-health-details" id="healthScoreDetails"></div>
+          <div class="stats-health-actions">
+            <button id="favoriteHealthScoreBtn" class="btn btn-secondary btn-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+              </svg>
+              <span data-i18n="statsFavoriteScore">Favorite this score</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 时间趋势 -->
+        <div class="stats-chart-card">
+          <div class="stats-chart-header">
+            <h3 class="stats-chart-title" data-i18n="statsTrend">Collection Trend</h3>
+            <div class="stats-chart-tabs" id="trendTabs">
+              <button class="tab-btn active" data-trend="daily" data-i18n="statsDaily">Daily</button>
+              <button class="tab-btn" data-trend="weekly" data-i18n="statsWeekly">Weekly</button>
+              <button class="tab-btn" data-trend="monthly" data-i18n="statsMonthly">Monthly</button>
+            </div>
+          </div>
+          <div class="stats-chart" id="trendChart"></div>
+        </div>
+
+        <!-- 标签 & 域名 -->
+        <div class="stats-chart-grid">
+          <div class="stats-chart-card">
+            <h3 class="stats-chart-title" data-i18n="statsTopTags">Top Tags</h3>
+            <div class="stats-chart" id="tagsChart"></div>
+          </div>
+          <div class="stats-chart-card">
+            <h3 class="stats-chart-title" data-i18n="statsTopDomains">Top Domains</h3>
+            <div class="stats-chart" id="domainsChart"></div>
+          </div>
+        </div>
+
+        <!-- 时段 & 文件夹 -->
+        <div class="stats-chart-grid">
+          <div class="stats-chart-card">
+            <h3 class="stats-chart-title" data-i18n="statsHourly">Active Hours</h3>
+            <div class="stats-chart" id="hoursChart"></div>
+          </div>
+          <div class="stats-chart-card">
+            <h3 class="stats-chart-title" data-i18n="statsFolderDist">Folder Distribution</h3>
+            <div class="stats-chart" id="foldersChart"></div>
+          </div>
+        </div>
+
+        <!-- 自动标签准确率趋势 -->
+        <div class="stats-chart-card">
+          <div class="stats-chart-header">
+            <h3 class="stats-chart-title" data-i18n="statsAccuracyTrend">Auto-tag Accuracy Trend</h3>
+          </div>
+          <div class="stats-chart" id="accuracyTrendChart"></div>
+          <div id="accuracyTrendEmpty" class="stats-empty" style="display:none;" data-i18n="statsAccuracyTrendEmpty">No review data yet. Accuracy trend will appear after you confirm some tag suggestions.</div>
+        </div>
+
+        <!-- 导出 -->
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="statsExport">Export Report</div>
+              <div class="setting-desc" data-i18n="statsExportDesc">Download statistics as CSV or printable PDF</div>
+            </div>
+            <div class="setting-control">
+              <button id="exportStatsCsvBtn" class="btn btn-secondary btn-sm">CSV</button>
+              <button id="exportStatsPdfBtn" class="btn btn-secondary btn-sm">PDF</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 收藏的健康度评分 -->
+        <div class="stats-favorites-section" id="healthFavoritesSection" style="display:none;">
+          <h3 class="stats-chart-title" data-i18n="statsFavoriteScores">Favorite Health Scores</h3>
+          <div class="stats-favorites-list" id="healthFavoritesList"></div>
+        </div>
+      </div>
+
+      <!-- RSS 订阅 -->
+      <div class="panel-section" id="panel-rss">
+        <h2 class="panel-title" data-i18n="rssSettings">RSS Subscriptions</h2>
+        <div class="setting-desc tagrules-intro" data-i18n="rssSettingsDesc">Configure RSS feed polling, notifications and bookmark integration</div>
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="rssPollInterval">Poll Interval (minutes)</div>
+              <div class="setting-desc" data-i18n="rssPollIntervalDesc">How often to fetch new articles from subscriptions</div>
+            </div>
+            <div class="setting-control">
+              <select id="rssPollIntervalSelect" class="select-control compact">
+                <option value="10">10</option>
+                <option value="15">15</option>
+                <option value="30" selected>30</option>
+                <option value="60">60</option>
+                <option value="120">120</option>
+                <option value="240">240</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="rssMaxItems">Max items per feed</div>
+              <div class="setting-desc" data-i18n="rssMaxItemsDesc">Maximum number of articles retained per feed (oldest evicted first)</div>
+            </div>
+            <div class="setting-control">
+              <select id="rssMaxItemsSelect" class="select-control compact">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="200">200</option>
+                <option value="500">500</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="rssDefaultFolder">Default bookmark folder</div>
+              <div class="setting-desc" data-i18n="rssDefaultFolderDesc">Where articles saved from RSS are stored</div>
+            </div>
+            <div class="setting-control">
+              <select id="rssDefaultFolderSelect" class="select-control">
+                <option value="" data-i18n="rssDefaultFolderNone">— None —</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="rssAutoDiscover">Auto-discover feeds</div>
+              <div class="setting-desc" data-i18n="rssAutoDiscoverDesc">Detect RSS feeds when visiting pages (for the context menu)</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="rssAutoDiscoverToggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="rssNotifyNew">New article notifications</div>
+              <div class="setting-desc" data-i18n="rssNotifyNewDesc">Show a desktop notification when new articles arrive</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="rssNotifyNewToggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="rssProxyFallback">Proxy fallback</div>
+              <div class="setting-desc" data-i18n="rssProxyFallbackDesc">Fall back to a public proxy when direct fetch fails (for sources unreachable from your network)</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="rssProxyFallbackToggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+          <div class="setting-row setting-row--full" id="rssProxyUrlRow">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="rssProxyUrl">Proxy server URL</div>
+              <div class="setting-desc" data-i18n="rssProxyUrlDesc">Use {url} as the feed URL placeholder. Supports rss2json-style (JSON) and raw (XML) proxies</div>
+              <div class="proxy-input-group">
+                <input type="text" id="rssProxyUrlInput" class="tagrule-input proxy-url-input" placeholder="https://api.rss2json.com/v1/api.json?rss_url={url}">
+                <button id="rssProxyTestBtn" class="btn btn-secondary" type="button">
+                  <span data-i18n="rssProxyTest">Test</span>
+                </button>
+                <button id="rssProxySaveBtn" class="btn btn-primary" type="button">
+                  <span data-i18n="rssProxySave">Save</span>
+                </button>
+              </div>
+              <div id="rssProxyTestResult" class="proxy-test-result"></div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="rssRefreshAll">Refresh All Now</div>
+              <div class="setting-desc" id="rssLastUpdatedDesc">—</div>
+            </div>
+            <div class="setting-control">
+              <button id="rssRefreshAllBtn" class="btn btn-secondary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="23 4 23 10 17 10"/>
+                  <polyline points="1 20 1 14 7 14"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                <span data-i18n="rssRefreshAll">Refresh All</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 关于 -->
+      <div class="panel-section" id="panel-about">
+        <h2 class="panel-title" data-i18n="about">About</h2>
+        <div class="setting-card">
+          <div class="about-content">
+            <div class="about-logo">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+              </svg>
+            </div>
+            <h3 class="about-name">AI Bookmark OS</h3>
+            <p class="about-version"><span data-i18n="version">Version</span> 1.0.0</p>
+            <a href="https://github.com/jdf12/AI Bookmark OS" target="_blank" rel="noopener noreferrer" class="about-github-link" data-i18n-title="aboutGithub">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+              </svg>
+            </a>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="../../shared/i18n.js"></script>
+  <script src="../../shared/ai-logger.js"></script>
+  <script src="../../shared/bookmark-stats.js"></script>
+  <script src="../../shared/simple-charts.js"></script>
+  <script src="settings.js?v=2"></script>
+</body>
+</html>

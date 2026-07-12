@@ -1,0 +1,8 @@
+node_modules
+dist
+dist-ai
+.sources
+vendor/markline
+.DS_Store
+*.log
+*.tsbuildinfo

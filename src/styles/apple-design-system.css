@@ -1,0 +1,271 @@
+/* AI Bookmark OS ? Apple HIG Design System
+   Shared visual language for timeline + AI surfaces.
+   Import first; page CSS may override local layout only. */
+
+:root {
+  /* Surfaces */
+  --bg-primary: #F2F2F7;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #E5E5EA;
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-active: rgba(0, 0, 0, 0.08);
+  --bg-elevated: rgba(255, 255, 255, 0.82);
+  --bg-glass: rgba(255, 255, 255, 0.72);
+  --bg-glass-strong: rgba(255, 255, 255, 0.88);
+
+  /* Text */
+  --text-primary: #1C1C1E;
+  --text-secondary: #636366;
+  --text-tertiary: #8E8E93;
+  --text-disabled: #AEAEB2;
+  --text-on-accent: #FFFFFF;
+
+  /* Borders */
+  --border-light: rgba(60, 60, 67, 0.12);
+  --border-medium: rgba(60, 60, 67, 0.18);
+  --border-strong: rgba(60, 60, 67, 0.29);
+  --border-glass: rgba(255, 255, 255, 0.45);
+  --separator: rgba(60, 60, 67, 0.12);
+
+  /* Brand */
+  --accent: #0A84FF;
+  --accent-hover: #0077ED;
+  --accent-pressed: #0066CC;
+  --accent-light: rgba(10, 132, 255, 0.12);
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --accent-secondary: #5E5CE6;
+
+  /* Semantic */
+  --danger: #FF3B30;
+  --danger-hover: #E0342B;
+  --danger-light: rgba(255, 59, 48, 0.12);
+  --success: #34C759;
+  --success-light: rgba(52, 199, 89, 0.14);
+  --warning: #FF9F0A;
+  --warning-light: rgba(255, 159, 10, 0.14);
+
+  /* Shadows (soft, Apple-like) */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.10), 0 2px 6px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.16), 0 4px 12px rgba(0, 0, 0, 0.06);
+
+  /* Spacing scale (4pt) */
+  --space-2xs: 2px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 24px;
+  --space-3xl: 32px;
+
+  /* Radius */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 9999px;
+
+  /* Typography */
+  --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.45;
+  --font-weight-regular: 400;
+  --font-weight-medium: 510;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Motion */
+  --ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --transition-fast: 140ms var(--ease-standard);
+  --transition-normal: 200ms var(--ease-standard);
+  --transition-slow: 280ms var(--ease-emphasized);
+
+  /* Control metrics */
+  --control-height-sm: 28px;
+  --control-height-md: 32px;
+  --control-height-lg: 36px;
+  --hit-target-min: 32px;
+
+  /* Compat aliases used by older page CSS */
+  --bg: var(--bg-primary);
+  --panel: var(--bg-secondary);
+  --card: var(--bg-secondary);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --border: var(--border-light);
+  --input-bg: var(--bg-secondary);
+  --primary-btn-text: var(--text-on-accent);
+  --app-font: var(--font-family);
+  --app-font-size: var(--font-size-base);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #000000;
+    --bg-secondary: #1C1C1E;
+    --bg-tertiary: #2C2C2E;
+    --bg-hover: rgba(255, 255, 255, 0.06);
+    --bg-active: rgba(255, 255, 255, 0.10);
+    --bg-elevated: rgba(28, 28, 30, 0.86);
+    --bg-glass: rgba(28, 28, 30, 0.72);
+    --bg-glass-strong: rgba(28, 28, 30, 0.88);
+
+    --text-primary: #F5F5F7;
+    --text-secondary: #A1A1A6;
+    --text-tertiary: #8E8E93;
+    --text-disabled: #636366;
+
+    --border-light: rgba(84, 84, 88, 0.45);
+    --border-medium: rgba(84, 84, 88, 0.55);
+    --border-strong: rgba(84, 84, 88, 0.72);
+    --border-glass: rgba(255, 255, 255, 0.08);
+    --separator: rgba(84, 84, 88, 0.45);
+
+    --accent-light: rgba(10, 132, 255, 0.22);
+    --accent-soft: rgba(10, 132, 255, 0.16);
+    --danger-light: rgba(255, 69, 58, 0.18);
+    --success-light: rgba(48, 209, 88, 0.18);
+    --warning-light: rgba(255, 159, 10, 0.18);
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.42);
+    --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.5);
+
+    --bg: var(--bg-primary);
+    --panel: var(--bg-secondary);
+    --card: var(--bg-secondary);
+    --text: var(--text-primary);
+    --muted: var(--text-secondary);
+    --border: var(--border-light);
+    --input-bg: var(--bg-tertiary);
+  }
+}
+
+/* Base */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  letter-spacing: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* Shared controls */
+.ab-btn,
+button.primary,
+.btn.primary,
+.modal-btn--save,
+.ai-workspace__btn,
+.ai-entry-banner__btn {
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast),
+    opacity var(--transition-fast),
+    filter var(--transition-fast);
+}
+
+button:not(:disabled):active,
+.ab-btn:not(:disabled):active,
+.btn:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+button:focus-visible,
+.btn:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, white);
+  outline-offset: 2px;
+}
+
+button:disabled,
+.btn:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Glass bars */
+.ab-glass,
+.topbar,
+.toolbar,
+.header,
+.ai-page-header,
+.sa-topbar,
+.settings-header {
+  backdrop-filter: saturate(180%) blur(18px);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
+}
+
+/* Card language */
+.ab-card,
+.card,
+.modal,
+.preview,
+.panel {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Smooth scrollbars (webkit) */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-tertiary) 45%, transparent);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-secondary) 55%, transparent);
+  background-clip: content-box;
+  border: 2px solid transparent;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}

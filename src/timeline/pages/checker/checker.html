@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title data-i18n="checkerTitle">Broken Bookmark Checker</title>
+  <link rel="stylesheet" href="../../shared/apple-design-system.css">
+  <link rel="stylesheet" href="../../shared/apple-page-polish.css">
+  <link rel="stylesheet" href="checker.css">
+</head>
+<body>
+  <div class="checker-container">
+    <!-- 顶部导航 -->
+    <header class="checker-header">
+      <div class="checker-header-inner">
+        <button id="backBtn" class="back-btn" data-i18n-title="back">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12"/>
+            <polyline points="12 19 5 12 12 5"/>
+          </svg>
+        </button>
+        <h1 class="checker-title" data-i18n="checkerTitle">Broken Bookmark Checker</h1>
+        <nav class="page-nav" aria-label="AI Bookmark OS">
+          <button id="workspaceBtn" class="page-nav-btn" type="button">工作台</button>
+          <button id="aiClassifyBtn" class="page-nav-btn" type="button">AI 分类</button>
+          <button id="settingsBtn" class="page-nav-btn" type="button">设置</button>
+        </nav>
+      </div>
+    </header>
+
+    <!-- 内容区 -->
+    <div class="checker-content">
+      <!-- 摘要统计 -->
+      <div class="summary-bar" id="summaryBar" style="display:none;">
+        <div class="summary-item summary-total">
+          <span class="summary-num" id="totalChecked">0</span>
+          <span class="summary-label" data-i18n="checkerTotal">Total</span>
+        </div>
+        <div class="summary-item summary-ok">
+          <span class="summary-num" id="totalOk">0</span>
+          <span class="summary-label" data-i18n="checkerOk">Valid</span>
+        </div>
+        <div class="summary-item summary-broken">
+          <span class="summary-num" id="totalBroken">0</span>
+          <span class="summary-label" data-i18n="checkerBroken">Broken</span>
+        </div>
+        <div class="summary-item summary-warning">
+          <span class="summary-num" id="totalWarning">0</span>
+          <span class="summary-label" data-i18n="checkerWarning">Warning</span>
+        </div>
+      </div>
+
+      <!-- 操作栏 -->
+      <div class="action-bar">
+        <button id="startCheckBtn" class="action-btn action-btn--primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span data-i18n="checkerStart">Start Check</span>
+        </button>
+        <button id="stopCheckBtn" class="action-btn action-btn--danger" style="display:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          </svg>
+          <span data-i18n="checkerStop">Stop</span>
+        </button>
+        <button id="deleteAllBrokenBtn" class="action-btn action-btn--danger-outline" style="display:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+          <span data-i18n="checkerDeleteAllBroken">Clean Up Broken</span>
+        </button>
+        <div class="filter-group">
+          <button class="filter-btn active" data-filter="all" data-i18n="checkerFilterAll">All</button>
+          <button class="filter-btn" data-filter="broken" data-i18n="checkerFilterBroken">Broken</button>
+          <button class="filter-btn" data-filter="warning" data-i18n="checkerFilterWarning">Warning</button>
+          <button class="filter-btn" data-filter="ok" data-i18n="checkerFilterOk">Valid</button>
+        </div>
+      </div>
+
+      <!-- 进度条 -->
+      <div class="progress-bar" id="progressBar" style="display:none;">
+        <div class="progress-fill" id="progressFill"></div>
+        <span class="progress-text" id="progressText">0%</span>
+      </div>
+
+      <!-- 空状态 -->
+      <div id="emptyState" class="state-view">
+        <svg class="state-illustration" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <p class="state-title" data-i18n="checkerEmptyTitle">Click "Start Check" to detect broken bookmarks</p>
+        <p class="state-hint" data-i18n="checkerEmptyHint">This will check all bookmark links for availability</p>
+      </div>
+
+      <!-- 加载状态 -->
+      <div id="loadingState" class="state-view" style="display:none;">
+        <div class="loading-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <p class="state-title" data-i18n="checkerLoading">Loading bookmarks...</p>
+      </div>
+
+      <!-- 结果列表 -->
+      <div id="resultList" class="result-list" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="../../shared/i18n.js"></script>
+  <script src="checker.js"></script>
+</body>
+</html>

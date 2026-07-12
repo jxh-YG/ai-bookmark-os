@@ -1,0 +1,70 @@
+/* Apple HIG unified polish (AI Bookmark OS) */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+}
+button,
+.icon-btn,
+.btn,
+.modal-btn,
+.sort-dropdown-btn,
+.footer-menu-item {
+  transition: background 140ms cubic-bezier(0.25,0.1,0.25,1), color 140ms cubic-bezier(0.25,0.1,0.25,1), border-color 140ms cubic-bezier(0.25,0.1,0.25,1), box-shadow 140ms cubic-bezier(0.25,0.1,0.25,1), transform 140ms cubic-bezier(0.25,0.1,0.25,1), opacity 140ms cubic-bezier(0.25,0.1,0.25,1);
+}
+button:not(:disabled):active,
+.icon-btn:not(:disabled):active,
+.btn:not(:disabled):active,
+.modal-btn:not(:disabled):active {
+  transform: scale(0.98);
+}
+button:focus-visible,
+.icon-btn:focus-visible,
+.btn:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, white);
+  outline-offset: 2px;
+}
+input,
+select,
+textarea,
+.search-input,
+.edit-input {
+  border-radius: var(--radius-md, 10px);
+  border-color: var(--border-light);
+  background: var(--bg-secondary, #fff);
+  transition: border-color 140ms cubic-bezier(0.25,0.1,0.25,1), box-shadow 140ms cubic-bezier(0.25,0.1,0.25,1), background 140ms cubic-bezier(0.25,0.1,0.25,1);
+}
+input:focus,
+select:focus,
+textarea:focus,
+.search-input:focus,
+.edit-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-medium));
+  box-shadow: 0 0 0 3px var(--accent-light);
+  outline: none;
+}
+.topbar,
+.sa-topbar,
+.settings-header,
+.toolbar {
+  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  backdrop-filter: saturate(180%) blur(18px);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
+  border-color: var(--border-light);
+}
+.modal,
+.card,
+.panel,
+.preview {
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-light);
+}
+.modal-overlay,
+.modal-backdrop {
+  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.28);
+}

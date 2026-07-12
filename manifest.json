@@ -1,0 +1,92 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extName__",
+  "version": "1.0.0",
+  "default_locale": "zh_CN",
+  "description": "__MSG_extDescription__",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "minimum_chrome_version": "114",
+  "homepage_url": "https://github.com/local/ai-bookmark-os",
+  "permissions": [
+    "bookmarks",
+    "storage",
+    "contextMenus",
+    "activeTab",
+    "alarms",
+    "tabs",
+    "history",
+    "notifications",
+    "scripting",
+    "declarativeNetRequest",
+    "sidePanel",
+    "favicon",
+    "windows"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "src/timeline/background/background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_popup": "src/timeline/pages/popup/popup.html",
+    "default_title": "__MSG_actionTitle__",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "commands": {
+    "open-command-palette": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+E",
+        "mac": "Command+Shift+E"
+      },
+      "description": "__MSG_cmdOpenPalette__"
+    },
+    "open-popup": {
+      "suggested_key": {
+        "default": "Alt+Shift+B",
+        "mac": "Alt+Shift+B"
+      },
+      "description": "__MSG_cmdOpenPopup__"
+    },
+    "quick-bookmark": {
+      "suggested_key": {
+        "default": "Alt+Shift+D",
+        "mac": "Alt+Shift+D"
+      },
+      "description": "__MSG_cmdQuickBookmark__"
+    },
+    "open-ai-sidepanel": {
+      "suggested_key": {
+        "default": "Alt+Shift+A",
+        "mac": "Alt+Shift+A"
+      },
+      "description": "__MSG_cmdOpenAiSidepanel__"
+    }
+  },
+  "omnibox": {
+    "keyword": "bk"
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "frame_allow_rules",
+        "enabled": true,
+        "path": "src/timeline/rules/frame_allow.json"
+      }
+    ]
+  }
+}

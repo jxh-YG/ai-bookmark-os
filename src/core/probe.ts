@@ -1,0 +1,154 @@
+// 单条链接探测逻辑（在 background service worker 中执行，避免 sidepanel CSP 噪音）
+
+export interface ProbeResult {
+  kind: 'ok' | 'dead' | 'suspect';
+  detail: string;
+}
+
+const DEAD_CHECK_TIMEOUT = 10_000;
+
+/** 软 404 / 失效内容关键词（标题或正文命中即疑似） */
+const SOFT_DEAD_PATTERNS: RegExp[] = [
+  // 中文
+  /页面不存在|页面未找到|找不到(该|此|你要的)?页面|页面已删除|内容(不存在|已删除|已下架|已失效)/,
+  /商品(不存在|已下架|已失效|已删除)|宝贝(不存在|已下架)|店铺不存在/,
+  /(文章|视频|帖子|资源)(不存在|已删除|已下架|已失效)/,
+  /(请|需要?)登录后(查看|访问|继续)|登录(后)?才能(查看|访问)/,
+  // 英文
+  /page not found|404 not found|content (not found|unavailable|removed)/i,
+  /(item|product|listing) (no longer available|not available|removed|unavailable)/i,
+  /(sign|log) ?in (required|to (view|continue|see))/i,
+  /this (page|video|post|account) (isn'?t|is not|is no longer) available/i,
+];
+
+/** 登录页 URL 特征 */
+const LOGIN_URL_PATTERN = /\/(login|signin|sign-in|passport|auth|account\/login)\b/i;
+
+/**
+ * 判断是否为 JS 渲染型页面（SPA 壳）：
+ * 初始 HTML 几乎无内容、靠脚本运行时渲染，静态分析无法代表真实页面。
+ */
+function isJsRenderedShell(html: string): boolean {
+  const hasScript = /<script[\s>]/i.test(html);
+  if (!hasScript) return false;
+  return (
+    /<div[^>]+id=["'](root|app|__next|__nuxt|main)["']/i.test(html) ||
+    /data-reactroot|data-v-app|ng-version|__NEXT_DATA__|window\.__INITIAL_STATE__/i.test(html) ||
+    (html.match(/<script/gi)?.length ?? 0) >= 3
+  );
+}
+
+/** 内容层启发式：200 响应进一步判断是否为软 404 / 登录墙 / 跳首页 */
+function inspectContent(originalUrl: string, finalUrl: string, html: string): ProbeResult {
+  // 1) 重定向漂移：原 URL 有深路径，最终却落在首页或登录页
+  try {
+    const orig = new URL(originalUrl);
+    const final = new URL(finalUrl);
+    const origHasPath = orig.pathname.length > 1 || orig.search.length > 0;
+    if (LOGIN_URL_PATTERN.test(final.pathname)) {
+      return { kind: 'suspect', detail: 'login-wall' };
+    }
+    if (origHasPath && final.hostname === orig.hostname && final.pathname === '/' && !final.search) {
+      return { kind: 'suspect', detail: 'redirect-home' };
+    }
+  } catch {
+    /* URL 解析失败则跳过该项检查 */
+  }
+
+  const jsShell = isJsRenderedShell(html);
+  const titleMatch = /<title[^>]*>([^<]*)<\/title>/i.exec(html);
+  const title = titleMatch?.[1] ?? '';
+
+  // 2) 软 404 / 失效关键词：SPA 壳只信 <title>；静态页面检查 title + 正文前 4KB
+  const snippet = jsShell ? '' : html.slice(0, 4096);
+  for (const p of SOFT_DEAD_PATTERNS) {
+    if (p.test(title) || (snippet && p.test(snippet))) {
+      return { kind: 'suspect', detail: 'soft-404' };
+    }
+  }
+
+  // 3) 空页面：仅对非 JS 渲染的静态页面生效
+  if (!jsShell) {
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/g, '')
+      .trim();
+    if (html.length > 0 && text.length < 80) {
+      return { kind: 'suspect', detail: 'empty-page' };
+    }
+  }
+
+  return { kind: 'ok', detail: '' };
+}
+
+/** 抓取页面 meta（用于低信息量标题的分类增强）；失败返回 null */
+export async function fetchPageMeta(
+  url: string,
+): Promise<{ title: string; description: string } | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6_000);
+  try {
+    const resp = await fetch(url, {
+      method: 'GET',
+      signal: ctrl.signal,
+      redirect: 'follow',
+      credentials: 'include',
+    });
+    const ct = resp.headers.get('content-type') ?? '';
+    if (!resp.ok || !ct.includes('text/html')) return null;
+    const html = (await resp.text()).slice(0, 32768);
+    const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() ?? '';
+    const description =
+      /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i.exec(html)?.[1]?.trim() ??
+      /<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i.exec(html)?.[1]?.trim() ??
+      '';
+    if (!title && !description) return null;
+    return { title, description };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 探测单条链接：协议层 + 内容层两级判定 */
+export async function probeUrl(url: string): Promise<ProbeResult> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), DEAD_CHECK_TIMEOUT);
+  try {
+    const resp = await fetch(url, {
+      method: 'GET',
+      signal: ctrl.signal,
+      redirect: 'follow',
+      // 携带 Cookie：用户在浏览器中登录过的站点探测时生效，
+      // 避免已登录的页面被误报为「需登录」
+      credentials: 'include',
+    });
+
+    // —— 协议层 ——
+    if (resp.status === 404 || resp.status === 410) {
+      return { kind: 'dead', detail: `HTTP ${resp.status}` };
+    }
+    if (resp.status === 403 || resp.status === 401) {
+      return { kind: 'suspect', detail: `HTTP ${resp.status}` };
+    }
+    if (resp.status >= 500) {
+      return { kind: 'suspect', detail: `HTTP ${resp.status}` };
+    }
+    if (resp.status >= 400) {
+      return { kind: 'dead', detail: `HTTP ${resp.status}` };
+    }
+
+    // —— 内容层（仅 HTML 响应）——
+    const ct = resp.headers.get('content-type') ?? '';
+    if (ct.includes('text/html')) {
+      const html = (await resp.text()).slice(0, 65536);
+      return inspectContent(url, resp.url, html);
+    }
+    return { kind: 'ok', detail: '' };
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') return { kind: 'suspect', detail: 'timeout' };
+    return { kind: 'dead', detail: 'unreachable' };
+  } finally {
+    clearTimeout(timer);
+  }
+}

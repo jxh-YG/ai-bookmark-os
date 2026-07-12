@@ -1,0 +1,854 @@
+{
+  "appName": {
+    "message": "AI Bookmark OS",
+    "description": "扩展名称"
+  },
+  "appDescription": {
+    "message": "以可视化时间轴方式查看和管理书签。一键搜索、同步和整理。",
+    "description": "扩展描述"
+  },
+  "syncBookmarks": {
+    "message": "同步书签",
+    "description": "同步按钮提示"
+  },
+  "clearRecords": {
+    "message": "清空记录",
+    "description": "清空按钮提示"
+  },
+  "searchPlaceholder": {
+    "message": "搜索书签...",
+    "description": "搜索框占位符"
+  },
+  "emptyTitle": {
+    "message": "还没有书签记录",
+    "description": "空状态标题"
+  },
+  "emptyHint": {
+    "message": "点击右上角同步按钮导入书签",
+    "description": "空状态提示"
+  },
+  "searchEmptyTitle": {
+    "message": "没有找到匹配的书签",
+    "description": "搜索无结果标题"
+  },
+  "searchEmptyHint": {
+    "message": "试试其他关键词",
+    "description": "搜索无结果提示"
+  },
+  "justNow": {
+    "message": "刚刚",
+    "description": "相对时间"
+  },
+  "minutesAgo": {
+    "message": "$COUNT$ 分钟前",
+    "description": "相对时间",
+    "placeholders": {
+      "count": { "content": "$1", "example": "5" }
+    }
+  },
+  "hoursAgo": {
+    "message": "$COUNT$ 小时前",
+    "description": "相对时间",
+    "placeholders": {
+      "count": { "content": "$1", "example": "3" }
+    }
+  },
+  "daysAgo": {
+    "message": "$COUNT$ 天前",
+    "description": "相对时间",
+    "placeholders": {
+      "count": { "content": "$1", "example": "2" }
+    }
+  },
+  "today": {
+    "message": "今天",
+    "description": "日期分组标签"
+  },
+  "yesterday": {
+    "message": "昨天",
+    "description": "日期分组标签"
+  },
+  "bookmarkCount": {
+    "message": "$COUNT$ 个书签",
+    "description": "日期分组书签数量",
+    "placeholders": {
+      "count": { "content": "$1", "example": "12" }
+    }
+  },
+  "untitled": {
+    "message": "无标题",
+    "description": "无标题书签默认名称"
+  },
+  "openLink": {
+    "message": "打开链接",
+    "description": "打开按钮提示"
+  },
+  "delete": {
+    "message": "删除",
+    "description": "删除按钮提示"
+  },
+  "loadFailed": {
+    "message": "加载失败",
+    "description": "提示消息"
+  },
+  "loadFailedRetry": {
+    "message": "加载失败，请重试",
+    "description": "提示消息"
+  },
+  "syncSuccessNew": {
+    "message": "已同步，新增 $COUNT$ 个书签",
+    "description": "提示消息",
+    "placeholders": {
+      "count": { "content": "$1", "example": "5" }
+    }
+  },
+  "syncSuccessTotal": {
+    "message": "已同步，共 $COUNT$ 个书签",
+    "description": "提示消息",
+    "placeholders": {
+      "count": { "content": "$1", "example": "100" }
+    }
+  },
+  "syncFailed": {
+    "message": "同步失败",
+    "description": "提示消息"
+  },
+  "syncFailedRetry": {
+    "message": "同步失败，请重试",
+    "description": "提示消息"
+  },
+  "deleted": {
+    "message": "已删除",
+    "description": "提示消息"
+  },
+  "deleteFailed": {
+    "message": "删除失败",
+    "description": "提示消息"
+  },
+  "nothingToClear": {
+    "message": "没有可清空的记录",
+    "description": "提示消息"
+  },
+  "confirmClear": {
+    "message": "确定要清空所有书签记录吗？\n\n共 $COUNT$ 条记录，此操作不影响 Chrome 原始书签。",
+    "description": "确认对话框",
+    "placeholders": {
+      "count": { "content": "$1", "example": "50" }
+    }
+  },
+  "allCleared": {
+    "message": "已清空所有记录",
+    "description": "提示消息"
+  },
+  "clearFailed": {
+    "message": "清空失败",
+    "description": "提示消息"
+  },
+  "newBookmarkDetected": {
+    "message": "检测到新书签",
+    "description": "提示消息"
+  },
+  "settings": {
+    "message": "设置",
+    "description": "设置按钮提示和页面标题"
+  },
+  "back": {
+    "message": "返回",
+    "description": "返回按钮提示"
+  },
+  "appearance": {
+    "message": "外观",
+    "description": "设置分区标题"
+  },
+  "theme": {
+    "message": "主题",
+    "description": "主题设置标签"
+  },
+  "themeDesc": {
+    "message": "选择浅色或深色模式",
+    "description": "主题设置描述"
+  },
+  "systemDefault": {
+    "message": "跟随系统",
+    "description": "系统默认选项"
+  },
+  "light": {
+    "message": "浅色",
+    "description": "浅色主题选项"
+  },
+  "dark": {
+    "message": "深色",
+    "description": "深色主题选项"
+  },
+  "language": {
+    "message": "语言",
+    "description": "语言分区标题"
+  },
+  "displayLanguage": {
+    "message": "显示语言",
+    "description": "语言设置标签"
+  },
+  "languageDesc": {
+    "message": "选择你偏好的语言",
+    "description": "语言设置描述"
+  },
+  "about": {
+    "message": "关于",
+    "description": "关于分区标题"
+  },
+  "version": {
+    "message": "版本",
+    "description": "版本标签"
+  },
+  "settingsSaved": {
+    "message": "设置已保存",
+    "description": "提示消息"
+  },
+  "timelineMode": {
+    "message": "时间轴",
+    "description": "工具栏模式标签"
+  },
+  "sortNewestFirst": {
+    "message": "最新在前",
+    "description": "排序按钮提示"
+  },
+  "sortOldestFirst": {
+    "message": "最早在前",
+    "description": "排序按钮提示"
+  },
+  "sortBy": {
+    "message": "排序方式",
+    "description": "排序下拉提示"
+  },
+  "sortNewest": {
+    "message": "最新",
+    "description": "排序选项：最新在前"
+  },
+  "sortOldest": {
+    "message": "最旧",
+    "description": "排序选项：最旧在前"
+  },
+  "sortHottest": {
+    "message": "最火",
+    "description": "排序选项：点击最多"
+  },
+  "sortColdest": {
+    "message": "最淡",
+    "description": "排序选项：点击最少"
+  },
+  "clickCount": {
+    "message": "$COUNT$ 次点击",
+    "description": "点击次数标签",
+    "placeholders": {
+      "count": { "content": "$1", "example": "42" }
+    }
+  },
+  "heatLevel1": {
+    "message": "微温",
+    "description": "热度等级标签"
+  },
+  "heatLevel2": {
+    "message": "火热",
+    "description": "热度等级标签"
+  },
+  "heatLevel3": {
+    "message": "炽热",
+    "description": "热度等级标签"
+  },
+  "heatLevel4": {
+    "message": "灼烧",
+    "description": "热度等级标签"
+  },
+  "heatLevel5": {
+    "message": "炼狱",
+    "description": "热度等级标签"
+  },
+  "cmdOpenPalette": {
+    "message": "打开命令面板",
+    "description": "命令面板快捷键描述"
+  },
+  "cmdOpenPopup": {
+    "message": "打开书签弹窗",
+    "description": "弹窗快捷键描述"
+  },
+  "moreOptions": {
+    "message": "更多选项",
+    "description": "三点菜单按钮提示"
+  },
+  "openPanel": {
+    "message": "打开独立窗口",
+    "description": "打开面板菜单项"
+  },
+  "toggleSidebar": {
+    "message": "切换侧栏",
+    "description": "侧栏切换按钮"
+  },
+  "folderTree": {
+    "message": "文件夹",
+    "description": "文件夹树区域标题"
+  },
+  "tagFilter": {
+    "message": "标签筛选",
+    "description": "标签筛选区域标题"
+  },
+  "viewTimeline": {
+    "message": "时间线",
+    "description": "时间线视图模式"
+  },
+  "viewGrid": {
+    "message": "网格",
+    "description": "网格视图模式"
+  },
+  "viewList": {
+    "message": "列表",
+    "description": "列表视图模式"
+  },
+  "statusReady": {
+    "message": "就绪",
+    "description": "状态栏就绪文本"
+  },
+  "movedToFolder": {
+    "message": "已移动到文件夹",
+    "description": "书签移动到文件夹提示"
+  },
+  "dragHint": {
+    "message": "拖拽书签到侧栏文件夹移动",
+    "description": "拖拽提示"
+  },
+  "allFolders": {
+    "message": "全部书签",
+    "description": "全部书签节点"
+  },
+  "collapseAll": {
+    "message": "全部折叠",
+    "description": "折叠所有文件夹节点"
+  },
+  "expandAll": {
+    "message": "全部展开",
+    "description": "展开所有文件夹节点"
+  },
+  "folderCount": {
+    "message": "$1 项",
+    "description": "文件夹项目计数"
+  },
+  "currentFolder": {
+    "message": "文件夹: $1",
+    "description": "状态栏当前文件夹显示"
+  },
+  "recentlyDeleted": {
+    "message": "最近删除",
+    "description": "最近删除视图标题"
+  },
+  "retentionDays": {
+    "message": "保留天数",
+    "description": "最近删除保留天数设置项"
+  },
+  "retentionDaysDesc": {
+    "message": "最近删除的书签保留多长时间",
+    "description": "保留天数说明"
+  },
+  "days": {
+    "message": "天",
+    "description": "天单位"
+  },
+  "clearAllDeleted": {
+    "message": "清空全部",
+    "description": "清空最近删除按钮"
+  },
+  "deletedEmptyTitle": {
+    "message": "暂无最近删除",
+    "description": "空状态标题"
+  },
+  "deletedEmptyHint": {
+    "message": "删除的书签会出现在这里",
+    "description": "空状态提示"
+  },
+  "back": {
+    "message": "返回",
+    "description": "返回按钮"
+  },
+  "cmdQuickBookmark": {
+    "message": "一键收藏",
+    "description": "快捷键收藏描述"
+  },
+  "shortcutSection": {
+    "message": "快捷键",
+    "description": "快捷键设置区域标题"
+  },
+  "notificationSection": {
+    "message": "通知设置",
+    "description": "通知设置区域标题"
+  },
+  "notificationSectionDesc": {
+    "message": "配置收藏成功后的桌面通知。",
+    "description": "通知设置区域说明"
+  },
+  "notificationEnabled": {
+    "message": "桌面通知",
+    "description": "启用桌面通知开关标签"
+  },
+  "notificationEnabledDesc": {
+    "message": "收藏成功后，在 Windows 通知中心显示提示。",
+    "description": "启用桌面通知开关说明"
+  },
+  "cmdQuickBookmarkDesc": {
+    "message": "一键收藏当前页面（自动建议目录）",
+    "description": "一键收藏快捷键说明"
+  },
+  "cmdOpenPaletteDesc": {
+    "message": "打开搜索面板查找书签",
+    "description": "命令面板快捷键说明"
+  },
+  "cmdOpenPopupDesc": {
+    "message": "打开书签弹窗",
+    "description": "弹窗快捷键说明"
+  },
+  "omniboxKeyword": {
+    "message": "地址栏搜索",
+    "description": "地址栏搜索标签"
+  },
+  "omniboxKeywordDesc": {
+    "message": "在地址栏输入关键字直接搜索书签",
+    "description": "地址栏搜索说明"
+  },
+  "shortcutConflictTitle": {
+    "message": "检测到快捷键冲突",
+    "description": "冲突提示标题"
+  },
+  "shortcutConflictInternal": {
+    "message": "重复绑定",
+    "description": "内部冲突提示"
+  },
+  "shortcutCustomize": {
+    "message": "自定义快捷键",
+    "description": "自定义快捷键标签"
+  },
+  "shortcutCustomizeDesc": {
+    "message": "在 Chrome 快捷键设置中修改",
+    "description": "自定义快捷键说明"
+  },
+  "shortcutOpenSettings": {
+    "message": "打开设置",
+    "description": "打开快捷键设置按钮"
+  },
+  "shortcutNotSet": {
+    "message": "未设置",
+    "description": "快捷键未设置"
+  },
+  "shortcutHint": {
+    "message": "请注意：要在基于Chrome内核的浏览器中修改快捷键，请访问[扩展管理页面] -> [管理快捷键]",
+    "description": "快捷键设置提示正文"
+  },
+  "shortcutHint2": {
+    "message": "去设置",
+    "description": "快捷键设置链接 - 打开 chrome://extensions/shortcuts"
+  },
+  "statsSection": {
+    "message": "统计",
+    "description": "统计设置项标题"
+  },
+  "statsDateRange": {
+    "message": "时间范围",
+    "description": "统计时间范围标签"
+  },
+  "statsDateRangeDesc": {
+    "message": "按书签收藏日期筛选统计数据",
+    "description": "统计时间范围说明"
+  },
+  "statsTotalBookmarks": {
+    "message": "书签数",
+    "description": "总书签数标签"
+  },
+  "statsTotalTags": {
+    "message": "标签数",
+    "description": "总标签数标签"
+  },
+  "statsUniqueDomains": {
+    "message": "域名数",
+    "description": "独立域名数标签"
+  },
+  "statsFolders": {
+    "message": "文件夹数",
+    "description": "文件夹数标签"
+  },
+  "statsHealthScore": {
+    "message": "健康度评分",
+    "description": "健康度评分标题"
+  },
+  "statsHealthScoreDesc": {
+    "message": "书签库整体质量评分",
+    "description": "健康度评分说明"
+  },
+  "statsHealthScoreEmpty": {
+    "message": "添加一些书签后即可查看健康度评分",
+    "description": "健康度评分空状态"
+  },
+  "statsFavoriteScore": {
+    "message": "收藏此评分",
+    "description": "收藏健康度评分按钮"
+  },
+  "statsFavoriteExists": {
+    "message": "今天已经收藏过该评分",
+    "description": "评分已存在提示"
+  },
+  "statsNoScoreToFavorite": {
+    "message": "暂无可收藏的评分",
+    "description": "无评分可收藏提示"
+  },
+  "statsFavoriteScores": {
+    "message": "收藏的健康度评分",
+    "description": "收藏的健康度评分列表标题"
+  },
+  "statsAllTime": {
+    "message": "全部时间",
+    "description": "全部时间标签"
+  },
+  "statsTrend": {
+    "message": "收藏趋势",
+    "description": "收藏趋势图表标题"
+  },
+  "statsDaily": {
+    "message": "日",
+    "description": "日趋势标签"
+  },
+  "statsWeekly": {
+    "message": "周",
+    "description": "周趋势标签"
+  },
+  "statsMonthly": {
+    "message": "月",
+    "description": "月趋势标签"
+  },
+  "statsTopTags": {
+    "message": "热门标签",
+    "description": "热门标签图表标题"
+  },
+  "statsTopDomains": {
+    "message": "热门域名",
+    "description": "热门域名图表标题"
+  },
+  "statsHourly": {
+    "message": "活跃时段",
+    "description": "活跃时段图表标题"
+  },
+  "statsFolderDist": {
+    "message": "文件夹分布",
+    "description": "文件夹分布图表标题"
+  },
+  "statsAccuracyTrend": {
+    "message": "自动标签准确率趋势",
+    "description": "自动标签准确率趋势图表标题"
+  },
+  "statsAccuracyTrendEmpty": {
+    "message": "暂无审核数据。确认一些标签建议后，准确率趋势将在这里显示。",
+    "description": "准确率趋势空状态"
+  },
+  "statsExport": {
+    "message": "导出报告",
+    "description": "导出报告按钮"
+  },
+  "statsExportDesc": {
+    "message": "将统计数据导出为 CSV 或可打印的 PDF",
+    "description": "导出报告说明"
+  },
+  "statsNoData": {
+    "message": "没有可导出的数据",
+    "description": "无数据可导出提示"
+  },
+  "statsPopupBlocked": {
+    "message": "弹窗被阻止。请允许弹窗以打印报告。",
+    "description": "弹窗被阻止提示"
+  },
+  "reset": {
+    "message": "重置",
+    "description": "重置按钮"
+  },
+  "reasonContentDisagree": {
+    "message": "正文判断不一致",
+    "description": "主动学习原因：正文判断不一致"
+  },
+  "reasonAIAssisted": {
+    "message": "AI 辅助分类",
+    "description": "主动学习原因：AI 辅助分类"
+  },
+  "aiAssistedTag": {
+    "message": "AI 辅助分类",
+    "description": "AI 辅助分类来源标识"
+  },
+  "aiSection": {
+    "message": "AI 辅助分类",
+    "description": "AI 设置分区标题"
+  },
+  "aiSectionDesc": {
+    "message": "当规则引擎不确定时，调用云端 AI 辅助分类。仅发送标题和 URL，不发送正文。",
+    "description": "AI 设置分区说明"
+  },
+  "aiEnabled": {
+    "message": "启用 AI 辅助分类",
+    "description": "启用 AI 开关"
+  },
+  "aiEnabledDesc": {
+    "message": "对低置信度书签触发云端 AI 辅助分类",
+    "description": "启用 AI 开关说明"
+  },
+  "aiProvider": {
+    "message": "AI 服务商",
+    "description": "AI 服务商选择"
+  },
+  "aiProviderDesc": {
+    "message": "选择你使用的 AI 服务商",
+    "description": "AI 服务商说明"
+  },
+  "aiProviderZhipu": {
+    "message": "智谱 AI (GLM-4-Flash, 免费)",
+    "description": "智谱 AI 选项"
+  },
+  "aiProviderDeepSeek": {
+    "message": "DeepSeek",
+    "description": "DeepSeek 选项"
+  },
+  "aiProviderGoogle": {
+    "message": "Google Gemini",
+    "description": "Google Gemini 选项"
+  },
+  "aiProviderOpenAI": {
+    "message": "OpenAI",
+    "description": "OpenAI 选项"
+  },
+  "aiProviderTongyi": {
+    "message": "阿里通义",
+    "description": "阿里通义选项"
+  },
+  "aiProviderCustom": {
+    "message": "自定义",
+    "description": "自定义提供商选项"
+  },
+  "aiCustomFormat": {
+    "message": "API 格式",
+    "description": "自定义提供商 API 格式标签"
+  },
+  "aiCustomFormatDesc": {
+    "message": "选择 API 协议格式",
+    "description": "自定义提供商 API 格式说明"
+  },
+  "aiFormatOpenAI": {
+    "message": "OpenAI Chat Completions",
+    "description": "OpenAI 格式选项"
+  },
+  "aiFormatAnthropic": {
+    "message": "Anthropic Messages",
+    "description": "Anthropic 格式选项"
+  },
+  "aiCustomEndpoint": {
+    "message": "API 请求地址",
+    "description": "自定义提供商请求地址标签"
+  },
+  "aiCustomEndpointDesc": {
+    "message": "完整的 API 端点 URL",
+    "description": "自定义提供商请求地址说明"
+  },
+  "aiCustomEndpointRequired": {
+    "message": "请填写 API 请求地址",
+    "description": "自定义提供商请求地址必填提示"
+  },
+  "aiFullUrl": {
+    "message": "使用完整 URL",
+    "description": "使用输入的完整 URL，不再拼接路径"
+  },
+  "aiFullUrlDesc": {
+    "message": "使用输入的完整 URL，不再拼接路径",
+    "description": "使用完整 URL 说明"
+  },
+  "aiEndpointHintOpenAI": {
+    "message": "请填写兼容 OpenAI API 的服务端点地址，不要以斜杠结尾。/chat/completions 将会被补充到你填写的地址末尾。",
+    "description": "OpenAI 格式端点提示"
+  },
+  "aiEndpointHintAnthropic": {
+    "message": "请填写兼容 Claude API 的服务端点地址，不要以斜杠结尾。/v1/messages 将会被补充到你填写的地址末尾。",
+    "description": "Anthropic 格式端点提示"
+  },
+  "aiEndpointHintFullUrl": {
+    "message": "请填写完整请求 URL，请求将直接使用此 URL，不拼接路径。",
+    "description": "使用完整 URL 时的端点提示"
+  },
+  "aiApiKey": {
+    "message": "API Key",
+    "description": "API Key 输入框标签"
+  },
+  "aiApiKeyDesc": {
+    "message": "API Key 仅保存在本地，不会同步",
+    "description": "API Key 说明"
+  },
+  "aiApiKeyRequired": {
+    "message": "请填写 API Key",
+    "description": "API Key 必填提示"
+  },
+  "aiModel": {
+    "message": "模型",
+    "description": "模型输入框标签"
+  },
+  "aiModelDesc": {
+    "message": "留空使用推荐模型",
+    "description": "自定义模型说明"
+  },
+  "aiModelRequired": {
+    "message": "请填写模型",
+    "description": "模型必填提示"
+  },
+  "aiTimeout": {
+    "message": "请求超时（秒）",
+    "description": "AI 请求超时"
+  },
+  "aiTimeoutDesc": {
+    "message": "单次 AI 请求最大等待时间",
+    "description": "AI 请求超时说明"
+  },
+  "aiStatus": {
+    "message": "状态",
+    "description": "AI 状态标签"
+  },
+  "aiStatusNotConfigured": {
+    "message": "未配置",
+    "description": "AI 未配置状态"
+  },
+  "aiStatusDisabled": {
+    "message": "AI 已关闭",
+    "description": "AI 已关闭状态"
+  },
+  "aiStatusNoKey": {
+    "message": "未填写 API Key",
+    "description": "AI 未填写 API Key 状态"
+  },
+  "aiStatusFormat": {
+    "message": "触发 $1 次 · 成功 $2 次 · 失败 $3 次 · 平均 $4ms",
+    "description": "AI 状态统计格式"
+  },
+  "aiTest": {
+    "message": "测试连接",
+    "description": "测试 AI 连接按钮"
+  },
+  "aiTesting": {
+    "message": "测试中...",
+    "description": "AI 测试中按钮"
+  },
+  "aiTestSuccess": {
+    "message": "连接成功，示例标签：$1",
+    "description": "AI 测试成功提示"
+  },
+  "aiTestFailed": {
+    "message": "连接失败：$1",
+    "description": "AI 测试失败提示"
+  },
+  "aiClearCache": {
+    "message": "清除缓存",
+    "description": "清除 AI 缓存按钮"
+  },
+  "aiCacheCleared": {
+    "message": "AI 缓存已清除",
+    "description": "AI 缓存清除成功提示"
+  },
+  "aiPrivacyNotice": {
+    "message": "启用 AI 后，书签标题和 URL 将发送至你选择的 AI 服务商。不会发送正文内容。",
+    "description": "AI 隐私声明"
+  },
+  "aiLogsTitle": {
+    "message": "AI 辅助分类日志",
+    "description": "AI 日志卡片标题"
+  },
+  "aiLogsStats": {
+    "message": "—",
+    "description": "AI 日志统计占位"
+  },
+  "aiLogsStatsFormat": {
+    "message": "总计 $TOTAL$ 条 · 成功 $SUCCESS$ 次 · 失败 $FAIL$ 次 · 缓存命中 $CACHE$ 次（命中率 $RATE$）· 平均 $AVG$",
+    "description": "AI 日志统计摘要格式",
+    "placeholders": {
+      "total": { "content": "$1", "example": "36" },
+      "success": { "content": "$2", "example": "3" },
+      "fail": { "content": "$3", "example": "0" },
+      "cache": { "content": "$4", "example": "6" },
+      "avg": { "content": "$5", "example": "1.3s" },
+      "rate": { "content": "$6", "example": "16.7%" }
+    }
+  },
+  "aiRefreshLogs": {
+    "message": "刷新日志",
+    "description": "刷新 AI 日志按钮"
+  },
+  "aiClearLogs": {
+    "message": "清空日志",
+    "description": "清空 AI 日志按钮"
+  },
+  "aiLogsEmpty": {
+    "message": "暂无日志",
+    "description": "AI 日志为空提示"
+  },
+  "aiLogsLoadFailed": {
+    "message": "加载日志失败",
+    "description": "AI 日志加载失败提示"
+  },
+  "aiLogsCleared": {
+    "message": "日志已清空",
+    "description": "AI 日志清空成功提示"
+  },
+  "aiClearLogsConfirm": {
+    "message": "确定清空所有 AI 辅助分类日志？",
+    "description": "清空 AI 日志确认"
+  },
+  "aiLogTrigger": {
+    "message": "触发分类",
+    "description": "AI 日志类型：触发分类"
+  },
+  "aiLogTriggerSkip": {
+    "message": "跳过触发",
+    "description": "AI 日志类型：跳过触发"
+  },
+  "aiLogCacheHit": {
+    "message": "缓存命中",
+    "description": "AI 日志类型：缓存命中"
+  },
+  "aiLogClassifySuccess": {
+    "message": "分类成功",
+    "description": "AI 日志类型：分类成功"
+  },
+  "aiLogClassifyFail": {
+    "message": "分类失败",
+    "description": "AI 日志类型：分类失败"
+  },
+  "aiLogBackfillSuccess": {
+    "message": "回填成功",
+    "description": "AI 日志类型：回填成功"
+  },
+  "aiLogBackfillFail": {
+    "message": "回填失败",
+    "description": "AI 日志类型：回填失败"
+  },
+  "aiLogBackfillSkip": {
+    "message": "回填跳过",
+    "description": "AI 日志类型：回填跳过"
+  },
+  "aiLogReason": {
+    "message": "原因",
+    "description": "AI 日志原因标签"
+  },
+  "aiLogDomain": {
+    "message": "域名",
+    "description": "AI 日志域名标签"
+  },
+  "aiLogDuration": {
+    "message": "耗时",
+    "description": "AI 日志耗时标签"
+  },
+  "aiLogTags": {
+    "message": "标签",
+    "description": "AI 日志标签标签"
+  },
+  "aiLogError": {
+    "message": "错误",
+    "description": "AI 日志错误标签"
+  },
+  "aiLogTime": {
+    "message": "时间",
+    "description": "AI 日志时间标签"
+  }
+}

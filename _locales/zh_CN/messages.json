@@ -1,0 +1,9 @@
+{
+  "extName": { "message": "AI Bookmark OS" },
+  "extDescription": { "message": "统一 AI 分类与时间线书签管理的 Apple OS 风格扩展" },
+  "actionTitle": { "message": "打开 AI Bookmark OS" },
+  "cmdOpenPalette": { "message": "打开命令面板" },
+  "cmdOpenPopup": { "message": "打开 AI Bookmark OS 弹窗" },
+  "cmdQuickBookmark": { "message": "快速收藏当前页面" },
+  "cmdOpenAiSidepanel": { "message": "打开 AI 分类侧边栏" }
+}

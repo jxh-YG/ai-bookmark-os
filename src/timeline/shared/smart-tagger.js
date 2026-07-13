@@ -1741,13 +1741,21 @@ async function autoTagBookmark(bookmark) {
   const contentText = bookmark.contentText || '';
   const metaDesc = bookmark.metaDesc || '';
   const ogDescription = bookmark.ogDescription || '';
-  const metaKeywords = Array.isArray(bookmark.metaKeywords) ? bookmark.metaKeywords : [];
+  const metaKeywords = Array.isArray(bookmark.metaKeywords)
+    ? bookmark.metaKeywords
+    : (Array.isArray(bookmark.contentMetaKeywords) ? bookmark.contentMetaKeywords : []);
+  const extractedHeadings = Array.isArray(bookmark.headings)
+    ? bookmark.headings
+    : (Array.isArray(bookmark.contentHeadings) ? bookmark.contentHeadings : []);
+  const structuredTypes = Array.isArray(bookmark.structuredTypes)
+    ? bookmark.structuredTypes
+    : (Array.isArray(bookmark.contentStructuredTypes) ? bookmark.contentStructuredTypes : []);
 
   // 优先使用已提取的纯文本，回退到 HTML
   const fingerprint = contentText
     ? extractPageFingerprintFromText(contentText)
     : (bookmark.html ? extractPageFingerprintFromHtml(bookmark.html) : extractPageFingerprintFromText(''));
-  const headings = fingerprint.headings || [];
+  const headings = [...new Set([...(fingerprint.headings || []), ...extractedHeadings])];
 
   const richText = [
     cleanTitle(bookmark.title || ''),
@@ -1757,7 +1765,8 @@ async function autoTagBookmark(bookmark) {
     ogDescription,
     fingerprint.leadingText,
     ...headings,
-    ...metaKeywords
+    ...metaKeywords,
+    ...structuredTypes
   ].filter(Boolean).join(' ');
 
   const baseText = `${cleanTitle(bookmark.title || '')} ${bookmark.url || ''} ${bookmark.domain || ''}`;
@@ -1990,12 +1999,20 @@ function autoTagBookmarkSync(bookmark) {
   const contentText = bookmark.contentText || '';
   const metaDesc = bookmark.metaDesc || '';
   const ogDescription = bookmark.ogDescription || '';
-  const metaKeywords = Array.isArray(bookmark.metaKeywords) ? bookmark.metaKeywords : [];
+  const metaKeywords = Array.isArray(bookmark.metaKeywords)
+    ? bookmark.metaKeywords
+    : (Array.isArray(bookmark.contentMetaKeywords) ? bookmark.contentMetaKeywords : []);
+  const extractedHeadings = Array.isArray(bookmark.headings)
+    ? bookmark.headings
+    : (Array.isArray(bookmark.contentHeadings) ? bookmark.contentHeadings : []);
+  const structuredTypes = Array.isArray(bookmark.structuredTypes)
+    ? bookmark.structuredTypes
+    : (Array.isArray(bookmark.contentStructuredTypes) ? bookmark.contentStructuredTypes : []);
 
   const fingerprint = contentText
     ? extractPageFingerprintFromText(contentText)
     : (bookmark.html ? extractPageFingerprintFromHtml(bookmark.html) : extractPageFingerprintFromText(''));
-  const headings = fingerprint.headings || [];
+  const headings = [...new Set([...(fingerprint.headings || []), ...extractedHeadings])];
 
   const richText = [
     cleanTitle(bookmark.title || ''),
@@ -2005,7 +2022,8 @@ function autoTagBookmarkSync(bookmark) {
     ogDescription,
     fingerprint.leadingText,
     ...headings,
-    ...metaKeywords
+    ...metaKeywords,
+    ...structuredTypes
   ].filter(Boolean).join(' ');
 
   const baseText = `${cleanTitle(bookmark.title || '')} ${bookmark.url || ''} ${bookmark.domain || ''}`;
@@ -2379,6 +2397,15 @@ function needsHumanReview(results, bookmark) {
   const top1 = results[0];
   const top2 = results[1];
 
+  const readableContent = String(bookmark?.contentText || bookmark?.excerpt || bookmark?.metaDesc || '').trim();
+  const hasPageSignals = readableContent.length >= 80 ||
+    (Array.isArray(bookmark?.headings) && bookmark.headings.length > 0) ||
+    (Array.isArray(bookmark?.contentHeadings) && bookmark.contentHeadings.length > 0) ||
+    (Array.isArray(bookmark?.metaKeywords) && bookmark.metaKeywords.length > 0) ||
+    (Array.isArray(bookmark?.contentMetaKeywords) && bookmark.contentMetaKeywords.length > 0) ||
+    (Array.isArray(bookmark?.structuredTypes) && bookmark.structuredTypes.length > 0) ||
+    (Array.isArray(bookmark?.contentStructuredTypes) && bookmark.contentStructuredTypes.length > 0);
+
   // 强规则信号：文件夹 / 域名 / 用户覆盖
   const hasStrongSignal = (tag) => (tag.signals || []).some(s =>
     s === 'folder' || s === 'domain' || s.startsWith('user-override')
@@ -2387,6 +2414,9 @@ function needsHumanReview(results, bookmark) {
   // 标题信息极少，规则信号可能不可靠
   const cleanedTitle = cleanTitle(bookmark?.title || '');
   const titleTokens = tokenize(cleanedTitle);
+  if (!hasPageSignals && !hasStrongSignal(top1)) {
+    return { need: true, reason: 'insufficient_page_evidence' };
+  }
   if (titleTokens.length <= 2 && !hasStrongSignal(top1)) {
     return { need: true, reason: 'title_noise' };
   }

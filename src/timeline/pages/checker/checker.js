@@ -112,30 +112,31 @@ async function checkUrl(url, timeoutMs) {
 
 function localizeCheckResult(result) {
   const msg = result.message || '';
+  const statusCode = Number(result.statusCode) || 0;
 
   if (result.status === 'ok') {
     return { ...result, message: i18n('checkerMsgOk') };
   }
 
   if (result.status === 'broken') {
-    if (msg.includes('404')) {
+    if (statusCode === 404 || statusCode === 410 || msg.includes('Not Found')) {
       return { ...result, message: i18n('checkerErr404') };
-    }
-    if (msg.includes('Client Error')) {
-      return { ...result, message: i18n('checkerClientError') };
-    }
-    if (msg.includes('Server Error')) {
-      return { ...result, message: i18n('checkerServerError') };
-    }
-    if (msg.includes('DNS') || msg.includes('Network Error')) {
-      return { ...result, message: i18n('checkerErrDNS') };
     }
     return { ...result, message: i18n('checkerErrNetwork') };
   }
 
   if (result.status === 'warning') {
+    if (msg.includes('Unconfirmed HTTP') || msg.includes('usable or inconclusive')) {
+      return { ...result, message: 'Page is reachable or its content cannot be confirmed; please verify manually.' };
+    }
     if (msg.includes('Timeout')) {
       return { ...result, message: i18n('checkerErrTimeout') };
+    }
+    if (msg.includes('Access Restricted')) {
+      return { ...result, message: i18n('checkerClientError') };
+    }
+    if (msg.includes('Server Error')) {
+      return { ...result, message: i18n('checkerServerError') };
     }
     return { ...result, message: i18n('checkerErrNetwork') };
   }
@@ -396,6 +397,8 @@ async function deleteSingleBookmark(id, url, element) {
         }
       }, 200);
       showToast(i18n('deleted'), 'success');
+    } else {
+      showToast(i18n('deleteFailed'), 'error');
     }
   } catch (err) {
     showToast(i18n('deleteFailed'), 'error');
@@ -410,16 +413,20 @@ async function deleteAllBroken() {
   if (!confirm(i18n('checkerConfirmDeleteAll', [String(brokenItems.length)]))) return;
 
   let deleted = 0;
+  const deletedIds = new Set();
   for (const item of brokenItems) {
     try {
-      await chrome.runtime.sendMessage({ action: 'deleteBookmark', id: item.bookmark.id, url: item.bookmark.url });
-      deleted++;
+      const result = await chrome.runtime.sendMessage({ action: 'deleteBookmark', id: item.bookmark.id, url: item.bookmark.url });
+      if (result?.success) {
+        deleted++;
+        deletedIds.add(item.bookmark.id);
+      }
     } catch (err) {
       console.error('删除失败:', item.bookmark.url, err);
     }
   }
 
-  results = results.filter(r => r.checkResult.status !== 'broken');
+  results = results.filter(r => r.checkResult.status !== 'broken' || !deletedIds.has(r.bookmark.id));
   renderResults();
   updateSummary();
 

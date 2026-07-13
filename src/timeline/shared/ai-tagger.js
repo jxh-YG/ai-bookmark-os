@@ -302,6 +302,17 @@ function readableBookmarkContent(bookmark, limit = 4000) {
   return String(bookmark.excerpt || bookmark.metaDesc || '').trim().slice(0, Math.min(limit, 800));
 }
 
+function readablePageSignals(bookmark) {
+  const headings = Array.isArray(bookmark.headings) ? bookmark.headings : [];
+  const keywords = Array.isArray(bookmark.metaKeywords) ? bookmark.metaKeywords : [];
+  const types = Array.isArray(bookmark.structuredTypes) ? bookmark.structuredTypes : [];
+  return {
+    headings: headings.slice(0, 12).join(' | '),
+    keywords: keywords.slice(0, 20).join(', '),
+    types: types.slice(0, 12).join(', ')
+  };
+}
+
 // ===== Prompt 构建 =====
 function buildClassificationPrompt(bookmark, candidateTags, tagDescriptions, assistPrompt) {
   const tagList = Object.entries(tagDescriptions)
@@ -314,8 +325,13 @@ function buildClassificationPrompt(bookmark, candidateTags, tagDescriptions, ass
     .join('\n') || '  （无）';
 
   const basePrompt = normalizeAIAssistPrompt(assistPrompt);
+  const pageSignals = readablePageSignals(bookmark);
 
   return `${basePrompt}
+
+Page structure: ${pageSignals.headings || '(not extracted)'}
+Page keywords: ${pageSignals.keywords || '(not extracted)'}
+Structured content types: ${pageSignals.types || '(not extracted)'}
 
 你是一个书签分类助手。请根据书签的标题、URL、域名、页面正文和描述，从下面的候选标签中选出最匹配的 1-3 个标签。
 
@@ -377,6 +393,7 @@ function buildBookmarkSuggestionPrompt(bookmark, candidateTags, tagDescriptions,
     .join('\n') || '  (none)';
 
   const basePrompt = normalizeAIAssistPrompt(assistPrompt);
+  const pageSignals = readablePageSignals(bookmark);
 
   const existingFolders = (Array.isArray(folderOptions) ? folderOptions : [])
     .map(folder => String(folder?.path || '').trim())
@@ -386,6 +403,10 @@ function buildBookmarkSuggestionPrompt(bookmark, candidateTags, tagDescriptions,
     .join('\n') || '  （无）';
 
   return `${basePrompt}
+
+Page structure: ${pageSignals.headings || '(not extracted)'}
+Page keywords: ${pageSignals.keywords || '(not extracted)'}
+Structured content types: ${pageSignals.types || '(not extracted)'}
 
 你是一个书签收藏前的 AI 分类建议助手。请根据标题、URL、域名、页面正文、页面摘要与规则引擎候选标签，给出用户确认前可编辑的收藏建议。
 
@@ -436,7 +457,11 @@ function parseBookmarkSuggestion(raw, validTags) {
       tags,
       folderPath: String(parsed.folderPath || parsed.folder || parsed.category || '').trim().slice(0, 120),
       summary: String(parsed.summary || '').trim().slice(0, 120),
-      reason: String(parsed.reason || '').trim().slice(0, 160)
+      reason: String(parsed.reason || '').trim().slice(0, 160),
+      evidence: (Array.isArray(parsed.evidence) ? parsed.evidence : [])
+        .map(item => String(item || '').trim().slice(0, 100))
+        .filter(Boolean)
+        .slice(0, 3)
     };
   } catch {
     return null;

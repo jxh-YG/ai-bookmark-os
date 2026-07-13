@@ -4,6 +4,22 @@ import type { ApplyRecord, CategoryNode, FlatBookmark, BookmarkBackup } from '..
 const APPLY_FOLDER_TITLE = '✨ AI 整理';
 const BACKUP_KEY = 'bookmarkBackup';
 const APPLY_RECORD_KEY = 'applyRecord';
+/* Legacy corrupted text retained only to avoid a source-encoding rewrite. It is not executed.
+const BROWSER_BOOKMARK_ROOT_TITLES = new Set([
+  '涔︾鏍?, '鍏朵粬涔︾', '绉诲姩璁惧涔︾',
+  'Bookmarks bar', 'Other bookmarks', 'Mobile bookmarks',
+]);
+*/
+const BROWSER_BOOKMARK_ROOT_TITLES = new Set([
+  String.fromCharCode(0x4e66, 0x7b7e, 0x680f),
+  String.fromCharCode(0x5176, 0x4ed6, 0x4e66, 0x7b7e),
+  String.fromCharCode(0x79fb, 0x52a8, 0x8bbe, 0x5907, 0x4e66, 0x7b7e),
+  'Bookmarks bar', 'Other bookmarks', 'Mobile bookmarks',
+]);
+
+function isBrowserBookmarkRoot(title: string | undefined): boolean {
+  return BROWSER_BOOKMARK_ROOT_TITLES.has((title ?? '').trim());
+}
 
 /** 读取并拍平整棵书签树（只保留有 url 的项，过滤无效协议） */
 export async function getFlatBookmarks(): Promise<FlatBookmark[]> {
@@ -22,7 +38,7 @@ export async function getFlatBookmarks(): Promise<FlatBookmark[]> {
           });
         }
       } else if (node.children) {
-        walk(node.children, node.title ? [...path, node.title] : path);
+        walk(node.children, node.title && !isBrowserBookmarkRoot(node.title) ? [...path, node.title] : path);
       }
     }
   };

@@ -174,16 +174,24 @@ button, input, select, textarea {
 
 /* ===== Search bar (match popup) ===== */
 .search-bar {
-  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
   padding: var(--space-sm) var(--space-lg);
   background: var(--bg-glass);
   border-bottom: 1px solid var(--border-light);
   flex-shrink: 0;
 }
 
+.search-field {
+  position: relative;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .search-icon {
   position: absolute;
-  left: calc(var(--space-lg) + 12px);
+  left: 12px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-tertiary);
@@ -214,7 +222,7 @@ button, input, select, textarea {
 
 .search-clear {
   position: absolute;
-  right: calc(var(--space-lg) + 8px);
+  right: 8px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
@@ -233,6 +241,18 @@ button, input, select, textarea {
 .search-clear:hover {
   background: var(--text-tertiary);
   color: var(--bg-primary);
+}
+
+.search-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: 0 0 auto;
+}
+
+.search-actions .btn {
+  min-height: 36px;
+  white-space: nowrap;
 }
 
 /* ===== Action bar ===== */
@@ -340,7 +360,7 @@ button.danger:hover {
 }
 
 /* generic button fallback for remaining plain buttons */
-button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):not(.nav-item) {
+button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -356,7 +376,7 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):not(
   transition: all var(--transition-fast);
 }
 
-button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):hover {
+button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item):hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
@@ -434,6 +454,11 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):hove
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+
+.tree.running > .tree-list {
+  display: none;
 }
 
 .tree-list { display: flex; flex-direction: column; gap: 2px; }
@@ -477,9 +502,33 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):hove
   background: color-mix(in srgb, var(--bg-hover) 88%, transparent); box-shadow: var(--shadow-xs);
 }
 
-.folder-row.drag-over {
+.folder-row[draggable="true"] {
+  cursor: grab;
+}
+
+.folder-row[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.folder-row.drag-inside {
   background: var(--accent-light);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.folder-row.drag-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.folder-row.drag-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.bookmark-row.drag-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.bookmark-row.drag-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .chevron {
@@ -539,6 +588,22 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):hove
   border-left: 1px solid var(--border-light);
 }
 
+.tree-root-dropzone {
+  min-height: 32px;
+  margin-top: 8px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-light);
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.tree-root-dropzone.drag-over {
+  background: var(--accent-light);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
 .bookmark-row {
   cursor: pointer;
   gap: var(--space-md);
@@ -566,7 +631,7 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):hove
 /* ===== Progress hero ===== */
 .classify-hero {
   width: min(360px, 100%);
-  margin: 24px auto;
+  margin: 0 auto;
   padding: 24px 20px;
   border-radius: var(--radius-lg);
   background: var(--bg-glass);
@@ -724,73 +789,13 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):hove
   to { opacity: 1; }
 }
 
-/* ===== Onboarding ===== */
-.onboarding {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--bg-glass-soft);
-  overflow: hidden;
-}
-
-.onboarding-body {
-  flex: 1;
-  overflow: auto;
-  padding: var(--space-lg);
-  background: var(--bg-secondary);
-}
-
-.ob-hero,
-.ob-step {
-  background: var(--bg-glass);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  padding: 16px;
-  margin-bottom: 12px;
-}
-
-.ob-logo {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  display: grid;
-  place-items: center;
-  background: var(--accent-light);
-  color: var(--accent);
-  margin-bottom: 10px;
-}
-
-.ob-hero h2 {
-  margin: 0 0 6px;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.ob-hero p,
-.ob-hint {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.ob-step-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  margin-bottom: 10px;
-}
-
-.ob-pills,
 .pills {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.pill,
-.ob-pills button {
+.pill {
   border: 1px solid var(--border-light);
   background: var(--bg-glass-soft);
   color: var(--text-secondary);
@@ -804,9 +809,7 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):hove
 }
 
 .pill.active,
-.ob-pills button.active,
-.pill:hover,
-.ob-pills button:hover {
+.pill:hover {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border-light));
   background: var(--accent-light);
   color: var(--accent);
@@ -819,55 +822,6 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):hove
   border-radius: var(--radius-full);
   background: var(--success-light);
   color: var(--success);
-}
-
-.ob-key-input {
-  width: 100%;
-  height: 36px;
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-md);
-  padding: 0 12px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  margin-bottom: 8px;
-  outline: none;
-  transition: all var(--transition-fast);
-}
-
-.ob-key-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-light);
-  background: var(--bg-glass-strong);
-}
-
-.ob-key-link {
-  color: var(--accent);
-  font-size: 12px;
-  text-decoration: none;
-}
-
-.ob-key-link:hover { text-decoration: underline; }
-
-.ob-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.ob-skip {
-  width: 100%;
-  margin-top: 4px;
-  border: none !important;
-  background: transparent !important;
-  color: var(--text-tertiary) !important;
-  min-height: 32px;
-  cursor: pointer;
-}
-
-.ob-skip:hover {
-  color: var(--accent) !important;
-  background: transparent !important;
 }
 
 /* Health remnants */
@@ -911,8 +865,6 @@ body,
 .panel,
 .card,
 .modal,
-.onboarding,
-.onboarding-card,
 .tree-panel,
 .tree-node,
 .health-panel,
@@ -940,7 +892,6 @@ body,
 
 .search-bar .search-input,
 .search-bar input,
-.ob-key-input,
 .edit-input,
 textarea,
 select {
@@ -954,27 +905,24 @@ select {
 .error-msg,
 .edit-hint,
 .health-panel,
-.onboarding-card,
 .modal {
   border-radius: var(--radius-lg, 16px);
 }
 
 .tree-node,
 .health-row,
-.pill,
-.ob-pills button {
+.pill {
   border-radius: var(--radius-md, 10px);
 }
 
 .tree-node:hover,
 .health-row:hover,
-.pill:hover,
-.ob-pills button:hover {
+.pill:hover {
   background: rgba(255,255,255,.52);
   box-shadow: var(--shadow-sm);
 }
 
-button:not(.icon-btn):not(.search-clear):not(.pill):not(.ob-skip):not(.nav-item),
+button:not(.icon-btn):not(.search-clear):not(.pill):not(.nav-item),
 .btn.primary,
 .primary {
   border-radius: var(--radius-md, 10px);
@@ -988,6 +936,17 @@ button:not(.icon-btn):not(.search-clear):not(.pill):not(.ob-skip):not(.nav-item)
 
   .search-bar {
     margin: 8px;
+  }
+
+  .search-bar {
+    gap: var(--space-xs);
+    padding-left: var(--space-sm);
+    padding-right: var(--space-sm);
+  }
+
+  .search-actions .btn {
+    padding-left: 8px;
+    padding-right: 8px;
   }
 }
 
@@ -1120,9 +1079,6 @@ body::before {
 .error-msg,
 .classify-hero,
 .modal,
-.onboarding-card,
-.ob-hero,
-.ob-step,
 .health-panel,
 .toolbar {
   background: var(--bg-glass, rgba(255,255,255,.68));
@@ -1148,9 +1104,6 @@ body::before {
 .error-msg,
 .classify-hero,
 .modal,
-.onboarding-card,
-.ob-hero,
-.ob-step,
 .health-panel,
 .toolbar {
   border-radius: var(--radius-lg, 16px);
@@ -1160,10 +1113,9 @@ body::before {
 .bookmark-row,
 .health-row,
 .pill,
-.ob-pills button,
 .btn,
 .icon-btn,
-button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):not(.nav-item) {
+button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item) {
   border-radius: var(--radius-md, 10px);
 }
 
@@ -1171,14 +1123,11 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):not(
 .bookmark-row,
 .health-row,
 .pill,
-.ob-pills button,
 .btn,
 .icon-btn,
 .classify-hero,
 .modal,
-.ob-step,
 .search-bar input,
-.ob-key-input,
 .edit-input,
 .rename-input,
 textarea,
@@ -1189,15 +1138,13 @@ select {
 .folder-row:hover,
 .bookmark-row:hover,
 .health-row:hover,
-.pill:hover,
-.ob-pills button:hover {
+.pill:hover {
   background: var(--bg-hover, rgba(255,255,255,.78));
   box-shadow: var(--shadow-sm);
 }
 
 .folder-row.drag-over,
 .pill.active,
-.ob-pills button.active,
 .ch-step.now {
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border-glass));
   background: var(--accent-light);
@@ -1206,7 +1153,6 @@ select {
 
 .search-bar .search-input,
 .search-bar input,
-.ob-key-input,
 .edit-input,
 .rename-input,
 textarea,
@@ -1216,7 +1162,6 @@ select {
 }
 
 .search-bar input:focus,
-.ob-key-input:focus,
 .edit-input:focus,
 .rename-input:focus,
 textarea:focus,
@@ -1244,7 +1189,7 @@ button.primary:hover {
 
 .btn,
 button.btn,
-button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.ob-skip):not(.nav-item) {
+button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item) {
   background: var(--bg-glass-soft, rgba(245,249,255,.58));
   border-color: var(--border-glass, rgba(255,255,255,.68));
 }

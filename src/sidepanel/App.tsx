@@ -5,7 +5,14 @@ import type {
   ClassifyResult,
   FlatBookmark,
 } from '../types';
-import { classify, classifyIncremental, estimateClassify, loadSavedResult, type ClassifyEstimate } from '../core/classifier';
+import {
+  classify,
+  classifyIncremental,
+  estimateClassify,
+  expandDuplicateBookmarks,
+  loadSavedResult,
+  type ClassifyEstimate,
+} from '../core/classifier';
 import {
   applyToBookmarks,
   backupBookmarks,
@@ -17,12 +24,11 @@ import {
   planApply,
   undoApply,
 } from '../core/bookmarks';
-import { deleteNode, moveBookmark, renameNode } from '../core/treeEdit';
+import { deleteNode, moveBookmark, moveNode, renameNode } from '../core/treeEdit';
 import { loadSettings } from '../core/settings';
 import { DEFAULT_SETTINGS, fontCss, type Settings } from '../types';
 import { applyColorMode, t } from '../core/i18n';
 import { Tree, type TreeEditHandlers } from './Tree';
-import { Onboarding } from './Onboarding';
 import { entriesSince, type ChangelogEntry } from '../core/changelog';
 import { resolveLang } from '../core/i18n';
 
@@ -50,8 +56,6 @@ export function App() {
   const [pendingIds, setPendingIds] = useState<string[]>([]);
   const [notice, setNotice] = useState('');
   const [estimate, setEstimate] = useState<ClassifyEstimate | null>(null);
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [obSkipped, setObSkipped] = useState(false);
   const [whatsNew, setWhatsNew] = useState<{ to: string; entries: ChangelogEntry[] } | null>(null);
   const [uiSettings, setUiSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const abortRef = useRef<AbortController | null>(null);
@@ -65,9 +69,6 @@ export function App() {
     chrome.storage.local
       .get('pendingNewBookmarks')
       .then((data) => setPendingIds(data.pendingNewBookmarks ?? []));
-    chrome.storage.local
-      .get('onboardingSkipped')
-      .then((data) => setObSkipped(!!data.onboardingSkipped));
     // 自动更新后首次打开：展示「新版本内容」弹窗（跨多版本更新会累积展示）
     chrome.storage.local.get('pendingWhatsNew').then((data) => {
       const p = data.pendingWhatsNew as { from: string; to: string } | undefined;
@@ -80,7 +81,6 @@ export function App() {
     loadSettings().then((s) => {
       setUiSettings(s);
       applyAppearance(s);
-      setSettingsLoaded(true);
     });
     const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
       if (area === 'local' && changes.settings?.newValue) {
@@ -137,6 +137,11 @@ export function App() {
 
   const running = progress.phase === 'labeling' || progress.phase === 'building' || progress.phase === 'assigning';
 
+  const openAiClassificationSettings = useCallback(() => {
+    setError('请先完成 AI 金字塔分类供应商设置，正在打开 AI 辅助分类设置。');
+    chrome.tabs.create({ url: chrome.runtime.getURL('pages/settings/settings.html#ai') });
+  }, []);
+
   /** 执行分类；limit 限制条数（试分类） */
   const runClassify = useCallback(async (limit?: number) => {
     setError('');
@@ -144,8 +149,7 @@ export function App() {
     setEstimate(null);
     const settings = await loadSettings();
     if (!settings.apiKey) {
-      setError(d.needApiKey);
-      chrome.tabs.create({ url: chrome.runtime.getURL('pages/settings/settings.html#ai') });
+      openAiClassificationSettings();
       return;
     }
     const all = await getFlatBookmarks();
@@ -156,7 +160,9 @@ export function App() {
     abortRef.current = ctrl;
     try {
       const r = await classify(settings, unique, setProgress, ctrl.signal);
-      setResult(r);
+      const expanded = expandDuplicateBookmarks(r, all);
+      await chrome.storage.local.set({ classifyResult: expanded });
+      setResult(expanded);
       if (limit) setNotice(d.trialNotice(unique.length));
     } catch (e) {
       if ((e as Error).name !== 'AbortError') {
@@ -166,21 +172,20 @@ export function App() {
         setProgress({ phase: 'idle', done: 0, total: 0 });
       }
     }
-  }, [d]);
+  }, [d, openAiClassificationSettings]);
 
   /** 点击分类：先出成本预估确认 */
   const startClassify = useCallback(async () => {
     setError('');
     const settings = await loadSettings();
     if (!settings.apiKey) {
-      setError(d.needApiKey);
-      chrome.tabs.create({ url: chrome.runtime.getURL('pages/settings/settings.html#ai') });
+      openAiClassificationSettings();
       return;
     }
     const all = await getFlatBookmarks();
     setBookmarks(all);
     setEstimate(await estimateClassify(dedupeByUrl(all), settings));
-  }, [d]);
+  }, [d, openAiClassificationSettings]);
 
   const cancelClassify = useCallback(() => {
     abortRef.current?.abort();
@@ -237,7 +242,10 @@ export function App() {
     () => ({
       onRename: (path, name) => updateTree((tree) => renameNode(tree, path, name)),
       onDelete: (path) => updateTree((tree) => deleteNode(tree, path)),
-      onMoveBookmark: (id, toPath) => updateTree((tree) => moveBookmark(tree, id, toPath)),
+      onMoveBookmark: (id, toPath, toIndex) => updateTree((tree) => moveBookmark(tree, id, toPath, toIndex)),
+      onMoveFolder: (fromPath, toParentPath, toIndex) => updateTree(
+        (tree) => moveNode(tree, fromPath, toParentPath, toIndex),
+      ),
       deleteConfirmText: d.deleteFolderConfirm,
     }),
     [updateTree, d],
@@ -249,8 +257,7 @@ export function App() {
     setError('');
     const settings = await loadSettings();
     if (!settings.apiKey) {
-      setError(d.needApiKey);
-      chrome.tabs.create({ url: chrome.runtime.getURL('pages/settings/settings.html#ai') });
+      openAiClassificationSettings();
       return;
     }
     const all = await getFlatBookmarks();
@@ -266,7 +273,9 @@ export function App() {
     abortRef.current = ctrl;
     try {
       const r = await classifyIncremental(settings, fresh, result, setProgress, ctrl.signal);
-      setResult(r);
+      const expanded = expandDuplicateBookmarks(r, all);
+      await chrome.storage.local.set({ classifyResult: expanded });
+      setResult(expanded);
       await chrome.storage.local.set({ pendingNewBookmarks: [] });
       chrome.action.setBadgeText({ text: '' });
     } catch (e) {
@@ -277,7 +286,7 @@ export function App() {
         setProgress({ phase: 'idle', done: 0, total: 0 });
       }
     }
-  }, [result, pendingIds, d]);
+  }, [result, pendingIds, d, openAiClassificationSettings]);
 
   const dismissPending = useCallback(async () => {
     await chrome.storage.local.set({ pendingNewBookmarks: [] });
@@ -326,19 +335,7 @@ export function App() {
 
   return (
     <div className="app app-desktop">
-      {settingsLoaded && !uiSettings.apiKey && !result && !running && !obSkipped ? (
-        <Onboarding
-          d={d}
-          settings={uiSettings}
-          bookmarkCount={bookmarks.length}
-          onStart={runClassify}
-          onSkip={() => {
-            setObSkipped(true);
-            chrome.storage.local.set({ onboardingSkipped: true });
-          }}
-        />
-      ) : (
-        <>
+      <>
           <header className="topbar">
             <div className="topbar-left">
               <svg className="logo-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -367,39 +364,40 @@ export function App() {
           </header>
 
           <div className="search-bar">
-            <svg className="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              className="search-input"
-              placeholder={d.searchPlaceholder}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {search.trim() ? (
-              <button type="button" className="search-clear" onClick={() => setSearch("")} aria-label="Clear">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            ) : null}
-          </div>
-
-          <div className="action-bar">
-            {running ? (
-              <button type="button" className="btn btn-danger" onClick={cancelClassify}>{d.cancel}</button>
-            ) : (
-              <button type="button" className="btn btn-primary" onClick={startClassify}>
-                {result ? d.reclassify : d.classify}
-              </button>
-            )}
-            {result && !running && (
-              <button type="button" className="btn btn-primary" onClick={() => setShowApplyModal(true)}>
-                {d.applyToBookmarks}
-              </button>
-            )}
+            <div className="search-field">
+              <svg className="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                className="search-input"
+                placeholder={d.searchPlaceholder}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search.trim() ? (
+                <button type="button" className="search-clear" onClick={() => setSearch("")} aria-label="Clear">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+            <div className="search-actions">
+              {running ? (
+                <button type="button" className="btn btn-danger btn-sm" onClick={cancelClassify}>{d.cancel}</button>
+              ) : (
+                <button type="button" className="btn btn-primary btn-sm" onClick={startClassify}>
+                  {result ? d.reclassify : d.classify}
+                </button>
+              )}
+              {result && !running && (
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowApplyModal(true)}>
+                  {d.applyToBookmarks}
+                </button>
+              )}
+            </div>
           </div>
 
           {pendingIds.length > 0 && result && !running && (
@@ -546,8 +544,7 @@ export function App() {
               </div>
             </div>
           )}
-        </>
-      )}
+      </>
 
       {whatsNew && (
         <div

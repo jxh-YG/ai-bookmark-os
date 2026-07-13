@@ -1941,6 +1941,8 @@ async function deleteBookmark(id, url, element) {
         renderTimeline(allBookmarks);
       }, 200);
       showToast(i18n('deleted'), 'success');
+    } else {
+      showToast(i18n('deleteFailed'), 'error');
     }
   } catch (err) {
     console.error('删除失败:', err);
@@ -1956,11 +1958,15 @@ async function handleClear() {
   try {
     const result = await chrome.runtime.sendMessage({ action: 'clearAll' });
     if (result && result.success) {
-      allBookmarks = [];
-      duplicateIds.clear();
       selectedIds.clear();
-      renderTimeline([]);
+      await loadBookmarks();
       showToast(i18n('allCleared'), 'success');
+    } else if (result?.removed) {
+      selectedIds.clear();
+      await loadBookmarks();
+      showToast(i18n('clearFailed'), 'error');
+    } else {
+      showToast(i18n('clearFailed'), 'error');
     }
   } catch (err) {
     console.error('清空失败:', err);
@@ -2079,6 +2085,13 @@ function setupBulkActions() {
         selectedIds.clear();
         await loadBookmarks();
         toggleBulkMode(false);
+      } else if (result?.removed) {
+        showToast(i18n('deleteFailed'), 'error');
+        selectedIds.clear();
+        await loadBookmarks();
+        toggleBulkMode(false);
+      } else {
+        showToast(i18n('deleteFailed'), 'error');
       }
     } catch (err) { console.error(err); }
   });
@@ -2402,11 +2415,8 @@ function openBookmarkNavPage() {
 }
 
 function openWorkspacePage() {
-  chrome.windows.create({
-    url: chrome.runtime.getURL('pages/standalone/standalone.html'),
-    type: 'popup',
-    width: 960,
-    height: 680
+  chrome.tabs.create({
+    url: chrome.runtime.getURL('pages/standalone/standalone.html')
   });
   try { window.close(); } catch (_) {}
 }

@@ -66,6 +66,35 @@ function extractTitleFromHtml(html) {
   return match?.[1] ? decodeHtmlEntities(match[1]).replace(/\s+/g, ' ').trim() : '';
 }
 
+function extractHeadingsFromHtml(html) {
+  const headings = [];
+  const pattern = /<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi;
+  let match;
+  while ((match = pattern.exec(String(html || ''))) && headings.length < 20) {
+    const heading = normalizeExtractedText(decodeHtmlEntities(match[1].replace(/<[^>]+>/g, ' ')));
+    if (heading.length >= 2) headings.push(heading);
+  }
+  return [...new Set(headings)];
+}
+
+function extractStructuredTypesFromHtml(html) {
+  const types = new Set();
+  const pattern = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = pattern.exec(String(html || ''))) && types.size < 12) {
+    try {
+      const payload = JSON.parse(match[1]);
+      const entries = Array.isArray(payload) ? payload : [payload, ...(payload?.['@graph'] || [])];
+      for (const entry of entries) {
+        for (const type of (Array.isArray(entry?.['@type']) ? entry['@type'] : [entry?.['@type']])) {
+          if (typeof type === 'string' && type) types.add(type);
+        }
+      }
+    } catch (_) {}
+  }
+  return [...types];
+}
+
 function extractReadableTextFromHtml(html) {
   const source = String(html || '');
   const mainMatch = /<(article|main)[^>]*>([\s\S]*?)<\/\1>/i.exec(source);
@@ -95,6 +124,9 @@ function makeContentResult(url, patch) {
     textContent,
     excerpt: normalizeExtractedText(patch?.excerpt || patch?.metaDesc || textContent.slice(0, 240)),
     metaDesc: normalizeExtractedText(patch?.metaDesc || ''),
+    metaKeywords: Array.isArray(patch?.metaKeywords) ? patch.metaKeywords.map(normalizeExtractedText).filter(Boolean).slice(0, 20) : [],
+    headings: Array.isArray(patch?.headings) ? patch.headings.map(normalizeExtractedText).filter(Boolean).slice(0, 20) : [],
+    structuredTypes: Array.isArray(patch?.structuredTypes) ? patch.structuredTypes.map(value => String(value).trim()).filter(Boolean).slice(0, 12) : [],
     lengthChars: textContent.length,
     fetchedAt: patch?.fetchedAt || Date.now(),
     elapsedMs: patch?.elapsedMs || 0,
@@ -164,6 +196,7 @@ async function fetchStaticPageContent(url) {
       } else {
         const html = await res.text();
         const metaDesc = getMetaContent(html, 'description') || getMetaContent(html, 'og:description') || getMetaContent(html, 'twitter:description');
+        const metaKeywords = getMetaContent(html, 'keywords').split(/[,\uFF0C]/).map(value => value.trim()).filter(Boolean);
         const textContent = extractReadableTextFromHtml(html);
         const result = makeContentResult(url, {
           status: textContent.length >= 80 ? 'success' : 'empty',
@@ -174,6 +207,9 @@ async function fetchStaticPageContent(url) {
           textContent,
           excerpt: metaDesc || textContent.slice(0, 240),
           metaDesc,
+          metaKeywords,
+          headings: extractHeadingsFromHtml(html),
+          structuredTypes: extractStructuredTypesFromHtml(html),
           fetchedAt: Date.now(),
           elapsedMs: Date.now() - startedAt,
           source: 'network-fetch'
@@ -430,6 +466,23 @@ async function runWithConcurrency(items, limit, worker) {
 }
 
 // ===== 书签处理 =====
+const BROWSER_BOOKMARK_ROOT_TITLES = new Set([
+  String.fromCharCode(0x4e66, 0x7b7e, 0x680f),
+  String.fromCharCode(0x5176, 0x4ed6, 0x4e66, 0x7b7e),
+  String.fromCharCode(0x79fb, 0x52a8, 0x8bbe, 0x5907, 0x4e66, 0x7b7e),
+  'Bookmarks bar', 'Other bookmarks', 'Mobile bookmarks',
+]);
+
+function isBrowserBookmarkRoot(title) {
+  return BROWSER_BOOKMARK_ROOT_TITLES.has(String(title || '').trim());
+}
+
+function joinBookmarkFolderPath(path, title) {
+  const name = String(title || '').trim();
+  if (!name || isBrowserBookmarkRoot(name)) return normalizeBookmarkFolderPath(path);
+  return normalizeBookmarkFolderPath(path ? `${path}/${name}` : name);
+}
+
 function bookmarkToItem(bookmark, folderName, folderPath) {
   return {
     id: bookmark.id,
@@ -448,6 +501,9 @@ function bookmarkToItem(bookmark, folderName, folderPath) {
     contentTitle: '',
     contentExcerpt: '',
     contentMetaDesc: '',
+    contentMetaKeywords: [],
+    contentHeadings: [],
+    contentStructuredTypes: [],
     contentFetchedAt: null,
     contentStatus: 'pending',
     contentFailureReason: '',
@@ -463,12 +519,13 @@ function bookmarkToItem(bookmark, folderName, folderPath) {
 async function collectAllBookmarks(nodes, folderPath = '', folderName = '') {
   let results = [];
   for (const node of nodes) {
-    const currentPath = folderPath ? `${folderPath}/${node.title}` : node.title;
+    const currentPath = joinBookmarkFolderPath(folderPath, node.title);
+    const currentFolderName = isBrowserBookmarkRoot(node.title) ? folderName : (node.title || folderName);
     if (node.url) {
       results.push(bookmarkToItem(node, folderName, folderPath));
     }
     if (node.children) {
-      results = results.concat(await collectAllBookmarks(node.children, currentPath, node.title));
+      results = results.concat(await collectAllBookmarks(node.children, currentPath, currentFolderName));
     }
   }
   return results;
@@ -529,6 +586,9 @@ async function syncAllBookmarks() {
         item.contentTitle = prev.contentTitle || '';
         item.contentExcerpt = prev.contentExcerpt || '';
         item.contentMetaDesc = prev.contentMetaDesc || '';
+        item.contentMetaKeywords = prev.contentMetaKeywords || [];
+        item.contentHeadings = prev.contentHeadings || [];
+        item.contentStructuredTypes = prev.contentStructuredTypes || [];
         item.contentFetchedAt = prev.contentFetchedAt || null;
         item.contentStatus = prev.contentStatus || item.contentStatus;
         item.contentFailureReason = prev.contentFailureReason || '';
@@ -605,43 +665,52 @@ function normalizeTagList(tags) {
 }
 
 function normalizeBookmarkFolderPath(path) {
-  return String(path || '')
+  const parts = String(path || '')
     .split('/')
     .map(part => part.trim())
     .filter(Boolean)
-    .join('/');
+    .filter(part => !isBrowserBookmarkRoot(part));
+  return parts.join('/');
 }
 
 function matchBookmarkFolderOption(folderOptions, path) {
   const normalized = normalizeBookmarkFolderPath(path);
   if (!normalized) return null;
   const options = Array.isArray(folderOptions) ? folderOptions : [];
-  return options.find(folder => normalizeBookmarkFolderPath(folder.path) === normalized)
-    || options.find(folder => normalizeBookmarkFolderPath(folder.path).split('/').slice(1).join('/') === normalized)
-    || null;
+  return options.find(folder => normalizeBookmarkFolderPath(folder.path) === normalized) || null;
 }
 
 async function loadBookmarkFolderOptions() {
   const tree = await chrome.bookmarks.getTree();
   const options = [];
-  const walk = (nodes, path = '') => {
+  const walk = (nodes, path = '', displayPath = '') => {
     for (const node of nodes || []) {
       if (node.url) continue;
-      const nextPath = node.title ? (path ? `${path}/${node.title}` : node.title) : path;
-      if (node.id !== '0' && nextPath) {
-        options.push({ id: node.id, title: node.title || '', path: nextPath });
+      const nextPath = joinBookmarkFolderPath(path, node.title);
+      const nextDisplayPath = node.title
+        ? (displayPath ? `${displayPath}/${node.title}` : node.title)
+        : displayPath;
+      if (node.id !== '0' && nextPath && !isBrowserBookmarkRoot(node.title)) {
+        options.push({ id: node.id, title: node.title || '', path: nextPath, displayPath: nextDisplayPath });
       }
-      if (node.children) walk(node.children, nextPath);
+      if (node.children) walk(node.children, nextPath, nextDisplayPath);
     }
   };
   walk(tree);
-  return options.sort((a, b) => a.path.localeCompare(b.path, 'zh'));
+  return options.sort((a, b) => a.displayPath.localeCompare(b.displayPath, 'zh'));
 }
 
 async function findExistingFolderByExactPath(path) {
   const options = await loadBookmarkFolderOptions();
   const matched = matchBookmarkFolderOption(options, path);
   return matched ? { id: matched.id, title: matched.title, path: matched.path } : null;
+}
+
+async function getBookmarkFolderInfo(bookmark) {
+  if (!bookmark?.parentId) return { id: '', path: '', title: '' };
+  const folders = await loadBookmarkFolderOptions();
+  const folder = folders.find(item => item.id === bookmark.parentId);
+  return folder || { id: bookmark.parentId, path: '', title: '' };
 }
 
 function buildLocalBookmarkSuggestion(tempItem, ruleTags, suggestedFolder, aiSuggestion, aiError) {
@@ -658,11 +727,15 @@ function buildLocalBookmarkSuggestion(tempItem, ruleTags, suggestedFolder, aiSug
     folderId: suggestedFolder?.id || '',
     summary: aiSuggestion?.summary || tempItem.excerpt || tempItem.metaDesc || '',
     reason: aiSuggestion?.reason || (aiError ? 'AI 建议生成失败，可手动选择分类后继续收藏。' : '根据标题、域名、页面内容与本地规则生成建议。'),
+    evidence: aiSuggestion?.evidence || [],
     aiAvailable: !!aiSuggestion,
     aiError: aiError || '',
     ruleTags: ruleTagNames,
     contentText: tempItem.contentText || '',
     contentTitle: tempItem.contentTitle || '',
+    metaKeywords: tempItem.metaKeywords || [],
+    headings: tempItem.headings || [],
+    structuredTypes: tempItem.structuredTypes || [],
     contentFetchedAt: tempItem.contentFetchedAt || null,
     contentStatus: tempItem.contentStatus || (tempItem.contentText ? 'success' : 'failed'),
     contentFailureReason: tempItem.contentFailureReason || '',
@@ -681,6 +754,9 @@ async function prepareBookmarkSuggestion(tab) {
     domain: extractDomain(tab.url),
     contentText: contentData?.textContent || '',
     contentTitle: contentData?.title || '',
+    metaKeywords: contentData?.metaKeywords || [],
+    headings: contentData?.headings || [],
+    structuredTypes: contentData?.structuredTypes || [],
     contentFetchedAt: contentData?.fetchedAt || null,
     contentStatus: contentData?.status || 'failed',
     contentFailureReason: contentData?.failureReason || (!contentData ? 'extract_failed' : ''),
@@ -727,6 +803,15 @@ async function prepareBookmarkSuggestion(tab) {
       draft.recommendedFolderExists = !!fallbackFolder.id;
     }
   }
+  const existing = await chrome.bookmarks.search({ url: tempItem.url });
+  const duplicate = existing[0];
+  if (duplicate) {
+    const existingFolder = await getBookmarkFolderInfo(duplicate);
+    draft.duplicate = true;
+    draft.bookmarkId = duplicate.id;
+    draft.existingFolderName = existingFolder.title || '';
+    draft.existingFolderPath = existingFolder.path || '';
+  }
   return draft;
 }
 
@@ -734,14 +819,27 @@ async function saveConfirmedBookmark(draft) {
   if (!draft || !draft.url) return { success: false, error: 'missing_url' };
 
   const existing = await chrome.bookmarks.search({ url: draft.url });
-  if (existing.length > 0) {
-    return { success: false, duplicated: true, bookmarkId: existing[0].id, error: 'already_exists' };
+  const duplicate = existing[0];
+  if (duplicate && !['move', 'copy'].includes(draft.duplicateAction)) {
+    const existingFolder = await getBookmarkFolderInfo(duplicate);
+    return {
+      success: false,
+      duplicated: true,
+      bookmarkId: duplicate.id,
+      existingFolderName: existingFolder.title || '',
+      existingFolderPath: existingFolder.path || '',
+      error: 'already_exists'
+    };
   }
 
   const finalTags = normalizeTagList(draft.tags);
   let parentId = draft.folderId || '';
   let folderName = draft.folderName || '';
-  let folderPath = draft.folderPath || '';
+  let folderPath = normalizeBookmarkFolderPath(draft.folderPath || '');
+
+  // The editable path is authoritative. Never keep a stale folder id after the
+  // user changes the recommendation in the confirmation drawer.
+  if (draft.folderMode === 'new') parentId = '';
 
   if (draft.folderMode === 'new' && folderPath) {
     const folder = await findOrCreateFolderPath(folderPath);
@@ -781,6 +879,9 @@ async function saveConfirmedBookmark(draft) {
     ruleTags: finalTags.map(tag => ({ tag, score: 100, signals: ['user-confirmed'] })),
     contentText: draft.contentText || '',
     contentTitle: draft.contentTitle || '',
+    metaKeywords: draft.metaKeywords || [],
+    headings: draft.headings || [],
+    structuredTypes: draft.structuredTypes || [],
     contentFetchedAt: draft.contentFetchedAt || null,
     contentStatus: draft.contentStatus || (draft.contentText ? 'success' : 'failed'),
     contentFailureReason: draft.contentFailureReason || '',
@@ -790,7 +891,8 @@ async function saveConfirmedBookmark(draft) {
     aiSuggestion: {
       tags: finalTags,
       summary: draft.summary || '',
-      reason: draft.reason || ''
+      reason: draft.reason || '',
+      evidence: Array.isArray(draft.evidence) ? draft.evidence : []
     },
     finalConfirmed: true
   });
@@ -800,7 +902,34 @@ async function saveConfirmedBookmark(draft) {
     url: draft.url
   };
   if (parentId) createOpts.parentId = parentId;
-  const createdBookmark = await chrome.bookmarks.create(createOpts);
+  let createdBookmark;
+  if (duplicate && draft.duplicateAction === 'move') {
+    createdBookmark = await chrome.bookmarks.move(duplicate.id, parentId ? { parentId } : {});
+    pendingQuickBookmarks.delete(draft.url);
+
+    // Moving does not emit onCreated, so update the mirrored record ourselves.
+    const stored = await getStoredBookmarks();
+    const moved = stored.find(item => item.id === createdBookmark.id);
+    if (moved) {
+      moved.parentId = createdBookmark.parentId || parentId || moved.parentId;
+      moved.title = createdBookmark.title || draft.title || moved.title;
+      moved.folderName = folderName;
+      moved.folderPath = folderPath;
+      moved.tags = finalTags;
+      moved.tagsAuto = finalTags;
+      moved.contentText = draft.contentText || moved.contentText || '';
+      moved.contentExcerpt = draft.excerpt || draft.summary || moved.contentExcerpt || '';
+      moved.aiSuggestion = {
+        tags: finalTags,
+        summary: draft.summary || '',
+        reason: draft.reason || '',
+        evidence: Array.isArray(draft.evidence) ? draft.evidence : []
+      };
+      await setStoredBookmarks(stored);
+    }
+  } else {
+    createdBookmark = await chrome.bookmarks.create(createOpts);
+  }
 
   const dfText = `${draft.title || ''} ${(draft.contentText || '').slice(0, 1000)} ${draft.url || ''}`;
   if (typeof updateDocFrequency === 'function') {
@@ -810,10 +939,13 @@ async function saveConfirmedBookmark(draft) {
     markDomainSeen(draft.domain).catch(() => {});
   }
 
-  return { success: true, bookmarkId: createdBookmark.id, tags: finalTags, folderName, folderPath };
+  return { success: true, bookmarkId: createdBookmark.id, tags: finalTags, folderName, folderPath, moved: !!duplicate && draft.duplicateAction === 'move', copied: !!duplicate && draft.duplicateAction === 'copy' };
 }
 
 async function injectBookmarkConfirmPanel(tabId, state) {
+  const { language = 'system' } = await chrome.storage.local.get('language');
+  const browserLanguage = chrome.i18n?.getUILanguage?.() || 'en';
+  state.panelLanguage = language === 'system' ? browserLanguage : language;
   await chrome.scripting.executeScript({
     target: { tabId },
     args: [state],
@@ -827,20 +959,41 @@ async function injectBookmarkConfirmPanel(tabId, state) {
       root.id = ROOT_ID;
       const tags = Array.isArray(panelState.tags) ? panelState.tags : [];
       const folderOptions = Array.isArray(panelState.folderOptions) ? panelState.folderOptions : [];
+      const isChinese = String(panelState.panelLanguage || '').toLowerCase().startsWith('zh');
+      const copy = isChinese ? {
+        title: '收藏前确认 AI 分类建议', analyzingPage: '正在分析当前页面', loading: '正在理解页面并生成分类建议...', cancel: '取消', titleLabel: '标题', aiCategory: 'AI 推荐分类', existingCategory: '匹配已有分类', newCategory: '推荐新建分类', newPrefix: '新建：', newCategoryLabel: '新建分类', searchCategory: '搜索已有分类，例如 公司 / 项目 / 文档', matchingCategories: '匹配的已有分类', selectCategory: '选择书签分类', useExisting: '沿用已有：', selectExisting: '选择已有分类...', manualPath: '手动输入路径...', pathExample: '例如：工作/公司/项目', categoryHint: '选择已有分类会直接收藏进去；选择新建分类会自动创建对应文件夹后收藏。', tags: '标签', tagHint: '用逗号分隔', recommendedPath: '推荐路径', summary: '摘要说明', summaryHint: '可手动补充摘要', reason: '归类理由', reasonHint: '可手动补充归类理由', aiReady: 'AI 已生成建议，你可以直接确认，也可以修改分类、标签和说明后再收藏。', localReady: '当前使用本地规则作为兜底建议，你仍可手动修改后继续收藏。', retry: '重试 AI', confirm: '确认收藏', duplicateTitle: '该页面已收藏', duplicateNote: '该页面已收藏在“$1”（$2）。请选择将它移动到当前目标，或在当前目标保留一份副本。', copy: '保留副本', move: '移动到此处', saving: '正在收藏...', saved: '已收藏', duplicateError: '该页面已经在书签中。', saveFailed: '收藏失败：', unknown: '未知错误', searchMatches: '匹配 $1 个已有分类，可点击结果或按 Enter 选中', searchHint: '可直接下拉选择，也可搜索 $1 个已有分类'
+      } : {
+        title: 'Review AI bookmark suggestion', analyzingPage: 'Analyzing the current page', loading: 'Understanding the page and preparing a suggestion...', cancel: 'Cancel', titleLabel: 'Title', aiCategory: 'AI suggested folder', existingCategory: 'Existing folder found', newCategory: 'New folder suggested', newPrefix: 'Create: ', newCategoryLabel: 'Create new folder', searchCategory: 'Search folders, e.g. Work / Projects / Docs', matchingCategories: 'Matching folders', selectCategory: 'Choose bookmark folder', useExisting: 'Use existing: ', selectExisting: 'Choose an existing folder...', manualPath: 'Enter a path manually...', pathExample: 'Example: Work/Company/Project', categoryHint: 'An existing folder is used directly. A new path creates its folders before saving.', tags: 'Tags', tagHint: 'Separate with commas', recommendedPath: 'Suggested path', summary: 'Summary', summaryHint: 'Add a summary', reason: 'Why this folder', reasonHint: 'Add a reason', aiReady: 'AI has prepared a suggestion. You can confirm it or edit the folder, tags, and details first.', localReady: 'A local-rule suggestion is being used. You can edit it before saving.', retry: 'Retry AI', confirm: 'Save bookmark', duplicateTitle: 'This page is already bookmarked', duplicateNote: 'This page is already in “$1” ($2). Move it to the current destination or keep a copy there.', copy: 'Keep a copy', move: 'Move here', saving: 'Saving...', saved: 'Saved', duplicateError: 'This page is already bookmarked.', saveFailed: 'Could not save: ', unknown: 'Unknown error', searchMatches: '$1 matching folders. Click a result or press Enter to select it.', searchHint: 'Choose from the list or search $1 existing folders'
+      };
+      const format = (text, ...values) => values.reduce((result, value, index) => result.replace(`$${index + 1}`, value), text);
+      const localizeRootPath = (path) => {
+        if (isChinese) return String(path || '');
+        const rootNames = {
+          [String.fromCharCode(0x4e66, 0x7b7e, 0x680f)]: 'Bookmarks bar',
+          [String.fromCharCode(0x5176, 0x4ed6, 0x4e66, 0x7b7e)]: 'Other bookmarks',
+          [String.fromCharCode(0x79fb, 0x52a8, 0x8bbe, 0x5907, 0x4e66, 0x7b7e)]: 'Mobile bookmarks'
+        };
+        return String(path || '').split('/').map(part => rootNames[part] || part).join('/');
+      };
+      panelState.existingFolderPath = localizeRootPath(panelState.existingFolderPath);
       const recommendedPath = panelState.recommendedFolderPath || panelState.folderPath || panelState.folderName || '';
       const recommendedExists = !!panelState.recommendedFolderExists || !!panelState.folderId;
       const selectedPath = panelState.folderPath || recommendedPath || '';
-      const folderOptionHtml = folderOptions.slice(0, 500).map(folder => {
+      const folderOptionHtml = folderOptions.map(folder => {
         const selected = folder.path === selectedPath ? ' selected' : '';
-        return `<option value="${esc(folder.path)}" data-id="${esc(folder.id)}"${selected}>${esc(folder.path)}</option>`;
+        const displayPath = localizeRootPath(folder.displayPath || folder.path);
+        return `<option value="${esc(folder.path)}" data-id="${esc(folder.id)}" data-display-path="${esc(displayPath)}"${selected}>${esc(displayPath)}</option>`;
       }).join('');
-      const newOptionLabel = recommendedPath ? `新建：${recommendedPath}` : '新建分类';
+      const newOptionLabel = recommendedPath ? `${copy.newPrefix}${recommendedPath}` : copy.newCategoryLabel;
       root.innerHTML = `
         <style>
-          #${ROOT_ID}{position:fixed;inset:0;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;color:#1d1d1f;background:rgba(0,0,0,.18);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:18px;box-sizing:border-box}
+          #${ROOT_ID}{position:fixed;inset:0;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;color:#1d1d1f;pointer-events:none;display:flex;align-items:stretch;justify-content:flex-end;box-sizing:border-box}
           #${ROOT_ID} *{box-sizing:border-box;letter-spacing:0}
-          #${ROOT_ID} .ab-card{width:min(520px,100%);max-height:min(720px,calc(100vh - 36px));overflow:auto;background:rgba(255,255,255,.94);border:1px solid rgba(0,0,0,.08);border-radius:22px;box-shadow:0 24px 70px rgba(0,0,0,.2);padding:20px}
+          #${ROOT_ID} .ab-card{pointer-events:auto;width:min(440px,100vw);height:100vh;overflow:auto;background:rgba(255,255,255,.98);border-left:1px solid rgba(0,0,0,.1);box-shadow:-18px 0 48px rgba(0,0,0,.18);padding:22px}
           #${ROOT_ID} .ab-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:16px}
+          #${ROOT_ID} .ab-head-copy{min-width:0;flex:1}
+          #${ROOT_ID} .ab-close{width:32px;min-width:32px;height:32px;min-height:32px;padding:0;border-radius:8px;background:transparent;color:#6e6e73;font-size:24px;font-weight:400;line-height:1}
+          #${ROOT_ID} .ab-close:hover{background:rgba(0,0,0,.07);color:#1d1d1f;transform:none}
           #${ROOT_ID} .ab-icon{width:34px;height:34px;border-radius:12px;background:#0a84ff;color:white;display:flex;align-items:center;justify-content:center;flex:0 0 auto;font-weight:700}
           #${ROOT_ID} h2{font-size:18px;line-height:1.25;margin:0;color:#1d1d1f;font-weight:700}
           #${ROOT_ID} .ab-sub{font-size:12px;line-height:1.45;color:#6e6e73;margin-top:4px;word-break:break-all}
@@ -853,19 +1006,27 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           #${ROOT_ID} input:focus,#${ROOT_ID} textarea:focus,#${ROOT_ID} select:focus{border-color:#0a84ff;box-shadow:0 0 0 4px rgba(10,132,255,.14);background:#fff}
           #${ROOT_ID} textarea{min-height:68px;resize:vertical;line-height:1.45}
           #${ROOT_ID} .ab-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-          #${ROOT_ID} .ab-folder-card{margin-top:12px;padding:12px;border-radius:16px;background:rgba(247,247,250,.72);border:1px solid rgba(0,0,0,.08)}
+          #${ROOT_ID} .ab-folder-card{margin-top:12px;padding:12px;border-radius:8px;background:rgba(247,247,250,.72);border:1px solid rgba(0,0,0,.08)}
           #${ROOT_ID} .ab-folder-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}
           #${ROOT_ID} .ab-folder-title{font-size:12px;font-weight:700;color:#1d1d1f}
           #${ROOT_ID} .ab-folder-badge{font-size:11px;color:${recommendedExists ? '#188038' : '#0756a8'};background:${recommendedExists ? 'rgba(52,199,89,.13)' : 'rgba(10,132,255,.12)'};padding:3px 8px;border-radius:999px;white-space:nowrap}
           #${ROOT_ID} .ab-folder-row{display:grid;grid-template-columns:1fr;gap:8px}
           #${ROOT_ID} .ab-folder-search-row{position:relative}
-          #${ROOT_ID} .ab-folder-results{display:none;max-height:176px;overflow:auto;border:1px solid rgba(0,0,0,.08);border-radius:14px;background:rgba(255,255,255,.96);box-shadow:0 10px 26px rgba(0,0,0,.08);padding:4px}
+          #${ROOT_ID} .ab-folder-combobox{position:relative}
+          #${ROOT_ID} .ab-folder-search{padding-right:42px}
+          #${ROOT_ID} .ab-folder-toggle{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:32px;min-width:32px;height:32px;min-height:32px;padding:0;border-radius:8px;background:transparent;color:#48484a;font-size:18px;line-height:1;box-shadow:none}
+          #${ROOT_ID} .ab-folder-toggle:hover{background:rgba(0,0,0,.06);color:#1d1d1f;transform:translateY(-50%)}
+          #${ROOT_ID} .ab-folder-results{display:none;position:absolute;z-index:2;top:calc(100% + 5px);left:0;right:0;max-height:240px;overflow:auto;border:1px solid rgba(0,0,0,.12);border-radius:8px;background:rgba(255,255,255,.98);box-shadow:0 12px 30px rgba(0,0,0,.16);padding:4px}
           #${ROOT_ID} .ab-folder-results.is-open{display:block}
-          #${ROOT_ID} .ab-folder-result{width:100%;min-height:34px;border-radius:10px;padding:7px 9px;background:transparent;color:#1d1d1f;text-align:left;box-shadow:none;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:600}
+          #${ROOT_ID} .ab-folder-result{width:100%;min-height:40px;border-radius:6px;padding:7px 9px;background:transparent;color:#1d1d1f;text-align:left;box-shadow:none;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:600}
           #${ROOT_ID} .ab-folder-result:hover,#${ROOT_ID} .ab-folder-result.is-active{background:rgba(10,132,255,.1);color:#0756a8;transform:none}
-          #${ROOT_ID} .ab-folder-result small{font-size:11px;color:#8e8e93;font-weight:600;white-space:nowrap}
+          #${ROOT_ID} .ab-folder-result-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+          #${ROOT_ID} .ab-folder-result small{max-width:56%;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#8e8e93;font-weight:500;white-space:nowrap}
           #${ROOT_ID} .ab-folder-search-status{font-size:11px;color:#8e8e93;margin-top:-2px;min-height:16px}
           #${ROOT_ID} .ab-folder-hint{font-size:11px;color:#6e6e73;line-height:1.4;margin-top:6px}
+          #${ROOT_ID} .ab-destination{display:grid;gap:3px;margin-top:10px;padding:9px 10px;border-left:3px solid #0a84ff;background:rgba(10,132,255,.07);font-size:12px;line-height:1.4}
+          #${ROOT_ID} .ab-destination-label{font-weight:700;color:#0756a8}
+          #${ROOT_ID} .ab-destination-path{color:#1d1d1f;word-break:break-word}
           #${ROOT_ID} .ab-new-folder{display:${recommendedExists ? 'none' : 'block'};margin-top:8px}
           #${ROOT_ID} .ab-note{margin-top:12px;padding:10px 12px;border-radius:14px;background:${panelState.aiError ? 'rgba(255,59,48,.1)' : 'rgba(10,132,255,.1)'};color:${panelState.aiError ? '#c42b1c' : '#0756a8'};font-size:12px;line-height:1.45}
           #${ROOT_ID} .ab-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
@@ -874,59 +1035,106 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           #${ROOT_ID} .ab-secondary{background:rgba(118,118,128,.12);color:#1d1d1f}
           #${ROOT_ID} .ab-primary{background:#0a84ff;color:white;box-shadow:0 8px 20px rgba(10,132,255,.28)}
           #${ROOT_ID} .ab-error{background:rgba(255,59,48,.1);color:#c42b1c}
-          @media(max-width:560px){#${ROOT_ID}{align-items:flex-end;padding:10px}#${ROOT_ID} .ab-card{border-radius:20px}#${ROOT_ID} .ab-grid{grid-template-columns:1fr}#${ROOT_ID} .ab-actions{flex-wrap:wrap}#${ROOT_ID} button{flex:1}}
+          @media(max-width:560px){#${ROOT_ID} .ab-card{width:100vw;padding:16px}#${ROOT_ID} .ab-grid{grid-template-columns:1fr}#${ROOT_ID} .ab-actions{flex-wrap:wrap}#${ROOT_ID} button{flex:1}}
         </style>
-        <section class="ab-card" role="dialog" aria-modal="true" aria-labelledby="abTitle">
-          <div class="ab-head"><div class="ab-icon">AI</div><div><h2 id="abTitle">收藏前确认 AI 分类建议</h2><div class="ab-sub">${esc(panelState.title || '正在分析当前页面')}<br>${esc(panelState.url || '')}</div></div></div>
+        <section class="ab-card" role="dialog" aria-modal="false" aria-labelledby="abTitle">
+          <div class="ab-head"><div class="ab-icon">AI</div><div class="ab-head-copy"><h2 id="abTitle">${copy.title}</h2><div class="ab-sub">${esc(panelState.title || copy.analyzingPage)}<br>${esc(panelState.url || '')}</div></div><button class="ab-close" data-act="cancel" aria-label="${isChinese ? String.fromCharCode(0x5173, 0x95ed) : 'Close'}" title="${isChinese ? String.fromCharCode(0x5173, 0x95ed) : 'Close'}">&times;</button></div>
           ${panelState.status === 'loading' ? `
-            <div class="ab-loading"><span class="ab-dot"></span><span class="ab-dot"></span><span class="ab-dot"></span><span>正在理解页面并生成分类建议...</span></div>
-            <div class="ab-actions"><button class="ab-secondary" data-act="cancel">取消</button></div>
+            <div class="ab-loading"><span class="ab-dot"></span><span class="ab-dot"></span><span class="ab-dot"></span><span>${copy.loading}</span></div>
+            <div class="ab-actions"><button class="ab-secondary" data-act="cancel">${copy.cancel}</button></div>
           ` : `
-            <label>标题</label><input id="abTitleInput" value="${esc(panelState.title)}">
+            <label>${copy.titleLabel}</label><input id="abTitleInput" value="${esc(panelState.title)}">
             <div class="ab-folder-card">
-              <div class="ab-folder-head"><div class="ab-folder-title">AI 推荐分类</div><div class="ab-folder-badge">${recommendedExists ? '匹配已有分类' : '推荐新建分类'}</div></div>
+              <div class="ab-folder-head"><div class="ab-folder-title">${copy.aiCategory}</div><div class="ab-folder-badge">${recommendedExists ? copy.existingCategory : copy.newCategory}</div></div>
               <div class="ab-folder-row">
-                <div class="ab-folder-search-row">
-                  <input id="abFolderSearch" value="" placeholder="搜索已有分类，例如 公司 / 项目 / 文档">
+                <div class="ab-folder-search-row ab-folder-combobox">
+                  <input id="abFolderSearch" class="ab-folder-search" value="" placeholder="${copy.searchCategory}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="abFolderResults">
+                  <button type="button" id="abFolderToggle" class="ab-folder-toggle" aria-label="${copy.selectCategory}" title="${copy.selectCategory}" aria-expanded="false">&#x2304;</button>
+                  <div id="abFolderResults" class="ab-folder-results" role="listbox" aria-label="${copy.matchingCategories}"></div>
                 </div>
-                <div id="abFolderResults" class="ab-folder-results" role="listbox" aria-label="匹配的已有分类"></div>
-                <select id="abFolderSelect" aria-label="选择书签分类">
-                  ${recommendedExists && recommendedPath ? `<option value="${esc(recommendedPath)}" data-id="${esc(panelState.folderId || '')}" selected>沿用已有：${esc(recommendedPath)}</option>` : ''}
+                <select id="abFolderSelect" aria-label="${copy.selectCategory}">
+                  ${recommendedExists && recommendedPath ? `<option value="${esc(recommendedPath)}" data-id="${esc(panelState.folderId || '')}" selected>${copy.useExisting}${esc(recommendedPath)}</option>` : ''}
                   ${!recommendedExists && recommendedPath ? `<option value="__new__" selected>${esc(newOptionLabel)}</option>` : ''}
-                  <option value="__existing__" disabled>选择已有分类...</option>
+                  <option value="__existing__" disabled>${copy.selectExisting}</option>
                   ${folderOptionHtml}
-                  <option value="__manual__">手动输入路径...</option>
+                  <option value="__manual__">${copy.manualPath}</option>
                 </select>
                 <div id="abFolderSearchStatus" class="ab-folder-search-status"></div>
-                <input id="abNewFolderInput" class="ab-new-folder" value="${esc(recommendedPath)}" placeholder="例如：工作/公司/项目">
+                <input id="abNewFolderInput" class="ab-new-folder" value="${esc(recommendedPath)}" placeholder="${copy.pathExample}">
               </div>
-              <div class="ab-folder-hint">选择已有分类会直接收藏进去；选择新建分类会自动创建对应文件夹后收藏。</div>
+              <div class="ab-folder-hint">${copy.categoryHint}</div>
+              <div id="abDestination" class="ab-destination" aria-live="polite"></div>
             </div>
-            <div class="ab-grid"><div><label>标签</label><input id="abTagsInput" value="${esc(tags.join(', '))}" placeholder="用逗号分隔"></div><div><label>推荐路径</label><input value="${esc(recommendedPath)}" disabled></div></div>
-            <label>摘要说明</label><textarea id="abSummaryInput" placeholder="可手动补充摘要">${esc(panelState.summary || '')}</textarea>
-            <label>归类理由</label><textarea id="abReasonInput" placeholder="可手动补充归类理由">${esc(panelState.reason || '')}</textarea>
-            <div class="ab-note">${esc(panelState.aiError || (panelState.aiAvailable ? 'AI 已生成建议，你可以直接确认，也可以修改分类、标签和说明后再收藏。' : '当前使用本地规则作为兜底建议，你仍可手动修改后继续收藏。'))}</div>
-            <div class="ab-actions"><button class="ab-secondary" data-act="retry">重试 AI</button><button class="ab-secondary" data-act="cancel">取消</button><button class="ab-primary" data-act="confirm">确认收藏</button></div>
+            <div class="ab-grid"><div><label>${copy.tags}</label><input id="abTagsInput" value="${esc(tags.join(', '))}" placeholder="${copy.tagHint}"></div><div><label>${copy.recommendedPath}</label><input value="${esc(recommendedPath)}" disabled></div></div>
+            <label>${copy.summary}</label><textarea id="abSummaryInput" placeholder="${copy.summaryHint}">${esc(panelState.summary || '')}</textarea>
+            <label>${copy.reason}</label><textarea id="abReasonInput" placeholder="${copy.reasonHint}">${esc(panelState.reason || '')}</textarea>
+            <div class="ab-note">${esc(panelState.aiError || (panelState.aiAvailable ? copy.aiReady : copy.localReady))}</div>
+            <div class="ab-actions"><button class="ab-secondary" data-act="retry">${copy.retry}</button><button class="ab-secondary" data-act="cancel">${copy.cancel}</button><button class="ab-primary" data-act="confirm">${copy.confirm}</button></div>
           `}
         </section>`;
       document.documentElement.appendChild(root);
+
+      // The native-like combobox is editable for new paths. The hidden select is
+      // retained as the backing source for Chrome bookmark-folder ids.
+      const pathSearch = root.querySelector('#abFolderSearch');
+      if (pathSearch) pathSearch.value = recommendedPath;
+      const pathSelect = root.querySelector('#abFolderSelect');
+      if (pathSelect) pathSelect.style.display = 'none';
+      const newPathInput = root.querySelector('#abNewFolderInput');
+      if (newPathInput) newPathInput.style.display = 'none';
+      const duplicatePathField = root.querySelector('.ab-grid > div:nth-child(2)');
+      if (duplicatePathField) duplicatePathField.style.display = 'none';
+      if (panelState.duplicate) {
+        const title = root.querySelector('#abTitle');
+        if (title) title.textContent = copy.duplicateTitle;
+        const note = root.querySelector('.ab-note');
+        if (note) note.textContent = format(copy.duplicateNote, panelState.existingFolderName || (isChinese ? '未命名文件夹' : 'Untitled folder'), panelState.existingFolderPath || (isChinese ? '书签栏' : 'Bookmarks bar'));
+        const actions = root.querySelector('.ab-actions');
+        if (actions) actions.innerHTML = `<button class="ab-secondary" data-act="cancel">${copy.cancel}</button><button class="ab-secondary" data-act="copy">${copy.copy}</button><button class="ab-primary" data-act="move">${copy.move}</button>`;
+      }
 
       const folderSelect = root.querySelector('#abFolderSelect');
       const newFolderInput = root.querySelector('#abNewFolderInput');
       const folderSearch = root.querySelector('#abFolderSearch');
       const folderResults = root.querySelector('#abFolderResults');
       const folderSearchStatus = root.querySelector('#abFolderSearchStatus');
+      const destination = root.querySelector('#abDestination');
+      const folderToggle = root.querySelector('#abFolderToggle');
       const getExistingFolderOptions = () => Array.from(folderSelect?.options || [])
         .filter(opt => opt.value && !opt.value.startsWith('__') && !opt.disabled);
+      let selectedExistingFolder = recommendedExists && recommendedPath
+        ? { id: panelState.folderId || '', path: recommendedPath, displayPath: recommendedPath }
+        : null;
       let activeFolderResult = 0;
-      const folderMatches = () => {
+      let folderDropdownOpen = false;
+      let folderBlurTimer = null;
+      const updateDestination = () => {
+        if (!destination || !folderSearch) return;
+        const enteredPath = folderSearch.value.trim();
+        const exactOption = getExistingFolderOptions().find(opt =>
+          (opt.dataset?.displayPath || opt.value) === enteredPath || opt.value === enteredPath
+        );
+        const chinese = {
+          defaultRoot: String.fromCharCode(0x4e66, 0x7b7e, 0x680f),
+          existing: String.fromCharCode(0x5c06, 0x4f7f, 0x7528, 0x5df2, 0x6709, 0x6587, 0x4ef6, 0x5939),
+          created: String.fromCharCode(0x5c06, 0x65b0, 0x5efa, 0x6587, 0x4ef6, 0x5939),
+          label: String.fromCharCode(0x6700, 0x7ec8, 0x6536, 0x85cf, 0x4f4d, 0x7f6e)
+        };
+        const path = exactOption?.dataset?.displayPath || enteredPath || (isChinese ? chinese.defaultRoot : 'Bookmarks bar');
+        const action = exactOption
+          ? (isChinese ? chinese.existing : 'Existing folder')
+          : (isChinese ? chinese.created : 'New folder to create');
+        const label = isChinese ? chinese.label : 'Save destination';
+        destination.innerHTML = `<span class="ab-destination-label">${esc(label)}: ${esc(action)}</span><span class="ab-destination-path">${esc(path)}</span>`;
+      };
+      const folderMatches = (showAll = false) => {
         const q = folderSearch?.value.trim().toLowerCase() || '';
         const tokens = q.split(/\s+/).filter(Boolean);
         return getExistingFolderOptions()
           .map(opt => {
             const value = opt.value || '';
-            const text = `${value} ${opt.textContent || ''}`.toLowerCase();
-            const matched = tokens.length === 0 || tokens.every(token => text.includes(token));
+          const text = `${value} ${opt.textContent || ''}`.toLowerCase();
+            const matched = showAll || tokens.length === 0 || tokens.every(token => text.includes(token));
             let score = 0;
             if (q) {
               const lowerValue = value.toLowerCase();
@@ -935,37 +1143,53 @@ async function injectBookmarkConfirmPanel(tabId, state) {
               if (lowerValue.includes(q)) score += 200;
               score -= Math.min(value.length, 200);
             }
-            return { opt, matched, score };
+          return { opt, matched, score };
           })
           .filter(item => item.matched)
           .sort((a, b) => b.score - a.score || a.opt.value.localeCompare(b.opt.value, 'zh'));
       };
       const selectExistingFolder = (opt) => {
         if (!opt || !folderSelect) return;
+        selectedExistingFolder = {
+          id: opt.dataset?.id || '',
+          path: opt.value,
+          displayPath: opt.dataset?.displayPath || opt.value
+        };
         folderSelect.value = opt.value;
         folderSelect.dispatchEvent(new Event('change'));
-        if (folderSearch) folderSearch.value = opt.value;
+        if (folderSearch) folderSearch.value = opt.dataset?.displayPath || opt.value;
+        if (folderSearch) folderSearch.dataset.userSearching = '';
+        folderDropdownOpen = false;
         if (folderResults) {
           folderResults.classList.remove('is-open');
           folderResults.innerHTML = '';
         }
+        updateDestination();
+      };
+      const setFolderDropdownOpen = (open, showAll = false) => {
+        folderDropdownOpen = open;
+        if (folderSearch) folderSearch.dataset.showAll = showAll ? 'true' : '';
+        folderSearch?.setAttribute('aria-expanded', String(open));
+        folderToggle?.setAttribute('aria-expanded', String(open));
+        renderFolderResults();
       };
       const renderFolderResults = () => {
         if (!folderResults || !folderSearch) return;
-        const q = folderSearch.value.trim();
-        if (!q) {
+        if (!folderDropdownOpen) {
           folderResults.classList.remove('is-open');
           folderResults.innerHTML = '';
           return;
         }
-        const matches = folderMatches().slice(0, 12);
+        const showAll = folderSearch.dataset.showAll === 'true' && !folderSearch.dataset.userSearching;
+        const matches = folderMatches(showAll);
         activeFolderResult = Math.min(activeFolderResult, Math.max(matches.length - 1, 0));
         folderResults.innerHTML = matches.map((item, index) => {
           const path = item.opt.value;
-          const parts = path.split('/').filter(Boolean);
-          const leaf = parts.slice(-1)[0] || path;
+          const displayPath = item.opt.dataset?.displayPath || path;
+          const parts = displayPath.split('/').filter(Boolean);
+          const leaf = parts.slice(-1)[0] || displayPath;
           const parent = parts.slice(0, -1).join('/');
-          return `<button type="button" class="ab-folder-result${index === activeFolderResult ? ' is-active' : ''}" data-path="${esc(path)}" role="option"><span>${esc(path)}</span>${parent ? `<small>${esc(leaf)}</small>` : ''}</button>`;
+          return `<button type="button" class="ab-folder-result${index === activeFolderResult ? ' is-active' : ''}" data-path="${esc(path)}" role="option" aria-selected="${index === activeFolderResult}"><span class="ab-folder-result-title">${esc(leaf)}</span>${parent ? `<small>${esc(parent)}</small>` : `<small>${esc(displayPath)}</small>`}</button>`;
         }).join('');
         folderResults.classList.toggle('is-open', matches.length > 0);
       };
@@ -983,8 +1207,8 @@ async function injectBookmarkConfirmPanel(tabId, state) {
         renderFolderResults();
         if (folderSearchStatus) {
           folderSearchStatus.textContent = q
-            ? `匹配 ${count} 个已有分类，可点击结果或按 Enter 选中`
-            : `可直接下拉选择，也可搜索 ${folderOptions.length} 个已有分类`;
+            ? format(copy.searchMatches, count)
+            : format(copy.searchHint, folderOptions.length);
         }
       };
       const updateFolderInput = () => {
@@ -993,7 +1217,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
         newFolderInput.style.display = (value === '__new__' || value === '__manual__') ? 'block' : 'none';
         if (value && !value.startsWith('__')) {
           newFolderInput.value = value;
-          if (folderSearch) folderSearch.value = value;
+          if (folderSearch) folderSearch.value = folderSelect.selectedOptions[0]?.dataset?.displayPath || value;
         }
       };
       if (folderSelect) folderSelect.addEventListener('change', updateFolderInput);
@@ -1006,12 +1230,33 @@ async function injectBookmarkConfirmPanel(tabId, state) {
         });
       }
       if (folderSearch) {
-        folderSearch.addEventListener('input', filterFolderOptions);
+        folderSearch.addEventListener('focus', () => {
+          if (folderBlurTimer) clearTimeout(folderBlurTimer);
+          activeFolderResult = 0;
+          setFolderDropdownOpen(true, !folderSearch.dataset.userSearching);
+        });
+        folderSearch.addEventListener('input', () => {
+          // Any manual edit switches back to create-or-reuse-path mode. A stale
+          // folder id must never send the bookmark to a previously selected folder.
+          if (selectedExistingFolder?.displayPath !== folderSearch.value.trim()) {
+            selectedExistingFolder = null;
+          }
+          folderSearch.dataset.userSearching = folderSearch.value.trim() ? 'true' : '';
+          activeFolderResult = 0;
+          filterFolderOptions();
+          setFolderDropdownOpen(true, false);
+          updateDestination();
+        });
+        folderSearch.addEventListener('blur', () => {
+          folderBlurTimer = setTimeout(() => setFolderDropdownOpen(false), 150);
+        });
         folderSearch.addEventListener('keydown', (event) => {
           if (!folderSelect) return;
-          const matches = folderMatches();
+          const showAll = folderSearch.dataset.showAll === 'true' && !folderSearch.dataset.userSearching;
+          const matches = folderMatches(showAll);
           if (event.key === 'ArrowDown') {
             event.preventDefault();
+            if (!folderDropdownOpen) setFolderDropdownOpen(true, true);
             activeFolderResult = Math.min(activeFolderResult + 1, Math.max(matches.length - 1, 0));
             renderFolderResults();
             return;
@@ -1023,7 +1268,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
             return;
           }
           if (event.key === 'Escape') {
-            folderResults?.classList.remove('is-open');
+            setFolderDropdownOpen(false);
             return;
           }
           if (event.key !== 'Enter') return;
@@ -1033,8 +1278,19 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           selectExistingFolder(selected.opt);
         });
       }
+      if (folderToggle) {
+        folderToggle.addEventListener('mousedown', event => event.preventDefault());
+        folderToggle.addEventListener('click', () => {
+          if (folderBlurTimer) clearTimeout(folderBlurTimer);
+          const nextOpen = !folderDropdownOpen;
+          activeFolderResult = 0;
+          setFolderDropdownOpen(nextOpen, true);
+          if (nextOpen) folderSearch?.focus();
+        });
+      }
       updateFolderInput();
       filterFolderOptions();
+      updateDestination();
 
       const close = () => root.remove();
       root.addEventListener('click', async (event) => {
@@ -1052,66 +1308,60 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           chrome.runtime.sendMessage({ action: 'quickBookmark' }).catch(() => {});
           return;
         }
-        if (act === 'confirm') {
+        if (act === 'confirm' || act === 'move' || act === 'copy') {
           const actions = root.querySelector('.ab-actions');
           const buttons = actions ? actions.querySelectorAll('button') : [];
           buttons.forEach(b => b.disabled = true);
-          btn.textContent = '正在收藏...';
-          const folderSelect = document.getElementById('abFolderSelect');
-          let selectedOption = folderSelect?.selectedOptions?.[0];
-          let selectedFolderValue = folderSelect?.value || '';
-          const newFolderValue = document.getElementById('abNewFolderInput')?.value?.trim() || '';
-          const folderSearchValue = document.getElementById('abFolderSearch')?.value?.trim() || '';
-          const searchMatchedOption = folderSearchValue ? Array.from(folderSelect?.options || [])
-            .filter(opt => opt.value && !opt.value.startsWith('__'))
-            .map(opt => {
-              const value = opt.value.trim();
-              const lowerValue = value.toLowerCase();
-              const q = folderSearchValue.toLowerCase();
-              const text = `${value} ${opt.textContent || ''}`.toLowerCase();
-              const matched = text.includes(q);
-              let score = matched ? 1 : 0;
-              if (lowerValue === q) score += 1000;
-              if (lowerValue.startsWith(q)) score += 500;
-              if (lowerValue.includes(q)) score += 200;
-              return { opt, matched, score };
-            })
-            .filter(item => item.matched)
-            .sort((a, b) => b.score - a.score)[0]?.opt : null;
-          if (searchMatchedOption && selectedFolderValue !== searchMatchedOption.value) {
-            selectedOption = searchMatchedOption;
-            selectedFolderValue = searchMatchedOption.value;
-          }
-          const folderMode = selectedFolderValue === '__new__' || selectedFolderValue === '__manual__'
-            ? 'new'
-            : 'existing';
-          const folderPath = folderMode === 'new'
-            ? newFolderValue
-            : (selectedFolderValue && !selectedFolderValue.startsWith('__') ? selectedFolderValue : panelState.folderPath);
+          const actionLabel = btn.textContent;
+          btn.textContent = copy.saving;
+          const folderSearchValue = root.querySelector('#abFolderSearch')?.value?.trim() || '';
+          const exactExistingOption = getExistingFolderOptions().find(opt =>
+            (opt.dataset?.displayPath || opt.value) === folderSearchValue || opt.value === folderSearchValue
+          );
+          const selectedExisting = selectedExistingFolder?.displayPath === folderSearchValue
+            ? selectedExistingFolder
+            : (exactExistingOption ? {
+              id: exactExistingOption.dataset?.id || '',
+              path: exactExistingOption.value,
+              displayPath: exactExistingOption.dataset?.displayPath || exactExistingOption.value
+            } : null);
+          const folderMode = selectedExisting ? 'existing' : 'new';
+          const folderPath = selectedExisting?.path || folderSearchValue || panelState.folderPath;
           const draft = {
             ...panelState,
-            title: document.getElementById('abTitleInput')?.value?.trim() || panelState.title,
+            title: root.querySelector('#abTitleInput')?.value?.trim() || panelState.title,
             folderMode,
-            folderId: folderMode === 'existing' ? (selectedOption?.dataset?.id || panelState.folderId || '') : '',
+            folderId: folderMode === 'existing' ? selectedExisting.id : '',
             folderPath,
             folderName: folderPath ? folderPath.split('/').filter(Boolean).slice(-1)[0] : panelState.folderName,
-            tags: (document.getElementById('abTagsInput')?.value || '').split(/[,，]/).map(s => s.trim()).filter(Boolean),
-            summary: document.getElementById('abSummaryInput')?.value?.trim() || '',
-            reason: document.getElementById('abReasonInput')?.value?.trim() || ''
+            tags: (root.querySelector('#abTagsInput')?.value || '').split(/[,，]/).map(s => s.trim()).filter(Boolean),
+            summary: root.querySelector('#abSummaryInput')?.value?.trim() || '',
+            reason: root.querySelector('#abReasonInput')?.value?.trim() || '',
+            duplicateAction: act === 'move' || act === 'copy' ? act : ''
           };
           const resp = await chrome.runtime.sendMessage({ action: 'confirmQuickBookmarkSuggestion', draft }).catch(err => ({ success:false, error: err?.message || String(err) }));
           if (resp && resp.success) {
-            btn.textContent = '已收藏';
+            btn.textContent = copy.saved;
             setTimeout(close, 450);
           } else {
             buttons.forEach(b => b.disabled = false);
-            btn.textContent = '确认收藏';
+            btn.textContent = actionLabel;
+            if (resp?.duplicated) {
+              panelState.duplicate = true;
+              panelState.bookmarkId = resp.bookmarkId || panelState.bookmarkId;
+              panelState.existingFolderName = resp.existingFolderName || panelState.existingFolderName;
+              panelState.existingFolderPath = localizeRootPath(resp.existingFolderPath || panelState.existingFolderPath);
+              const title = root.querySelector('#abTitle');
+              if (title) title.textContent = copy.duplicateTitle;
+              const actions = root.querySelector('.ab-actions');
+              if (actions) actions.innerHTML = `<button class="ab-secondary" data-act="cancel">${copy.cancel}</button><button class="ab-secondary" data-act="copy">${copy.copy}</button><button class="ab-primary" data-act="move">${copy.move}</button>`;
+            }
             const note = root.querySelector('.ab-note');
             if (note) {
               note.className = 'ab-note';
               note.style.background = 'rgba(255,59,48,.1)';
               note.style.color = '#c42b1c';
-              note.textContent = resp?.duplicated ? '该页面已经在书签中。' : ('收藏失败：' + (resp?.error || '未知错误'));
+              note.textContent = resp?.duplicated ? copy.duplicateError : (copy.saveFailed + (resp?.error || copy.unknown));
             }
           }
         }
@@ -1142,6 +1392,9 @@ async function addSingleBookmark(id) {
       item.contentTitle = pending.contentTitle || pending.title || '';
       item.contentExcerpt = pending.excerpt || '';
       item.contentMetaDesc = pending.metaDesc || '';
+      item.contentMetaKeywords = pending.metaKeywords || [];
+      item.contentHeadings = pending.headings || [];
+      item.contentStructuredTypes = pending.structuredTypes || [];
       item.contentFetchedAt = pending.contentFetchedAt || null;
       item.contentStatus = pending.contentStatus || (pending.contentText ? 'success' : 'pending');
       item.contentFailureReason = pending.contentFailureReason || '';
@@ -1168,6 +1421,9 @@ async function addSingleBookmark(id) {
         stored.contentTitle = content.title || stored.contentTitle || '';
         stored.contentExcerpt = content.excerpt || '';
         stored.contentMetaDesc = content.metaDesc || '';
+        stored.contentMetaKeywords = content.metaKeywords || [];
+        stored.contentHeadings = content.headings || [];
+        stored.contentStructuredTypes = content.structuredTypes || [];
         stored.contentFetchedAt = content.fetchedAt || Date.now();
         stored.contentStatus = content.status || 'failed';
         stored.contentFailureReason = content.failureReason || '';
@@ -1513,6 +1769,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // 从 Chrome 书签中真正删除
         const bookmarks = await getStoredBookmarks();
         const target = bookmarks.find((b) => b.id === message.id || (message.url && b.url === message.url));
+        if (!target || !message.id) {
+          sendResponse({ success: false, error: 'Bookmark not found' });
+          return;
+        }
+        try {
+          await chrome.bookmarks.remove(message.id);
+        } catch (err) {
+          sendResponse({ success: false, error: err.message || 'bookmark_delete_failed' });
+          return;
+        }
+        /*
         if (message.id) {
           try {
             await chrome.bookmarks.remove(message.id);
@@ -1520,13 +1787,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             console.warn('删除 Chrome 书签失败:', err.message);
           }
         }
+        */
         const filtered = bookmarks.filter((b) => b.id !== message.id && b.url !== message.url);
         if (filtered.length !== bookmarks.length) {
           await setStoredBookmarks(filtered);
         }
-        if (target) {
-          await addTombstone(target);
-        }
+        await addTombstone(target);
         sendResponse({ success: true, total: filtered.length });
       })();
       return true;
@@ -1535,20 +1801,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         // 从 Chrome 书签中真正删除所有
         const bookmarks = await getStoredBookmarks();
+        const removedIds = new Set();
+        const failedIds = [];
         for (const b of bookmarks) {
-          if (b.id) {
-            try {
-              await chrome.bookmarks.remove(b.id);
-            } catch (err) {
-              console.warn('删除 Chrome 书签失败:', err.message);
-            }
+          if (!b.id) {
+            failedIds.push(b.url || 'unknown');
+            continue;
+          }
+          try {
+            await chrome.bookmarks.remove(b.id);
+            removedIds.add(b.id);
+          } catch (err) {
+            failedIds.push(b.id);
           }
         }
         const existingTombstones = await pruneTombstones(await getTombstones(), await getEffectiveRetentionDays());
         const merged = [...existingTombstones];
         const keys = new Set(merged.map(t => t.url + '_' + t.dateAdded));
         for (const item of bookmarks) {
-          if (item.url) {
+          if (removedIds.has(item.id) && item.url) {
             const key = item.url + '_' + item.dateAdded;
             if (!keys.has(key)) {
               merged.push({ ...item, deletedAt: Date.now() });
@@ -1557,8 +1828,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         await setTombstones(merged);
-        await setStoredBookmarks([]);
-        sendResponse({ success: true });
+        const remaining = bookmarks.filter((item) => !removedIds.has(item.id));
+        await setStoredBookmarks(remaining);
+        sendResponse({
+          success: failedIds.length === 0,
+          removed: removedIds.size,
+          failed: failedIds.length,
+          total: remaining.length,
+          error: failedIds.length ? 'some_bookmarks_could_not_be_deleted' : undefined,
+        });
       })();
       return true;
 
@@ -1670,15 +1948,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: false, error: 'No IDs provided' });
           return;
         }
-        const idSet = new Set(ids);
-        // 从 Chrome 书签中删除
+        const removedIds = new Set();
+        const failedIds = [];
         for (const id of ids) {
-          try { await chrome.bookmarks.remove(id); } catch (e) {}
+          try {
+            await chrome.bookmarks.remove(id);
+            removedIds.add(id);
+          } catch (err) {
+            failedIds.push(id);
+          }
         }
         const bookmarks = await getStoredBookmarks();
-        const remaining = bookmarks.filter((b) => !idSet.has(b.id));
+        const removed = bookmarks.filter((b) => removedIds.has(b.id));
+        const remaining = bookmarks.filter((b) => !removedIds.has(b.id));
+        await Promise.all(removed.map((bookmark) => addTombstone(bookmark)));
         await setStoredBookmarks(remaining);
-        sendResponse({ success: true, removed: ids.length, total: remaining.length });
+        sendResponse({
+          success: failedIds.length === 0,
+          removed: removedIds.size,
+          failed: failedIds.length,
+          total: remaining.length,
+          error: failedIds.length ? 'some_bookmarks_could_not_be_deleted' : undefined,
+        });
       })();
       return true;
 
@@ -2622,8 +2913,8 @@ const CHECKER_ALARM_PREFIX = 'bookmark_checker_';
 // 检测策略：
 //   1) 总超时预算（timeoutMs）控制单 URL 总耗时，避免拖慢整批。
 //   2) 先 HEAD 探测：2xx/3xx 立即返回；4xx/5xx 也降级 GET（部分服务器 HEAD 405/501）。
-//   3) GET 失败按"瞬时 vs 业务"分类：仅瞬时错误（Timeout/Failed to fetch/net::/ERR_*）
-//      和 5xx 触发重试；4xx 等业务错误直接判定 broken，不再重试。
+//   3) 404/410 必须先读取 HTML：仅当页面明确表示资源不存在，且两次独立 GET 均如此时才判定 broken。
+//      SPA 应用壳、登录页、访问限制页和无法确认的页面均保留为 warning，避免误删可打开书签。
 //   4) 指数退避 + 抖动（full jitter），防雪崩。
 //   5) 单次请求也受 perAttemptMs 上限约束，绝不超过剩余预算。
 //
@@ -2684,31 +2975,37 @@ async function fetchOnce(url, method, deadlineMs, perAttemptMs) {
     const response = await fetch(url, {
       method,
       signal: controller.signal,
-      redirect: 'follow'
+      redirect: 'follow',
+      // Reuse a signed-in browser session where the site permits it. Some bookmark
+      // destinations require login and would otherwise be falsely reported.
+      credentials: 'include',
+      cache: 'no-store'
     });
     clearTimeout(tid);
-    return { ok: true, status: response.status };
+    return { ok: true, response };
   } catch (err) {
     clearTimeout(tid);
     return { ok: false, error: err };
   }
 }
 
-// HTTP 状态码 → 检测结果
+// HTTP 状态码 → 检测结果。
+// 只有资源明确不存在时才允许标记为 broken 并出现在批量清理中；
+// 认证、权限、限流和服务器故障都可能在浏览器标签页中正常打开，因此保留为 warning。
 function classifyByStatus(status) {
   if (status >= 200 && status < 400) {
     return { status: 'ok', statusCode: status, message: `HTTP ${status}` };
   }
-  if (status === 404) {
-    return { status: 'broken', statusCode: status, message: '404 Not Found' };
+  if (status === 404 || status === 410) {
+    return { status: 'broken', statusCode: status, message: `HTTP ${status} - Not Found` };
   }
   if (status >= 400 && status < 500) {
-    return { status: 'broken', statusCode: status, message: `HTTP ${status} - Client Error` };
+    return { status: 'warning', statusCode: status, message: `HTTP ${status} - Access Restricted` };
   }
   if (status >= 500) {
-    return { status: 'broken', statusCode: status, message: `HTTP ${status} - Server Error` };
+    return { status: 'warning', statusCode: status, message: `HTTP ${status} - Server Error` };
   }
-  return { status: 'ok', statusCode: status, message: `HTTP ${status}` };
+  return { status: 'warning', statusCode: status, message: `HTTP ${status} - Unknown Response` };
 }
 
 /**
@@ -2724,6 +3021,15 @@ function classifyByStatus(status) {
  *   }
  */
 async function checkUrlFromBackground(url, timeoutOrOptions) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { status: 'warning', statusCode: 0, message: 'Unsupported URL Scheme' };
+    }
+  } catch {
+    return { status: 'warning', statusCode: 0, message: 'Invalid URL' };
+  }
+
   const opts = (typeof timeoutOrOptions === 'object' && timeoutOrOptions !== null)
     ? timeoutOrOptions
     : { timeoutMs: timeoutOrOptions };
@@ -2741,7 +3047,7 @@ async function checkUrlFromBackground(url, timeoutOrOptions) {
   const head = await fetchOnce(url, 'HEAD', deadline, perAttemptMs);
   if (head.ok) {
     // 2xx/3xx 直接成功
-    if (head.status < 400) return classifyByStatus(head.status);
+    if (head.response.status < 400) return classifyByStatus(head.response.status);
     // 4xx 业务错误：仍尝试一次 GET（HEAD 405/501 时 GET 可能正常）
     // 5xx 也降级 GET（服务器短暂不可用，GET 或许能拿到不同结果）
   } else if (!isTransientError(head.error)) {
@@ -2752,6 +3058,7 @@ async function checkUrlFromBackground(url, timeoutOrOptions) {
   // ---- 2) GET 重试链 ----
   let attempts = 0;
   let lastError = null; // { type: 'http'|'network', status?, error? }
+  let confirmedMissingResponses = 0;
 
   while (true) {
     // 预算已耗尽
@@ -2770,12 +3077,22 @@ async function checkUrlFromBackground(url, timeoutOrOptions) {
 
     const get = await fetchOnce(url, 'GET', deadline, perAttemptMs);
     if (get.ok) {
-      // 2xx/3xx / 4xx 业务错误 → 立即返回
-      if (get.status < 400 || isBusinessError(get.status)) {
-        return classifyByStatus(get.status);
+      const { response } = get;
+      const { status } = response;
+      // 2xx/3xx 和非 Not Found 的业务状态可立即确定为可用或需人工复查。
+      if (status < 400 || (isBusinessError(status) && status !== 404 && status !== 410)) {
+        return classifyByStatus(status);
       }
-      // 5xx → 可重试
-      lastError = { type: 'http', status: get.status };
+      if (status === 404 || status === 410) {
+        const inspection = await inspectMissingResponse(response);
+        if (!inspection.confirmed) {
+          return { status: 'warning', statusCode: status, message: `HTTP ${status} - ${inspection.reason}` };
+        }
+        confirmedMissingResponses++;
+        if (confirmedMissingResponses >= 2) return classifyByStatus(status);
+      }
+      // 404/410 等待二次确认；5xx 也继续重试。
+      lastError = { type: 'http', status };
     } else {
       const err = get.error;
       // 整体超时（被 deadline 截断的 AbortError）
@@ -2796,19 +3113,67 @@ async function checkUrlFromBackground(url, timeoutOrOptions) {
 
   // ---- 3) 重试耗尽：返回最终结果 ----
   if (lastError && lastError.type === 'http') {
+    if (lastError.status === 404 || lastError.status === 410) {
+      return { status: 'warning', statusCode: lastError.status, message: `Unconfirmed HTTP ${lastError.status}` };
+    }
     return classifyByStatus(lastError.status);
   }
-  const msg = ((lastError && lastError.error && lastError.error.message) || '').toLowerCase();
-  if (
-    msg.includes('failed to fetch') ||
-    msg.includes('err_name') ||
-    msg.includes('err_internet') ||
-    msg.includes('err_connection') ||
-    msg.includes('net::')
-  ) {
-    return { status: 'broken', statusCode: 0, message: 'DNS/Network Error' };
-  }
+
+  // Browser fetches can fail because of TLS, proxy, VPN, privacy rules, or
+  // temporary DNS trouble. None proves that a bookmark is dead.
   return { status: 'warning', statusCode: 0, message: 'Network Error' };
+}
+
+const CONFIRMED_MISSING_PATTERNS = [
+  /页面不存在|页面未找到|找不到(该|此|你要的)?页面|页面已删除|内容(不存在|已删除|已下架|已失效)/,
+  /商品(不存在|已下架|已失效|已删除)|宝贝(不存在|已下架)|店铺不存在/,
+  /(文章|视频|帖子|资源)(不存在|已删除|已下架|已失效)/,
+  /page not found|404 not found|content (not found|unavailable|removed)/i,
+  /(item|product|listing) (no longer available|not available|removed|unavailable)/i,
+  /this (page|video|post|account) (isn'?t|is not|is no longer) available/i,
+];
+
+function containsConfirmedMissingPattern(text) {
+  return CONFIRMED_MISSING_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function plainPageText(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isJsRenderedShell(html) {
+  return /<script[\s>]/i.test(html) && (
+    /<div[^>]+id=["'](root|app|__next|__nuxt|main)["']/i.test(html) ||
+    /data-reactroot|data-v-app|ng-version|__NEXT_DATA__|window\.__INITIAL_STATE__/i.test(html) ||
+    (html.match(/<script/gi) || []).length >= 3
+  );
+}
+
+async function inspectMissingResponse(response) {
+  const status = response.status;
+  if (!(response.headers.get('content-type') || '').includes('text/html')) {
+    return { confirmed: false, status, reason: 'non-HTML response' };
+  }
+  try {
+    const html = (await response.text()).slice(0, 65536);
+    const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(html) || [])[1] || '';
+    // SPA 初始 HTML 往往带有与当前路由无关的 meta，因此只检查标题。
+    const jsShell = isJsRenderedShell(html);
+    const text = jsShell ? '' : plainPageText(html);
+    const titleConfirmsMissing = containsConfirmedMissingPattern(title);
+    const bodyConfirmsMissing = !jsShell && containsConfirmedMissingPattern(text);
+    const confirmed =
+      titleConfirmsMissing &&
+      bodyConfirmsMissing &&
+      text.length > 0 &&
+      text.length <= 1200;
+    return { confirmed, status, reason: confirmed ? 'missing page content' : 'page content is usable or inconclusive' };
+  } catch {
+    return { confirmed: false, status, reason: 'could not read page content' };
+  }
 }
 
 async function getCheckSettings() {
@@ -3222,120 +3587,8 @@ chrome.commands.onCommand.addListener(async (command) => {
 async function handleQuickBookmark(activeTab) {
   try {
     const tab = activeTab || (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
-    if (!tab || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
-
-    const { notificationEnabled } = await chrome.storage.local.get(['notificationEnabled']);
-
-    // 检查是否已收藏
-    const existing = await chrome.bookmarks.search({ url: tab.url });
-    if (existing.length > 0) {
-      if (notificationEnabled) {
-        chrome.notifications?.create({
-          type: 'basic',
-          iconUrl: '../icons/icon48.png',
-          title: 'AI Bookmark OS',
-          message: '该页面已在书签中'
-        });
-      }
-      return;
-    }
-
-    // 提取当前页正文（失败也不阻塞收藏）
-    const contentData = (tab.id && tab.url) ? await extractActiveTabContent(tab.id, tab.url) : null;
-
-    // 预计算标签（同步，缓存已预加载）——只调用一次，避免竞态
-    const tempItem = {
-      url: tab.url,
-      title: tab.title,
-      domain: extractDomain(tab.url),
-      contentText: contentData?.textContent || '',
-      metaDesc: contentData?.metaDesc || '',
-      excerpt: contentData?.excerpt || contentData?.metaDesc || ''
-    };
-    const tags = autoTagBookmarkSync(tempItem);
-    const tagNames = tags.map(t => t.tag);
-
-    // 智能建议目录（复用上面计算的标签，保证标签与目录一致）
-    const suggestedFolder = await suggestBookmarkFolder(tab.url, tab.title, tagNames);
-
-    // 暂存标签和文件夹信息，供 onCreated → addSingleBookmark 消费（唯一写入路径）
-    pendingQuickBookmarks.set(tab.url, {
-      tags: tagNames,
-      folderName: suggestedFolder?.title || '',
-      folderPath: suggestedFolder?.path || '',
-      ruleTags: tags,
-      contentText: contentData?.textContent || '',
-      metaDesc: contentData?.metaDesc || '',
-      excerpt: tempItem.excerpt || ''
-    });
-
-    // 创建书签到建议目录（触发 onCreated → addSingleBookmark 写入本地存储）
-    const createOpts = {
-      title: tab.title || tab.url,
-      url: tab.url
-    };
-    if (suggestedFolder && suggestedFolder.id) {
-      createOpts.parentId = suggestedFolder.id;
-    }
-    const createdBookmark = await chrome.bookmarks.create(createOpts);
-
-    // 增量更新通用文档频率（TF-IDF 用，不依赖标签，可安全 fire-and-forget）
-    const dfText = `${tab.title || ''} ${contentData?.textContent?.slice(0, 1000) || ''} ${tab.url || ''}`;
-    if (typeof updateDocFrequency === 'function') {
-      updateDocFrequency(dfText, tab.url); // fire-and-forget，带 URL 去重
-    }
-
-    // 主动学习：判断是否需要人工确认
-    if (typeof needsHumanReview === 'function' && typeof addToReviewQueue === 'function') {
-      const review = needsHumanReview(tags, tempItem);
-      if (review.need) {
-        addToReviewQueue({
-          id: createdBookmark.id,
-          url: tab.url,
-          title: tab.title || tab.url,
-          domain: tempItem.domain,
-          suggestedTags: tagNames,
-          confidence: tags[0]?.confidence || 0,
-          score: tags[0]?.score || 0,
-          reason: review.reason,
-          excerpt: tempItem.excerpt || '',
-          createdAt: Date.now()
-        }); // fire-and-forget
-      }
-    }
-
-    // 标记该域名已被系统见过，避免 new_domain 反复触发
-    if (typeof markDomainSeen === 'function' && tempItem.domain) {
-      markDomainSeen(tempItem.domain).catch(() => {});
-    }
-
-    // 成功通知统一在 addSingleBookmark 中根据 notificationEnabled 发送
-  } catch (err) {
-    console.error('快捷键收藏失败:', err);
-  }
-}
-
-// ===== 智能建议目录 =====
-// 新流程：收藏前先生成 AI 建议，用户确认后才真正创建书签。
-handleQuickBookmark = async function(activeTab) {
-  try {
-    const tab = activeTab || (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
     if (!tab || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
       return { success: false, error: 'unsupported_page' };
-    }
-
-    const existing = await chrome.bookmarks.search({ url: tab.url });
-    if (existing.length > 0) {
-      const { notificationEnabled } = await chrome.storage.local.get(['notificationEnabled']);
-      if (notificationEnabled) {
-        chrome.notifications?.create({
-          type: 'basic',
-          iconUrl: '../icons/icon48.png',
-          title: 'AI Bookmark OS',
-          message: '该页面已经在书签中'
-        });
-      }
-      return { success: false, duplicated: true, bookmarkId: existing[0].id };
     }
 
     if (tab.id) {
@@ -3355,7 +3608,7 @@ handleQuickBookmark = async function(activeTab) {
     console.error('快捷收藏建议失败:', err);
     return { success: false, error: err?.message || String(err) };
   }
-};
+}
 
 // suggestedTags: 已由调用方通过 autoTagBookmarkSync 计算好的标签数组
 async function suggestBookmarkFolder(url, title, suggestedTags) {
@@ -3445,8 +3698,8 @@ async function suggestBookmarkFolderReadOnly(url, title, suggestedTags) {
 function findFolderInTree(nodes, name, path = '') {
   if (!nodes) return null;
   for (const node of nodes) {
-    const currentPath = path ? `${path}/${node.title}` : node.title;
-    if (node.title === name && !node.url) {
+    const currentPath = joinBookmarkFolderPath(path, node.title);
+    if (node.title === name && !node.url && !isBrowserBookmarkRoot(node.title)) {
       return { node, path: currentPath };
     }
     if (node.children) {
@@ -3460,6 +3713,8 @@ function findFolderInTree(nodes, name, path = '') {
 // 根据路径查找 Chrome 书签文件夹 ID
 async function findFolderIdByPath(path) {
   try {
+    const matchingFolder = await findExistingFolderByExactPath(path);
+    if (matchingFolder) return matchingFolder.id;
     const tree = await chrome.bookmarks.getTree();
     const parts = path.split('/').filter(Boolean);
     if (parts.length === 0) return null;
@@ -3497,12 +3752,10 @@ async function findOrCreateFolderPath(path) {
     const tree = await chrome.bookmarks.getTree();
     const bookmarkBar = tree[0].children?.[0];
     if (!bookmarkBar) return null;
-    const rootNames = new Set((tree[0].children || []).map(node => node.title));
     const parts = normalized.split('/').filter(Boolean);
-    if (parts.length && rootNames.has(parts[0])) parts.shift();
 
     let parent = bookmarkBar;
-    const actualParts = [bookmarkBar.title];
+    const actualParts = [];
     for (const part of parts) {
       const children = await chrome.bookmarks.getChildren(parent.id);
       let next = children.find(node => !node.url && node.title === part);
@@ -3535,7 +3788,7 @@ async function findOrCreateFolder(name) {
       parentId: bookmarkBar.id,
       title: name
     });
-    return { id: folder.id, path: `${bookmarkBar.title}/${name}` };
+    return { id: folder.id, path: name };
   } catch {
     return null;
   }

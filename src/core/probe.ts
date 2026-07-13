@@ -21,6 +21,10 @@ const SOFT_DEAD_PATTERNS: RegExp[] = [
   /this (page|video|post|account) (isn'?t|is not|is no longer) available/i,
 ];
 
+const CONFIRMED_MISSING_PATTERNS = SOFT_DEAD_PATTERNS.filter(
+  (_pattern, index) => index !== 3 && index !== 6,
+);
+
 /** 登录页 URL 特征 */
 const LOGIN_URL_PATTERN = /\/(login|signin|sign-in|passport|auth|account\/login)\b/i;
 
@@ -80,6 +84,21 @@ function inspectContent(originalUrl: string, finalUrl: string, html: string): Pr
   return { kind: 'ok', detail: '' };
 }
 
+async function inspectMissingResponse(originalUrl: string, resp: Response): Promise<ProbeResult> {
+  const ct = resp.headers.get('content-type') ?? '';
+  if (!ct.includes('text/html')) return { kind: 'suspect', detail: `HTTP ${resp.status} non-HTML response` };
+  const html = (await resp.text()).slice(0, 65536);
+  const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1] ?? '';
+  const sample = isJsRenderedShell(html)
+    ? title
+    : html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/g, ' ').slice(0, 65536);
+  if (CONFIRMED_MISSING_PATTERNS.some((pattern) => pattern.test(sample))) {
+    return { kind: 'dead', detail: `HTTP ${resp.status} missing-page-content` };
+  }
+  const contentResult = inspectContent(originalUrl, resp.url, html);
+  return { kind: 'suspect', detail: contentResult.kind === 'ok' ? `HTTP ${resp.status} usable-or-inconclusive-page` : contentResult.detail };
+}
+
 /** 抓取页面 meta（用于低信息量标题的分类增强）；失败返回 null */
 export async function fetchPageMeta(
   url: string,
@@ -126,7 +145,22 @@ export async function probeUrl(url: string): Promise<ProbeResult> {
 
     // —— 协议层 ——
     if (resp.status === 404 || resp.status === 410) {
-      return { kind: 'dead', detail: `HTTP ${resp.status}` };
+      const firstResult = await inspectMissingResponse(url, resp);
+      if (firstResult.kind !== 'dead') return firstResult;
+      const confirmation = await fetch(url, {
+        method: 'GET',
+        signal: ctrl.signal,
+        redirect: 'follow',
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (confirmation.status !== 404 && confirmation.status !== 410) {
+        return { kind: 'suspect', detail: `unconfirmed HTTP ${resp.status}` };
+      }
+      const confirmationResult = await inspectMissingResponse(url, confirmation);
+      return confirmationResult.kind === 'dead'
+        ? confirmationResult
+        : { kind: 'suspect', detail: `unconfirmed HTTP ${resp.status}` };
     }
     if (resp.status === 403 || resp.status === 401) {
       return { kind: 'suspect', detail: `HTTP ${resp.status}` };
@@ -135,7 +169,7 @@ export async function probeUrl(url: string): Promise<ProbeResult> {
       return { kind: 'suspect', detail: `HTTP ${resp.status}` };
     }
     if (resp.status >= 400) {
-      return { kind: 'dead', detail: `HTTP ${resp.status}` };
+      return { kind: 'suspect', detail: `HTTP ${resp.status}` };
     }
 
     // —— 内容层（仅 HTML 响应）——
@@ -147,7 +181,7 @@ export async function probeUrl(url: string): Promise<ProbeResult> {
     return { kind: 'ok', detail: '' };
   } catch (e) {
     if ((e as Error).name === 'AbortError') return { kind: 'suspect', detail: 'timeout' };
-    return { kind: 'dead', detail: 'unreachable' };
+    return { kind: 'suspect', detail: 'unreachable' };
   } finally {
     clearTimeout(timer);
   }

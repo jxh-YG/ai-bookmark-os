@@ -65,23 +65,78 @@ export function moveBookmark(
   tree: CategoryNode[],
   bookmarkId: string,
   toPath: number[],
+  toIndex?: number,
 ): CategoryNode[] {
   const next = cloneTree(tree);
+  let sourceIds: string[] | undefined;
+  let sourceIndex = -1;
+  let removed = false;
   // 从原位置移除
   const removeFrom = (nodes: CategoryNode[]): boolean => {
     for (const n of nodes) {
       const i = n.bookmarkIds?.indexOf(bookmarkId) ?? -1;
       if (i >= 0) {
+        sourceIds = n.bookmarkIds;
+        sourceIndex = i;
         n.bookmarkIds!.splice(i, 1);
+        removed = true;
         return true;
       }
       if (n.children && removeFrom(n.children)) return true;
     }
     return false;
   };
-  removeFrom(next);
   const target = nodeAt(next, toPath);
-  if (target) (target.bookmarkIds ??= []).push(bookmarkId);
+  if (!target) return tree;
+  removeFrom(next);
+  if (!removed) return tree;
+  const targetIds = target.bookmarkIds ??= [];
+  const requestedIndex = toIndex ?? targetIds.length;
+  if (requestedIndex < 0 || requestedIndex > targetIds.length + (sourceIds === targetIds ? 1 : 0)) return tree;
+  const adjustedIndex = sourceIds === targetIds && sourceIndex < requestedIndex
+    ? requestedIndex - 1
+    : requestedIndex;
+  targetIds.splice(Math.min(adjustedIndex, targetIds.length), 0, bookmarkId);
+  return next;
+}
+
+/** 鎶婁竴涓垎绫昏妭鐐硅繛鍚屽叾鎵€鏈夊瓙鍒嗙被鍜屼功绛剧Щ鍏ュ彟涓€涓垎绫昏妭鐐广€?*/
+// Moves the folder as one unit, preserving its complete subtree.
+export function moveNode(
+  tree: CategoryNode[],
+  fromPath: number[],
+  toParentPath: number[],
+  toIndex: number,
+): CategoryNode[] {
+  if (!fromPath.length || toIndex < 0) return tree;
+  // A folder cannot contain itself or any of its descendants.
+  if (
+    toParentPath.length >= fromPath.length
+    && fromPath.every((part, index) => toParentPath[index] === part)
+  ) {
+    return tree;
+  }
+
+  const next = cloneTree(tree);
+  const sourceParentPath = fromPath.slice(0, -1);
+  const sourceIndex = fromPath[fromPath.length - 1];
+  const sourceSiblings = sourceParentPath.length ? nodeAt(next, sourceParentPath)?.children : next;
+  if (!sourceSiblings) return next;
+  const moved = sourceSiblings[sourceIndex];
+  if (!moved) return next;
+
+  // Paths are index-based. Resolve the target parent before removing the source,
+  // then find that same object again after indexes have shifted.
+  const targetParent = toParentPath.length ? nodeAt(next, toParentPath) : null;
+  if (toParentPath.length && !targetParent) return tree;
+  const targetSiblingsBeforeMove = targetParent ? (targetParent.children ??= []) : next;
+  if (toIndex > targetSiblingsBeforeMove.length) return tree;
+
+  sourceSiblings.splice(sourceIndex, 1);
+  const targetSiblings = targetParent ? (targetParent.children ??= []) : next;
+  const sameParent = sourceSiblings === targetSiblings;
+  const adjustedIndex = sameParent && sourceIndex < toIndex ? toIndex - 1 : toIndex;
+  targetSiblings.splice(Math.min(adjustedIndex, targetSiblings.length), 0, moved);
   return next;
 }
 

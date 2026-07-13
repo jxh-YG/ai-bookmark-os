@@ -161,15 +161,24 @@ function buildFolderTree(nodes: chrome.bookmarks.BookmarkTreeNode[], path: strin
 
   for (const node of nodes) {
     if (node.url || !node.children) continue;
+    /*
 
-    const nextPath = node.title ? [...path, node.title] : path;
+    const isBrowserRoot = ['涔︾鏍?, '鍏朵粬涔︾', '绉诲姩璁惧涔︾', 'Bookmarks bar', 'Other bookmarks', 'Mobile bookmarks'].includes(node.title);
+    */
+    const isBrowserRoot = [
+      String.fromCharCode(0x4e66, 0x7b7e, 0x680f),
+      String.fromCharCode(0x5176, 0x4ed6, 0x4e66, 0x7b7e),
+      String.fromCharCode(0x79fb, 0x52a8, 0x8bbe, 0x5907, 0x4e66, 0x7b7e),
+      'Bookmarks bar', 'Other bookmarks', 'Mobile bookmarks',
+    ].includes(node.title);
+    const nextPath = node.title && !isBrowserRoot ? [...path, node.title] : path;
     const children = buildFolderTree(node.children, nextPath);
     const directBookmarkIds = node.children
       .filter((child) => child.url && isSupportedBookmarkUrl(child.url))
       .map((child) => child.id);
     const bookmarkIds = [...directBookmarkIds, ...children.flatMap((child) => child.bookmarkIds)];
 
-    if (node.title) {
+    if (node.title && !isBrowserRoot) {
       folders.push({
         id: node.id,
         title: node.title,

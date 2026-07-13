@@ -179,7 +179,7 @@ body {
 .checker-content {
   flex: 1;
   width: 100%;
-  max-width: 700px;
+  max-width: none;
 }
 
 /* ===== Summary Bar ===== */
@@ -769,6 +769,7 @@ body {
 }
 
 .checker-content {
+  width: min(100% - 48px, 1440px);
   margin: 16px auto 24px;
   border: 1px solid var(--border-glass, rgba(255,255,255,.68));
   border-radius: var(--radius-xl, 22px);
@@ -806,5 +807,11 @@ body {
   .checker-content {
     margin: 10px;
     width: calc(100% - 20px);
+  }
+}
+
+@media (min-width: 1600px) {
+  .checker-content {
+    width: min(100% - 64px, 1720px);
   }
 }

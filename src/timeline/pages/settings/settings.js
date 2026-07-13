@@ -1644,37 +1644,46 @@ const DEFAULT_TREE_PROMPTS = {
     "tags": ["标签1", "标签2"]
   }
 ]`,
-  buildTree: `你是“书签信息架构与分类体系设计专家”。请根据输入的书签数据（包括书签标题、URL 链接、已有书签路径/分类，以及可获取到的页面内容摘要或正文），为这些书签设计一个清晰、稳定、可扩展的金字塔式分类树。
+  buildTree: `你是“书签信息架构与分类体系设计专家”。请根据输入的书签数据，为这些书签设计一个清晰、稳定、可扩展、便于查找的金字塔式分类树。
 
-分类目标与范围：
-1. 只设计分类树结构，不需要逐条输出书签归属。
-2. 分类树最多包含 3 层：一级大类 → 二级子类 → 三级子类。
-3. 一级大类数量不超过 10 个。
-4. 任意一级或二级分类下的直接子类数量不超过 10 个。
-5. 分类名称应简洁、明确、可复用，避免使用过于宽泛或重复的名称。
-6. 对数量较少、主题相近的分类进行合并；无法明确归入主要类别的，可归入“其他”。
-7. 不要为单个零散书签创建过细分类，除非它属于明确的公司、项目、工具或高频主题。
+输入数据可能包含以下信息：
+- 书签标题
+- URL 链接
+- 原有书签路径/分类
+- 页面内容摘要
+- 页面正文片段
+- 站点名称、产品名、公司名、项目名或工具名等可识别信息
 
-办公/公司相关书签的特殊分类规则：
-1. 与办公、企业内部系统、客户/供应商/合作方、项目协作、管理后台、文档平台、工单系统、CRM、ERP、邮箱、会议、招聘、财务、人事、合同、报销等相关的书签，应优先根据“公司名称”或“组织名称”进行归类。
-2. 同一公司的多个链接必须尽量归入同一个公司分类下，不要因为页面功能不同而分散到多个无关分类中。
-3. 判断公司名称时，优先参考以下信息：
-   - 已有书签文件夹/路径中的公司名称；
-   - 书签标题中的公司名称、品牌名、系统名；
-   - URL 域名、子域名或页面内容中出现的组织名称。
-4. 如果原有书签分类中已经存在某个公司文件夹，并且多个该公司相关书签已被放在该文件夹下，则应沿用该公司分类名称作为分类依据。
-5. 公司类分类可作为一级大类下的子类，例如“办公 / 公司 / 项目”相关大类下按公司名称划分；如果公司类书签数量较大，也可以将“公司与办公”作为一级大类。
+你的任务不是给每条书签分配分类，而是仅输出适用于整批书签的分类树结构。
 
-分类设计原则：
-1. 优先保证分类对用户查找书签有帮助，而不是机械按网站类型拆分。
-2. 对明显属于同一使用场景的内容进行合并，例如开发工具、AI 工具、设计资源、学习资料、购物消费、娱乐媒体、生活服务等。
-3. 对同一平台的不同页面，应根据实际用途决定是否合并；若属于同一公司办公场景，优先按公司合并。
-4. 分类层级应尽量均衡，避免某个大类过度庞大或某些分类只有极少内容。
-5. 不要输出解释、推理过程、统计信息或书签明细。
+分类树设计要求：
+1. 分类树最多包含 3 层：一级大类 → 二级子类 → 三级子类。
+2. 一级大类数量不超过 10 个。
+3. 任意一级分类或二级分类下的直接子类数量不超过 10 个。
+4. 分类名称必须简洁、明确、可复用，通常控制在 2-8 个中文字符或简短中文短语内。
+5. 分类名称应体现内容主题、使用场景、业务领域或主要用途，不要仅机械按照网站类型划分。
+6. 不要使用含义过宽、边界模糊或重复交叉的名称，例如“常用网站”“资料”“工具”“内容”“平台”等，除非上下文确实需要。
+7. 对主题相近、数量较少或使用场景一致的书签，应合并到同一分类中。
+8. 不要为了单个零散书签创建过细分类；只有当其属于明确的公司、项目、产品、工具、业务系统或高频主题时，才可以单独成类。
+9. 无法明确归入主要类别、数量较少且缺乏共同主题的内容，可归入“其他”。
+10. 若多个书签属于同一公司、团队、办公系统或业务协作场景，应优先按公司、团队或办公场景合并，而不是按页面类型拆分。
+11. 同一平台的不同页面，应根据实际用途判断是否合并；如果用途差异明显，可以拆分到不同主题分类中。
+12. 分类层级应尽量均衡，避免某个一级大类包含过多内容，也避免大量分类只有极少内容。
+13. 一级大类应覆盖整批书签的主要主题；二级和三级分类用于细化高频或内容较多的主题。
+14. 如果某个分类已经足够清晰，不需要强行补全到三级。
+15. 不要输出书签明细、分类依据、推理过程、统计信息或任何解释。
 
 输出格式要求：
-1. 只输出 JSON 数组。
-2. JSON 格式必须严格符合以下结构：
+1. 只输出合法 JSON 数组。
+2. JSON 根节点必须是数组。
+3. 数组元素必须是分类对象。
+4. 每个分类对象必须包含 "name" 字段。
+5. 有子分类时才添加 "children" 字段；没有子分类时省略 "children" 字段。
+6. "children" 字段的值必须是分类对象数组。
+7. 分类层级最多 3 层，三级分类对象不得再包含 "children" 字段。
+8. 不要输出 JSON 以外的任何文字、注释、解释、Markdown 代码块或多余标点。
+9. 输出必须严格符合以下结构示例：
+
 [
   {
     "name": "一级大类名",
@@ -1689,10 +1698,8 @@ const DEFAULT_TREE_PROMPTS = {
       }
     ]
   }
-]
-3. 没有子类的分类可以省略 children 字段。
-4. children 字段只能包含同样结构的分类对象。
-5. 不要输出 JSON 以外的任何文字、注释、Markdown 代码块或说明。`,
+]`,
+
   assign: '根据我提供的书签列表和分类编号说明，将每个书签分配到语义最匹配的一个分类编号。判断依据按优先级依次为：书签标题、URL 域名与路径、描述/摘要、标签或备注；若信息不足，则根据可识别的关键词、网站类型或内容主题进行合理归类。每个书签必须且只能分配一个分类编号，不要漏项、重复或新增书签 id；分类编号必须来自我提供的分类列表，不得自创编号。最终只输出合法 JSON 数组，格式严格为：[{"id":"书签id","cat":分类编号}]。不要输出任何解释、Markdown、代码块或其他文字。',
 };
 
@@ -1702,8 +1709,20 @@ const LEGACY_TREE_PROMPTS = {
   assign: '把每个书签分配到最合适的分类编号。只输出 JSON 数组：[{"id":"书签id","cat":分类编号}]。不要其他文字。',
 };
 
+function normalizeTreePrompt(value, fallback) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text || fallback;
+}
+
 function migrateTreeDefaultPrompts(prompts) {
-  const merged = { ...DEFAULT_TREE_PROMPTS, ...(prompts || {}) };
+  const savedPrompts = prompts && typeof prompts === 'object' && !Array.isArray(prompts)
+    ? prompts
+    : {};
+  const merged = {
+    label: normalizeTreePrompt(savedPrompts.label, DEFAULT_TREE_PROMPTS.label),
+    buildTree: normalizeTreePrompt(savedPrompts.buildTree, DEFAULT_TREE_PROMPTS.buildTree),
+    assign: normalizeTreePrompt(savedPrompts.assign, DEFAULT_TREE_PROMPTS.assign),
+  };
   return {
     label: merged.label === LEGACY_TREE_PROMPTS.label ? DEFAULT_TREE_PROMPTS.label : merged.label,
     buildTree: merged.buildTree === LEGACY_TREE_PROMPTS.buildTree ? DEFAULT_TREE_PROMPTS.buildTree : merged.buildTree,
@@ -1765,6 +1784,7 @@ const treeRetryCountInput = document.getElementById('treeRetryCountInput');
 const treeRequestTimeoutInput = document.getElementById('treeRequestTimeoutInput');
 
 let treeFolderOptions = [];
+let treeFolderOptionsLoadFailed = false;
 let _treeProviderInputCache = {};
 
 function getTreeProvider(id) {
@@ -1902,8 +1922,13 @@ async function loadTreeFolderOptions() {
     };
     walk(tree, []);
     treeFolderOptions = options.sort((a, b) => a.path.localeCompare(b.path, 'zh'));
-  } catch (_) {
+    treeFolderOptionsLoadFailed = false;
+    return true;
+  } catch (error) {
+    console.warn('loadTreeFolderOptions failed', error);
     treeFolderOptions = [];
+    treeFolderOptionsLoadFailed = true;
+    return false;
   }
 }
 
@@ -1916,12 +1941,12 @@ function getSelectedPreservedFolders() {
 
 function renderTreePreserveFolders(selectedPaths) {
   if (!treePreserveFoldersList) return;
-  const selected = new Set(selectedPaths || []);
+  const selected = new Set(Array.isArray(selectedPaths) ? selectedPaths : []);
   treePreserveFoldersList.innerHTML = '';
   if (!treeFolderOptions.length) {
     const empty = document.createElement('div');
     empty.className = 'tree-preserve-empty';
-    empty.textContent = '暂无可选文件夹';
+    empty.textContent = treeFolderOptionsLoadFailed ? '无法读取浏览器书签文件夹' : '暂无可选文件夹';
     treePreserveFoldersList.appendChild(empty);
     return;
   }
@@ -1949,11 +1974,11 @@ function readTreeSettingsFromUI(prev) {
   const provider = (treeProviderSelect && treeProviderSelect.value) || 'agnes';
   const p = getTreeProvider(provider);
   const model = ((treeModelInput && treeModelInput.value.trim()) || p.defaultModel || '').trim();
-  const prompts = {
-    label: (treePromptLabel && treePromptLabel.value.trim()) || DEFAULT_TREE_PROMPTS.label,
-    buildTree: (treePromptBuild && treePromptBuild.value.trim()) || DEFAULT_TREE_PROMPTS.buildTree,
-    assign: (treePromptAssign && treePromptAssign.value.trim()) || DEFAULT_TREE_PROMPTS.assign,
-  };
+  const prompts = migrateTreeDefaultPrompts({
+    label: treePromptLabel && treePromptLabel.value,
+    buildTree: treePromptBuild && treePromptBuild.value,
+    assign: treePromptAssign && treePromptAssign.value,
+  });
   const baseUrl = provider === 'custom'
     ? normalizeTreeEndpointBase((treeBaseUrlInput && treeBaseUrlInput.value) || '')
     : p.baseUrl;
@@ -1983,12 +2008,21 @@ function readTreeSettingsFromUI(prev) {
 
 async function loadTreeSettings() {
   if (!treeProviderSelect) return;
+  // Paint usable defaults before asynchronous storage/bookmark reads. A malformed
+  // legacy setting must not leave the prompt editors or folder selector blank.
+  if (treePromptLabel) treePromptLabel.value = DEFAULT_TREE_PROMPTS.label;
+  if (treePromptBuild) treePromptBuild.value = DEFAULT_TREE_PROMPTS.buildTree;
+  if (treePromptAssign) treePromptAssign.value = DEFAULT_TREE_PROMPTS.assign;
+  if (treeRespectFoldersToggle) treeRespectFoldersToggle.checked = true;
+  updateTreePreserveVisibility();
   try {
     const data = await chrome.storage.local.get('settings');
     const s = { ...DEFAULT_TREE_SETTINGS, ...(data.settings || {}) };
     s.classifyPrompts = migrateTreeDefaultPrompts(s.classifyPrompts || {});
 
-    const provider = s.provider in TREE_PROVIDERS ? s.provider : 'custom';
+    const provider = typeof s.provider === 'string' && Object.prototype.hasOwnProperty.call(TREE_PROVIDERS, s.provider)
+      ? s.provider
+      : 'custom';
     const p = getTreeProvider(provider);
     treeProviderSelect.value = provider;
     treeProviderSelect.dataset.previousProvider = provider;
@@ -2019,7 +2053,7 @@ async function loadTreeSettings() {
     if (treePromptAssign) treePromptAssign.value = s.classifyPrompts.assign || DEFAULT_TREE_PROMPTS.assign;
     if (treeRespectFoldersToggle) treeRespectFoldersToggle.checked = s.respectExistingFolders !== false;
     await loadTreeFolderOptions();
-    renderTreePreserveFolders(s.preservedFolderPaths || []);
+    renderTreePreserveFolders(s.preservedFolderPaths);
     updateTreePreserveVisibility();
     if (treeReusePreviousToggle) treeReusePreviousToggle.checked = s.reusePreviousAiTree === true;
     if (treeBuiltInRulesToggle) treeBuiltInRulesToggle.checked = s.useBuiltInClassificationRules !== false;

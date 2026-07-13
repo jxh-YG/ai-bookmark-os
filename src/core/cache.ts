@@ -12,7 +12,19 @@ export function hashUrl(url: string): string {
   return (h >>> 0).toString(36);
 }
 
-type CacheMap = Record<string, Omit<BookmarkLabel, 'id'>>;
+export interface CachedPageContext {
+  siteName: string;
+  title: string;
+  description: string;
+  excerpt: string;
+}
+
+export interface CachedLabel extends Omit<BookmarkLabel, 'id'> {
+  /** Context used for this label, retained so a cache hit skips page fetching too. */
+  pageContext?: CachedPageContext;
+}
+
+type CacheMap = Record<string, CachedLabel>;
 
 export async function loadCache(): Promise<CacheMap> {
   const data = await chrome.storage.local.get(CACHE_KEY);

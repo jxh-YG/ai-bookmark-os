@@ -58,6 +58,31 @@
     return normalizeText(blocks.length ? blocks.join('\n\n') : tpl.content.textContent || '');
   }
 
+  function readMetaValues(selector) {
+    return [...document.querySelectorAll(selector)]
+      .map(node => normalizeText(node.content || ''))
+      .filter(Boolean);
+  }
+
+  function extractStructuredTypes() {
+    const types = [];
+    for (const node of document.querySelectorAll('script[type="application/ld+json"]')) {
+      try {
+        const payload = JSON.parse(node.textContent || 'null');
+        const entries = Array.isArray(payload) ? payload : [payload, ...(payload?.['@graph'] || [])];
+        for (const entry of entries) {
+          const value = entry?.['@type'];
+          for (const type of (Array.isArray(value) ? value : [value])) {
+            if (typeof type === 'string' && type) types.push(type);
+          }
+        }
+      } catch (_) {
+        // Malformed JSON-LD is common enough that it must not fail extraction.
+      }
+    }
+    return [...new Set(types)].slice(0, 12);
+  }
+
   async function extractContent(options = {}) {
     const maxWaitMs = Number(options.maxWaitMs || 3500);
     const startedAt = Date.now();
@@ -69,6 +94,16 @@
         document.querySelector('meta[property="og:description"]')?.content ||
         document.querySelector('meta[name="twitter:description"]')?.content ||
         '';
+      const metaKeywords = readMetaValues('meta[name="keywords"], meta[property="article:tag"]')
+        .flatMap(value => value.split(/[,\uFF0C]/))
+        .map(value => normalizeText(value))
+        .filter(Boolean)
+        .slice(0, 20);
+      const headings = [...document.querySelectorAll('article h1, article h2, article h3, main h1, main h2, main h3, [role="main"] h1, [role="main"] h2, [role="main"] h3')]
+        .map(node => normalizeText(node.innerText || node.textContent || ''))
+        .filter(text => text.length >= 2)
+        .slice(0, 20);
+      const structuredTypes = extractStructuredTypes();
       const doc = cloneReadableDocument();
       const article = typeof Readability === 'function' ? new Readability(doc).parse() : null;
       const articleText = textFromArticleHtml(article?.content || '');
@@ -92,6 +127,9 @@
         textContent,
         excerpt,
         metaDesc,
+        metaKeywords,
+        headings,
+        structuredTypes,
         lengthChars: textContent.length,
         fetchedAt: Date.now(),
         elapsedMs: Date.now() - startedAt,
@@ -107,6 +145,9 @@
         textContent: '',
         excerpt: '',
         metaDesc: '',
+        metaKeywords: [],
+        headings: [],
+        structuredTypes: [],
         lengthChars: 0,
         fetchedAt: Date.now(),
         elapsedMs: Date.now() - startedAt,

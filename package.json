@@ -2,6 +2,12 @@
   "name": "ai-bookmark-os",
   "private": true,
   "version": "1.0.0",
+  "description": "AI-assisted local-first bookmark management and classification for Chrome.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jxh-YG/ai-bookmark-os.git"
+  },
+  "homepage": "https://github.com/jxh-YG/ai-bookmark-os",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",

@@ -345,6 +345,61 @@ function readablePageSignals(bookmark) {
   };
 }
 
+const GENERIC_AI_TAGS = new Set([
+  '其他', '其它', '未知', '未分类', '无', '无标签',
+  'other', 'others', 'unknown', 'uncategorized', 'misc', 'none', 'n/a'
+]);
+
+const BROWSER_ROOT_FOLDER_NAMES = new Set([
+  '书签栏', '收藏夹栏', '书签菜单', '其他书签', '其他收藏夹', '移动设备书签',
+  'bookmarks bar', 'bookmarks menu', 'other bookmarks', 'mobile bookmarks'
+]);
+
+function normalizeSuggestedTagName(value, validTags) {
+  if (typeof value !== 'string') return '';
+  const text = value
+    .replace(/^#+/, '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text || text.length > 24 || !/[A-Za-z0-9\u4e00-\u9fff]/.test(text) || GENERIC_AI_TAGS.has(text.toLowerCase())) return '';
+  const canonical = (validTags || []).find(tag => String(tag).toLowerCase() === text.toLowerCase());
+  return canonical || text;
+}
+
+function normalizeSuggestedAITags(items, validTags, allowNewTags) {
+  const knownTags = Array.isArray(validTags) ? validTags : [];
+  const knownKeys = new Set(knownTags.map(tag => String(tag).toLowerCase()));
+  const normalized = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!item || typeof item !== 'object') continue;
+    const tag = normalizeSuggestedTagName(item.tag, knownTags);
+    if (!tag || (!allowNewTags && !knownKeys.has(tag.toLowerCase()))) continue;
+    const rawConfidence = Number(item.confidence);
+    const confidence = Math.max(0, Math.min(1, Number.isFinite(rawConfidence) ? rawConfidence : 0.6));
+    if (confidence < 0.35) continue;
+    const key = tag.toLowerCase();
+    const current = normalized.get(key);
+    if (!current || confidence > current.confidence) {
+      normalized.set(key, { tag, confidence, source: 'ai' });
+    }
+  }
+  return [...normalized.values()]
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 3);
+}
+
+function normalizeSuggestedFolderPath(value) {
+  return String(value || '')
+    .split(/[\\/]+/)
+    .map(part => part.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim())
+    .filter(part => part && part !== '.' && part !== '..')
+    .filter(part => !BROWSER_ROOT_FOLDER_NAMES.has(part.toLowerCase()))
+    .slice(0, 4)
+    .map(part => part.slice(0, 32))
+    .join('/');
+}
+
 // ===== Prompt 构建 =====
 function buildClassificationPrompt(bookmark, candidateTags, tagDescriptions, assistPrompt) {
   const tagList = Object.entries(tagDescriptions)
@@ -397,15 +452,7 @@ function parseAIClassification(raw, validTags) {
     const parsed = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(parsed)) return null;
 
-    const results = parsed
-      .filter(item => item && validTags.includes(item.tag))
-      .map(item => ({
-        tag: item.tag,
-        confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0.5)),
-        source: 'ai'
-      }))
-      .sort((a, b) => b.confidence - a.confidence)
-      .slice(0, 3);
+    const results = normalizeSuggestedAITags(parsed, validTags, false);
 
     return results.length > 0 ? results : null;
   } catch {
@@ -474,20 +521,12 @@ function parseBookmarkSuggestion(raw, validTags) {
     if (!objectMatch) return null;
     const parsed = JSON.parse(objectMatch[0]);
     if (!parsed || typeof parsed !== 'object') return null;
-    const tags = Array.isArray(parsed.tags)
-      ? parsed.tags
-        .filter(item => item && item.tag)
-        .map(item => ({
-          tag: String(item.tag).trim().slice(0, 24),
-          confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0.6)),
-          source: 'ai'
-        }))
-        .filter(item => item.tag)
-        .slice(0, 3)
-      : [];
+    const tags = normalizeSuggestedAITags(parsed.tags, validTags, true);
+    const folderPath = normalizeSuggestedFolderPath(parsed.folderPath || parsed.folder || parsed.category);
+    if (tags.length === 0 && !folderPath) return null;
     return {
       tags,
-      folderPath: String(parsed.folderPath || parsed.folder || parsed.category || '').trim().slice(0, 120),
+      folderPath,
       summary: String(parsed.summary || '').trim().slice(0, 120),
       reason: String(parsed.reason || '').trim().slice(0, 160),
       evidence: (Array.isArray(parsed.evidence) ? parsed.evidence : [])
@@ -840,17 +879,20 @@ function mergeAITags(ruleTags, aiTags, maxTags = 3) {
 
   const merged = new Map();
   for (const t of ruleTags || []) {
-    merged.set(t.tag, { ...t });
+    const tag = normalizeSuggestedTagName(t?.tag, []);
+    if (!tag) continue;
+    merged.set(tag.toLowerCase(), { ...t, tag });
   }
 
-  for (const ai of aiTags) {
-    const existing = merged.get(ai.tag);
+  for (const ai of normalizeSuggestedAITags(aiTags, [], true)) {
+    const key = ai.tag.toLowerCase();
+    const existing = merged.get(key);
     if (existing) {
       existing.score = (existing.score || 0) + ai.confidence * AI_WEIGHT;
       existing.signals = [...(existing.signals || []), `ai:${ai.confidence.toFixed(2)}`];
       existing.confidence = Math.min(1, (existing.confidence || 0) + ai.confidence * 0.2);
     } else {
-      merged.set(ai.tag, {
+      merged.set(key, {
         tag: ai.tag,
         score: ai.confidence * AI_WEIGHT,
         confidence: ai.confidence,

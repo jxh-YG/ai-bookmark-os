@@ -1439,12 +1439,10 @@ function drawPreviewFromCache(entry, itemEl) {
 
 function showPreviewForItem(itemEl) {
   if (!previewEnabled) {
-    console.log('[Preview] disabled, skip');
     return;
   }
   const url = itemEl.dataset.url;
   if (!url) {
-    console.log('[Preview] no url, skip');
     return;
   }
   if (previewHoverItem === itemEl) return;
@@ -1508,7 +1506,6 @@ async function loadPreviewEnabled() {
   try {
     const result = await chrome.storage.local.get('previewEnabled');
     previewEnabled = result.previewEnabled !== false;
-    console.log('[Preview] enabled =', previewEnabled);
   } catch (e) {
     previewEnabled = true;
   }
@@ -1518,7 +1515,6 @@ async function loadPreviewEnabled() {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.previewEnabled) {
     previewEnabled = changes.previewEnabled.newValue !== false;
-    console.log('[Preview] storage changed, enabled =', previewEnabled);
     if (!previewEnabled) hidePreviewCard();
   }
 });

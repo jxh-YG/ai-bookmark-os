@@ -656,12 +656,17 @@ async function syncAllBookmarks() {
 const pendingQuickBookmarks = new Map();
 
 function normalizeTagList(tags) {
-  return Array.from(new Set((tags || [])
-    .map(t => typeof t === 'string' ? t : t && t.tag)
-    .filter(Boolean)
-    .map(t => String(t).trim())
-    .filter(Boolean)))
-    .slice(0, 8);
+  const normalized = new Map();
+  for (const item of tags || []) {
+    const tag = String(typeof item === 'string' ? item : item?.tag || '')
+      .replace(/^#+/, '')
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 24);
+    if (tag && !normalized.has(tag.toLowerCase())) normalized.set(tag.toLowerCase(), tag);
+  }
+  return [...normalized.values()].slice(0, 8);
 }
 
 function normalizeBookmarkFolderPath(path) {
@@ -716,7 +721,10 @@ async function getBookmarkFolderInfo(bookmark) {
 function buildLocalBookmarkSuggestion(tempItem, ruleTags, suggestedFolder, aiSuggestion, aiError) {
   const ruleTagNames = normalizeTagList(ruleTags);
   const aiTagNames = normalizeTagList(aiSuggestion?.tags);
-  const finalTags = aiTagNames.length > 0 ? aiTagNames : ruleTagNames.slice(0, 3);
+  const mergedTags = aiTagNames.length > 0 && typeof mergeAITags === 'function'
+    ? mergeAITags(ruleTags, aiSuggestion.tags, 3)
+    : ruleTags;
+  const finalTags = normalizeTagList(mergedTags).slice(0, 3);
   return {
     title: tempItem.title || tempItem.url,
     url: tempItem.url,

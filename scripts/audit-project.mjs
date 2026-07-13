@@ -53,14 +53,19 @@ const requiredFiles = [
 for (const file of requiredFiles) mustExist(file);
 
 mustInclude('README.md', [
-  '核心功能',
+  '项目简介',
+  '功能特性',
   '技术栈',
-  '目录结构',
+  '项目结构',
   '环境要求',
-  '安装与构建',
-  '本地加载',
+  '安装方法',
+  '使用方法',
   '书签导航',
-  'AI 配置',
+  '配置说明',
+  '构建与部署',
+  '截图与演示',
+  '贡献指南',
+  '许可证',
   '常见问题',
   '仓库整理',
   '请加载 `dist/`',
@@ -80,6 +85,8 @@ if (manifest.options_page !== 'pages/settings/settings.html') fail('manifest opt
 else pass('manifest options path');
 if (!manifest.omnibox || manifest.omnibox.keyword !== 'bk') fail('manifest omnibox missing');
 else pass('manifest omnibox');
+if (manifest.homepage_url !== 'https://github.com/jxh-YG/ai-bookmark-os') fail('manifest homepage mismatch');
+else pass('manifest homepage');
 
 const aiAssets = existsSync('dist/ai/assets') ? readdirSync('dist/ai/assets') : [];
 if (aiAssets.some((file) => /^options-/.test(file))) fail('legacy AI options bundle should not be packaged');

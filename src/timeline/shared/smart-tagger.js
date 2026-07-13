@@ -969,6 +969,16 @@ function hasStrongSignal(signals, tag) {
   );
 }
 
+function hasReliableLocalSignal(signals, tag) {
+  const list = signals[tag] || [];
+  return hasStrongSignal(signals, tag) || list.some(s =>
+    s === 'subdomain' ||
+    s === 'extension' ||
+    s === 'domain+path' ||
+    s === 'url-path:1'
+  );
+}
+
 // 判断当前书签是否存在任何强规则信号
 function hasAnyStrongSignal(signals) {
   for (const list of Object.values(signals)) {
@@ -1574,12 +1584,17 @@ function matchCombinationRules(features) {
 function matchDomainTag(domain) {
   if (!domain) return null;
 
-  const lowerDomain = domain.toLowerCase();
+  const lowerDomain = domain.toLowerCase().replace(/\.$/, '');
+  const matchesDomain = ruleDomain => {
+    const candidate = String(ruleDomain || '').toLowerCase().replace(/\.$/, '');
+    if (!candidate || candidate.includes('/')) return false;
+    return lowerDomain === candidate || lowerDomain.endsWith('.' + candidate);
+  };
 
   // 动态规则优先（含自动学习到的域名→标签）
   const mergedRules = getMergedDomainRules();
   for (const rule of mergedRules) {
-    if (rule.domains.some(d => lowerDomain.includes(d))) {
+    if (rule.domains.some(matchesDomain)) {
       return { tag: rule.tag, color: rule.color, confidence: 1.0 };
     }
   }
@@ -1587,7 +1602,7 @@ function matchDomainTag(domain) {
   // 自动学习的域名→标签映射（带置信度）
   if (_dynamicRulesCache?.learnedDomainTag) {
     for (const [d, info] of Object.entries(_dynamicRulesCache.learnedDomainTag)) {
-      if (lowerDomain.includes(d)) {
+      if (matchesDomain(d)) {
         const isObj = info && typeof info === 'object';
         const tag = isObj ? info.tag : info;
         const count = isObj ? (info.count || 1) : 1;
@@ -1605,10 +1620,20 @@ function matchDomainTag(domain) {
 function matchUrlPathTag(url) {
   if (!url) return null;
 
-  const lowerUrl = url.toLowerCase();
+  let lowerPath;
+  try {
+    lowerPath = new URL(url).pathname.toLowerCase();
+  } catch {
+    return null;
+  }
 
   for (const rule of getMergedUrlPathRules()) {
-    if (rule.patterns.some(p => lowerUrl.includes(p))) {
+    if (rule.patterns.some(pattern => {
+      const normalized = String(pattern || '').toLowerCase();
+      if (!normalized) return false;
+      if (normalized.endsWith('/')) return lowerPath.includes(normalized);
+      return lowerPath === normalized || lowerPath.startsWith(normalized + '/') || lowerPath.includes(normalized + '/');
+    })) {
       return { tag: rule.tag, weight: rule.weight ?? 1.0 };
     }
   }
@@ -1897,8 +1922,12 @@ async function autoTagBookmark(bookmark) {
   const sortedEntries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
   let filteredEntries = applyConfidenceFilter(sortedEntries, signals);
 
+  if (filteredEntries.length === 0) {
+    filteredEntries = [['其他', 0]];
+  }
+
   // 低置信度兜底：无强规则信号且 top1 分数过低时归为“其他”
-  if (filteredEntries.length > 0 && filteredEntries[0][1] <= 16 && !hasStrongSignal(signals, filteredEntries[0][0])) {
+  if (filteredEntries.length > 0 && filteredEntries[0][1] <= 16 && !hasReliableLocalSignal(signals, filteredEntries[0][0])) {
     filteredEntries = [['其他', 0]];
   }
 
@@ -2116,8 +2145,12 @@ function autoTagBookmarkSync(bookmark) {
   const sortedEntries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
   let filteredEntries = applyConfidenceFilter(sortedEntries, signals);
 
+  if (filteredEntries.length === 0) {
+    filteredEntries = [['其他', 0]];
+  }
+
   // 低置信度兜底：无强规则信号且 top1 分数过低时归为“其他”
-  if (filteredEntries.length > 0 && filteredEntries[0][1] <= 16 && !hasStrongSignal(signals, filteredEntries[0][0])) {
+  if (filteredEntries.length > 0 && filteredEntries[0][1] <= 16 && !hasReliableLocalSignal(signals, filteredEntries[0][0])) {
     filteredEntries = [['其他', 0]];
   }
 

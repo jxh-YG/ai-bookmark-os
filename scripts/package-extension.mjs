@@ -151,6 +151,7 @@ const manifest = {
   manifest_version: 3,
   name: '__MSG_extName__',
   version: '1.0.0',
+  homepage_url: 'https://github.com/jxh-YG/ai-bookmark-os',
   default_locale: 'zh_CN',
   description: '__MSG_extDescription__',
   icons: {

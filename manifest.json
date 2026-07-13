@@ -11,7 +11,7 @@
     "128": "icons/icon128.png"
   },
   "minimum_chrome_version": "114",
-  "homepage_url": "https://github.com/local/ai-bookmark-os",
+  "homepage_url": "https://github.com/jxh-YG/ai-bookmark-os",
   "permissions": [
     "bookmarks",
     "storage",

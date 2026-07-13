@@ -1,15 +1,63 @@
-node_modules
-dist
-.sources
-vendor/markline
-.DS_Store
-*.log
+# Dependencies
+/node_modules/
+
+# Build outputs and caches
+/dist/
+/build/
+/coverage/
+/.cache/
+/.vite/
+/.nyc_output/
 *.tsbuildinfo
+*.tmp
+*.temp
+*.bak
+
+# Local reference repositories and agent state
+/.sources/
+/vendor/markline/
+/.agents/
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+/secrets/
+id_rsa
+id_ed25519
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials*.json
+
+# IDE and OS files
+/.idea/
+/.vscode/
+/.vs/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs and package manager diagnostics
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Local audit and one-off migration artifacts
-task_plan.md
-progress.md
-findings.md
-tmp-*.json
-tmp-ui-shots/
-scripts/_*.mjs
+/task_plan.md
+/progress.md
+/findings.md
+/tmp-*.json
+/tmp-ui-shots/
+/scripts/_*.mjs
+
+# Local release archives
+/*.zip

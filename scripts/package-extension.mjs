@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const dist = path.join(root, 'dist');
 const timelineSource = path.join(root, 'src', 'timeline');
-const distAi = path.join(root, 'dist-ai');
+const aiDist = path.join(dist, 'ai');
 
 function ensureDir(p) {
   mkdirSync(p, { recursive: true });
@@ -36,12 +36,15 @@ function mustExist(p, label) {
 }
 
 mustExist(timelineSource, 'src/timeline');
-mustExist(distAi, 'dist-ai (run vite build first)');
-mustExist(path.join(distAi, 'sidepanel.html'), 'dist-ai/sidepanel.html');
-mustExist(path.join(distAi, 'bookmark-nav.html'), 'dist-ai/bookmark-nav.html');
+mustExist(aiDist, 'dist/ai (run vite build first)');
+mustExist(path.join(aiDist, 'sidepanel.html'), 'dist/ai/sidepanel.html');
+mustExist(path.join(aiDist, 'bookmark-nav.html'), 'dist/ai/bookmark-nav.html');
 
-if (existsSync(dist)) rmSync(dist, { recursive: true, force: true });
 ensureDir(dist);
+for (const name of readdirSync(dist)) {
+  if (name === 'ai') continue;
+  rmSync(path.join(dist, name), { recursive: true, force: true });
+}
 
 // 1) Full timeline modules at extension root
 for (const part of ['background', 'content', 'pages', 'shared', 'rules', 'icons']) {
@@ -60,8 +63,6 @@ for (const name of ['icon16.png', 'icon32.png', 'icon48.png', 'icon128.png']) {
   }
 }
 
-copyDir(distAi, path.join(dist, 'ai'));
-
 // The React AI options page is kept in source for development, but the packaged
 // extension must expose one settings surface only. Direct visits are forwarded
 // to the unified settings page to avoid two competing AI settings UIs.
@@ -71,9 +72,7 @@ const aiOptionsRedirect = `<!doctype html>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Bookmark OS · 设置</title>
-  <script>
-    location.replace('../pages/settings/settings.html#ai');
-  </script>
+  <script src="options.js"></script>
   <style>
     :root{color-scheme:light dark}
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:linear-gradient(180deg,#f8fbff 0%,#edf4fb 48%,#f6f8fb 100%);color:#1d1d1f}
@@ -93,6 +92,11 @@ const aiOptionsRedirect = `<!doctype html>
 </body>
 </html>`;
 writeFileSync(path.join(dist, 'ai', 'options.html'), aiOptionsRedirect, 'utf8');
+writeFileSync(
+  path.join(dist, 'ai', 'options.js'),
+  "location.replace('../pages/settings/settings.html#ai');\n",
+  'utf8',
+);
 
 // 3) SW bridge
 ensureDir(path.join(dist, 'background'));

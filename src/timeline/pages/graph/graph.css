@@ -853,3 +853,19 @@ body,
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 82%, white), var(--accent-hover));
   box-shadow: var(--shadow-glow, 0 18px 52px rgba(93,151,255,.18));
 }
+
+/* graph full-bleed */
+html, body, .graph-container {
+  width: 100%;
+  max-width: 100%;
+}
+.graph-container {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.graph-canvas-wrap,
+.cy-container,
+#cy {
+  width: 100% !important;
+  max-width: none !important;
+}

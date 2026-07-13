@@ -10,6 +10,7 @@
     "build": "npm run build:ai && npm run build:ext",
     "typecheck": "tsc -b --noEmit",
     "test:quick-bookmark": "node scripts/test-quick-bookmark.mjs",
+    "test:regressions": "node scripts/test-regressions.mjs",
     "preview:check": "node scripts/verify-build.mjs",
     "audit:project": "node scripts/audit-project.mjs"
   },

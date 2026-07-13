@@ -129,6 +129,10 @@ export async function applyToBookmarks(
   tree: CategoryNode[],
   onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
+  if (await getApplyRecord()) {
+    throw new Error('请先撤销上一次应用，再执行新的分类应用。');
+  }
+
   const { moveCount } = planApply(tree);
   let done = 0;
 
@@ -147,6 +151,47 @@ export async function applyToBookmarks(
   const rootFolder = await chrome.bookmarks.create({ parentId: bar.id, title: rootTitle });
 
   const record: ApplyRecord = { createdAt: Date.now(), rootFolderId: rootFolder.id, moves: [] };
+  const recoverableIds = new Set<string>();
+  const bookmarkIds: string[] = [];
+  const collectBookmarkIds = (nodes: CategoryNode[]) => {
+    for (const node of nodes) {
+      for (const id of node.bookmarkIds ?? []) {
+        if (!recoverableIds.has(id)) {
+          recoverableIds.add(id);
+          bookmarkIds.push(id);
+        }
+      }
+      if (node.children) collectBookmarkIds(node.children);
+    }
+  };
+  collectBookmarkIds(tree);
+  recoverableIds.clear();
+
+  for (const id of bookmarkIds) {
+    try {
+      const [node] = await chrome.bookmarks.get(id);
+      if (!node) continue;
+      record.moves.push({
+        id,
+        oldParentId: node.parentId ?? bar.id,
+        oldIndex: node.index ?? 0,
+      });
+      recoverableIds.add(id);
+    } catch {
+      // 书签可能已被用户删除，跳过
+    }
+  }
+
+  try {
+    await chrome.storage.local.set({ [APPLY_RECORD_KEY]: record });
+  } catch (error) {
+    try {
+      await chrome.bookmarks.removeTree(rootFolder.id);
+    } catch {
+      // 清理失败时保留空目录，避免掩盖原始错误
+    }
+    throw error;
+  }
 
   const createLevel = async (nodes: CategoryNode[], parentId: string) => {
     for (const n of nodes) {
@@ -154,13 +199,9 @@ export async function applyToBookmarks(
       if (n.children) await createLevel(n.children, folder.id);
       for (const id of n.bookmarkIds ?? []) {
         try {
-          const [node] = await chrome.bookmarks.get(id);
-          await chrome.bookmarks.move(id, { parentId: folder.id });
-          record.moves.push({
-            id,
-            oldParentId: node.parentId ?? bar.id,
-            oldIndex: node.index ?? 0,
-          });
+          if (recoverableIds.has(id)) {
+            await chrome.bookmarks.move(id, { parentId: folder.id });
+          }
         } catch {
           // 书签可能已被用户删除，跳过
         }
@@ -170,7 +211,6 @@ export async function applyToBookmarks(
     }
   };
   await createLevel(tree, rootFolder.id);
-  await chrome.storage.local.set({ [APPLY_RECORD_KEY]: record });
 }
 
 export async function getApplyRecord(): Promise<ApplyRecord | null> {
@@ -188,6 +228,7 @@ export async function undoApply(
   const record = await getApplyRecord();
   if (!record) return 0;
   let restored = 0;
+  const failedIds = new Set<string>();
   // 倒序移回，尽量还原 index 顺序
   const moves = [...record.moves].reverse();
   for (let i = 0; i < moves.length; i++) {
@@ -196,14 +237,33 @@ export async function undoApply(
       await chrome.bookmarks.move(m.id, { parentId: m.oldParentId, index: m.oldIndex });
       restored++;
     } catch {
-      // 原文件夹或书签已不存在，跳过
+      failedIds.add(m.id);
     }
     onProgress?.(i + 1, moves.length);
   }
+
+  const remainingMoves = record.moves.filter((move) => failedIds.has(move.id));
+  if (remainingMoves.length > 0) {
+    await chrome.storage.local.set({
+      [APPLY_RECORD_KEY]: { ...record, moves: remainingMoves },
+    });
+    return restored;
+  }
+
   try {
+    const subtree = await chrome.bookmarks.getSubTree(record.rootFolderId);
+    const containsBookmark = (nodes: chrome.bookmarks.BookmarkTreeNode[]): boolean =>
+      nodes.some((node) => !!node.url || containsBookmark(node.children ?? []));
+    if (containsBookmark(subtree)) {
+      await chrome.storage.local.remove(APPLY_RECORD_KEY);
+      return restored;
+    }
     await chrome.bookmarks.removeTree(record.rootFolderId);
   } catch {
-    // 文件夹可能已被用户删除
+    await chrome.storage.local.set({
+      [APPLY_RECORD_KEY]: { ...record, moves: [] },
+    });
+    return restored;
   }
   await chrome.storage.local.remove(APPLY_RECORD_KEY);
   return restored;

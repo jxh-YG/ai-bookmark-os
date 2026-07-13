@@ -87,8 +87,8 @@ body {
 .settings-layout {
   display: flex;
   min-height: 100vh;
-  max-width: 1100px;
-  margin: 0 auto;
+  max-width: none; width: 100%;
+  margin: 0;
 }
 
 /* ===== Top Header ===== */
@@ -191,7 +191,7 @@ body {
 .settings-panel {
   flex: 1;
   padding: var(--space-2xl);
-  max-width: 800px;
+  max-width: none; min-width: 0;
   background: var(--bg-primary);
 }
 
@@ -1766,7 +1766,7 @@ body {
 }
 
 .settings-layout {
-  max-width: 1180px;
+  max-width: none; width: 100%;
   gap: 16px;
   padding: 18px;
 }
@@ -1863,5 +1863,67 @@ textarea,
   .settings-nav,
   .settings-panel {
     border-radius: var(--radius-lg, 16px);
+  }
+}
+
+
+/* full-bleed adaptive shell */
+html, body {
+  width: 100%;
+  max-width: 100%;
+}
+
+.settings-layout {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  flex: 1 1 auto;
+}
+
+.settings-panel {
+  max-width: none !important;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-header {
+  width: 100%;
+  max-width: none;
+}
+
+.setting-card,
+.panel-section.active {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+/* form controls scale with container instead of fixed overflow at zoom */
+#panel-ai .tagrule-input,
+#panel-ai .tree-url-input,
+.setting-control .tagrule-input,
+.setting-control .select-control {
+  max-width: 100%;
+}
+
+@media (max-width: 900px) {
+  .settings-layout {
+    flex-direction: column;
+    padding: 12px;
+  }
+  .settings-nav {
+    width: 100%;
+    border-right: none;
+  }
+  .nav-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px;
+  }
+  .nav-item {
+    width: auto;
+    margin: 0;
+    border-radius: var(--radius-md);
   }
 }

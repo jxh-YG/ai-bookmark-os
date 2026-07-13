@@ -14,7 +14,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist-ai',
+    outDir: 'dist/ai',
     emptyOutDir: true,
     rollupOptions: {
       input: {

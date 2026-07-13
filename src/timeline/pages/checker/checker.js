@@ -127,7 +127,7 @@ function localizeCheckResult(result) {
 
   if (result.status === 'warning') {
     if (msg.includes('Unconfirmed HTTP') || msg.includes('usable or inconclusive')) {
-      return { ...result, message: 'Page is reachable or its content cannot be confirmed; please verify manually.' };
+      return { ...result, message: i18n('checkerUnconfirmed') || '页面可访问或内容无法确认，请手动核实。' };
     }
     if (msg.includes('Timeout')) {
       return { ...result, message: i18n('checkerErrTimeout') };

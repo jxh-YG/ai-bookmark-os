@@ -20,6 +20,9 @@ export interface TreeEditHandlers {
   onMoveBookmark: (bookmarkId: string, toPath: number[], toIndex?: number) => void;
   onMoveFolder: (fromPath: number[], toParentPath: number[], toIndex: number) => void;
   deleteConfirmText: (name: string) => string;
+  renameLabel?: string;
+  deleteLabel?: string;
+  moveToRootLabel?: string;
 }
 
 const FOLDER_DRAG_TYPE = 'application/x-ai-bookmark-folder-path';
@@ -81,7 +84,7 @@ export function Tree({ nodes, bookmarkById, labels, edit }: TreeProps) {
             if (fromPath) edit.onMoveFolder(fromPath, [], nodes.length);
           }}
         >
-          Move folder to top level
+          {edit.moveToRootLabel || 'Move folder to top level'}
         </div>
       )}
     </div>
@@ -226,8 +229,8 @@ function Folder({
             <button
               type="button"
               className="icon-btn"
-              title="Rename"
-              aria-label="Rename"
+              title={edit.renameLabel || 'Rename'}
+              aria-label={edit.renameLabel || 'Rename'}
               onClick={() => {
                 setNameDraft(node.name);
                 setRenaming(true);
@@ -241,8 +244,8 @@ function Folder({
             <button
               type="button"
               className="icon-btn icon-btn--subtle"
-              title="Delete"
-              aria-label="Delete"
+              title={edit.deleteLabel || 'Delete'}
+              aria-label={edit.deleteLabel || 'Delete'}
               onClick={() => {
                 if (confirm(edit.deleteConfirmText(node.name))) edit.onDelete(path);
               }}

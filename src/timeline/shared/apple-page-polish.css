@@ -190,8 +190,8 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -200,13 +200,13 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--border-medium) 70%, transparent);
-  border: 3px solid transparent;
+  border: 2px solid transparent;
   border-radius: var(--radius-full);
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--accent) 34%, var(--border-medium));
+  background: color-mix(in srgb, var(--accent) 28%, var(--border-medium));
   background-clip: content-box;
 }
 
@@ -1026,4 +1026,56 @@ html body .icon-btn:not(:disabled):active {
   html body .sa-feed-article:hover {
     transform: none;
   }
+}
+
+
+/* adaptive full-bleed pages (full tab pages only; NEVER collapse extension popup) */
+html:not(:has(body[data-page="popup"])) body:not([data-page="popup"]) .settings-layout,
+html:not(:has(body[data-page="popup"])) body:not([data-page="popup"]) .checker-container,
+html:not(:has(body[data-page="popup"])) body:not([data-page="popup"]) .graph-container,
+html:not(:has(body[data-page="popup"])) body:not([data-page="popup"]) .bookmark-nav-shell,
+html:not(:has(body[data-page="popup"])) body:not([data-page="popup"]) .sa-layout {
+  width: 100% !important;
+  max-width: none !important;
+  box-sizing: border-box;
+}
+
+body:not([data-page="popup"]) .settings-layout {
+  margin: 0 !important;
+}
+
+body:not([data-page="popup"]) .checker-container {
+  align-items: stretch !important;
+}
+
+body:not([data-page="popup"]) .checker-content,
+body:not([data-page="popup"]) .graph-canvas-wrap,
+body:not([data-page="popup"]) .sa-main,
+body:not([data-page="popup"]) .sa-content {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0;
+}
+
+/* Full pages fill the viewport; popup keeps fixed chrome width via popup.css */
+html:has(body[data-page="settings"]),
+html:has(body[data-page="standalone"]),
+html:has(body[data-page="checker"]),
+html:has(body[data-page="graph"]),
+html:has(body[data-page="bookmark-nav"]),
+body[data-page="settings"],
+body[data-page="standalone"],
+body[data-page="checker"],
+body[data-page="graph"],
+body[data-page="bookmark-nav"] {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Hard guard: extension popup must never inherit full-page 100% width collapse */
+html:has(body[data-page="popup"]),
+body[data-page="popup"] {
+  width: 420px !important;
+  min-width: 420px !important;
+  max-width: 420px !important;
 }

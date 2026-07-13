@@ -84,6 +84,50 @@ const API_FORMATS = {
 // ===== 内置 Provider 定义 =====
 // 每个 provider 只需指定名称、格式、模型和端点即可，请求构建和解析由格式模板接管
 const AI_PROVIDERS = {
+  // Aligned with AI pyramid classification providers
+  agnes: {
+    name: 'Agnes AI',
+    format: 'openai',
+    model: 'agnes-2.0-flash',
+    endpoint: 'https://apihub.agnes-ai.com/v1/chat/completions',
+    isFree: false
+  },
+  openrouter: {
+    name: 'OpenRouter',
+    format: 'openai',
+    model: 'openai/gpt-4o-mini',
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    isFree: false
+  },
+  openai: {
+    name: 'OpenAI (Codex)',
+    format: 'openai',
+    model: 'gpt-4o-mini',
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+    isFree: false
+  },
+  claude: {
+    name: 'Claude (Anthropic)',
+    format: 'anthropic',
+    model: 'claude-3-5-haiku-latest',
+    endpoint: 'https://api.anthropic.com/v1/messages',
+    isFree: false
+  },
+  gemini: {
+    name: 'Gemini (Google)',
+    format: 'google',
+    model: 'gemini-2.0-flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
+    isFree: false
+  },
+  deepseek: {
+    name: 'DeepSeek',
+    format: 'openai',
+    model: 'deepseek-chat',
+    endpoint: 'https://api.deepseek.com/v1/chat/completions',
+    isFree: false
+  },
+  // Legacy providers kept for existing user configs
   zhipu: {
     name: '智谱 AI',
     format: 'openai',
@@ -91,25 +135,11 @@ const AI_PROVIDERS = {
     endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
     isFree: true
   },
-  deepseek: {
-    name: 'DeepSeek',
-    format: 'openai',
-    model: 'deepseek-chat',
-    endpoint: 'https://api.deepseek.com/chat/completions',
-    isFree: false
-  },
   google: {
-    name: 'Google Gemini',
+    name: 'Gemini (Google)',
     format: 'google',
-    model: 'gemini-2.0-flash-lite',
+    model: 'gemini-2.0-flash',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
-    isFree: false
-  },
-  openai: {
-    name: 'OpenAI',
-    format: 'openai',
-    model: 'gpt-4o-mini',
-    endpoint: 'https://api.openai.com/v1/chat/completions',
     isFree: false
   },
   tongyi: {
@@ -119,9 +149,8 @@ const AI_PROVIDERS = {
     endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
     isFree: false
   },
-  // 自定义提供商 — 用户自行配置所有参数
   custom: {
-    name: 'Custom',
+    name: '自定义',
     format: null,
     model: '',
     endpoint: '',
@@ -137,7 +166,7 @@ function resolveProvider(config) {
 
   if (providerDef.isCustom) {
     // 自定义 provider：格式来自 config.customFormat
-    const formatType = config.customFormat || 'openai';
+    const formatType = (config.customFormat === 'gemini' || config.customFormat === 'google') ? 'google' : (config.customFormat || 'openai');
     const format = API_FORMATS[formatType];
     if (!format) return null;
     const rawUrl = (config.customEndpoint || '').replace(/\/+$/, '');
@@ -146,7 +175,7 @@ function resolveProvider(config) {
     // 用户勾选了“使用完整 URL”则直接使用，否则按格式拼接路径
     const endpoint = config.customFullUrl ? rawUrl : format.normalizeEndpoint(rawUrl);
     return {
-      name: 'Custom',
+      name: '自定义',
       model: config.model || 'gpt-4o-mini',
       endpoint,
       buildHeaders: format.buildHeaders,
@@ -209,7 +238,7 @@ async function getAIConfig() {
   const defaults = {
     enabled: false,
     assistClassificationEnabled: true,
-    provider: 'zhipu',
+    provider: 'agnes',
     apiKey: '',
     model: '',
     timeout: 8,
@@ -218,7 +247,10 @@ async function getAIConfig() {
     customFullUrl: false,
     assistPrompt: DEFAULT_AI_ASSIST_PROMPT
   };
-  return { ...defaults, ...(result[AI_CONFIG_KEY] || {}) };
+  const merged = { ...defaults, ...(result[AI_CONFIG_KEY] || {}) };
+  if (merged.provider === 'google') merged.provider = 'gemini';
+  if (merged.customFormat === 'google') merged.customFormat = 'gemini';
+  return merged;
 }
 
 function normalizeAIAssistPrompt(prompt) {

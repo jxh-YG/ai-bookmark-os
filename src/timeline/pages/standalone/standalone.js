@@ -384,9 +384,13 @@ async function deleteBookmark(id, url) {
 
 async function togglePin(id) {
   try {
-    await chrome.runtime.sendMessage({ action: 'togglePin', id });
-    showToast(i18n('toggledPin'), 'success');
-    await refreshBookmarkData();
+    const res = await chrome.runtime.sendMessage({ action: 'togglePin', id });
+    if (res && res.success) {
+      showToast(i18n('toggledPin'), 'success');
+      await refreshBookmarkData();
+    } else {
+      showToast(i18n('saveFailed'), 'error');
+    }
   } catch { showToast(i18n('saveFailed'), 'error'); }
 }
 
@@ -394,12 +398,16 @@ async function updateBookmark(id, changes) {
   try {
     const res = await chrome.runtime.sendMessage({ action: 'updateBookmark', id, ...changes });
     if (res && res.success) {
-      showToast(i18n('editSuccess'), 'success');
       await refreshBookmarkData();
+      return true;
     } else {
       showToast(i18n('editFailed'), 'error');
+      return false;
     }
-  } catch { showToast(i18n('editFailed'), 'error'); }
+  } catch {
+    showToast(i18n('editFailed'), 'error');
+    return false;
+  }
 }
 
 // ===== 标签系统 =====
@@ -697,6 +705,9 @@ function renderCurrentView(bookmarks) {
     saTimelineView.innerHTML = '';
     saGridView.innerHTML = '';
     saListView.innerHTML = '';
+    saTimelineView.style.display = 'none';
+    saGridView.style.display = 'none';
+    saListView.style.display = 'none';
     saLoading.style.display = 'none';
     if (currentFilter) {
       saSearchEmpty.style.display = 'flex';
@@ -1389,23 +1400,29 @@ saEditFolderTreeInner.addEventListener('click', (e) => {
 
 saEditSave.addEventListener('click', async () => {
   if (!editingBookmarkId) return;
+  const bookmarkId = editingBookmarkId;
+  const targetFolderId = editingFolderId;
   const title = saEditTitle.value.trim();
   const url = saEditUrl.value.trim();
-  const changes = { title, url, tags: editingTags };
-  const bookmark = allBookmarks.find(b => b.id === editingBookmarkId);
+  const changes = { title, url, tags: [...editingTags] };
+  const bookmark = allBookmarks.find(b => b.id === bookmarkId);
   const oldFolderId = bookmark?.parentId;
-  closeEditModal();
-  await updateBookmark(editingBookmarkId, changes);
-  if (editingFolderId && editingFolderId !== oldFolderId) {
+  const updated = await updateBookmark(bookmarkId, changes);
+  if (!updated) return;
+  if (targetFolderId && targetFolderId !== oldFolderId) {
     try {
-      await chrome.bookmarks.move(editingBookmarkId, { parentId: editingFolderId });
+      await chrome.bookmarks.move(bookmarkId, { parentId: targetFolderId });
       showToast(i18n('editAndMoveSuccess'), 'success');
       await refreshBookmarkData();
       await loadFolderTree();
     } catch {
+      showToast(i18n('editSuccess'), 'success');
       showToast(i18n('moveFailed'), 'error');
     }
+  } else {
+    showToast(i18n('editSuccess'), 'success');
   }
+  closeEditModal();
 });
 
 saEditCancel.addEventListener('click', closeEditModal);
@@ -1591,7 +1608,7 @@ function toggleTheme() {
 
 // ===== 监听后台消息 =====
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.action === 'bookmarkAdded' || msg.action === 'bookmarksUpdated' || msg.action === 'tagsUpdated') {
+  if (msg.action === 'bookmarkAdded' || msg.action === 'bookmarksDeleted' || msg.action === 'bookmarksUpdated' || msg.action === 'tagsUpdated') {
     refreshBookmarkData({ keepFilter: true });
   }
 });
@@ -1836,7 +1853,7 @@ function showPlaceholderContent(title, url) {
   previewEmptyMsgEl.style.display = 'none';
   previewBodyEl.style.display = '';
   previewTitleEl.textContent = title || '';
-  previewDescEl.textContent = i18n('previewLoading') || 'Loading\u2026';
+  previewDescEl.textContent = i18n('previewLoading') || '正在加载…';
   previewDescEl.className = 'preview-desc preview-desc--loading';
   previewSiteEl.textContent = host;
 }
@@ -2152,19 +2169,19 @@ async function fetchAndRenderPreview(itemEl, url) {
   if (seq !== previewFetchSeq || itemEl !== previewHoverItem) return;
   if (!response || !response.success) {
     previewSessionCache.set(url, { type: 'error' });
-    showPreviewMessage(i18n('previewError') || 'Failed to load');
+    showPreviewMessage(i18n('previewError') || '预览加载失败');
     return;
   }
   const result = response.result || {};
   if (result.disabled) {
     previewEnabled = false;
     previewSessionCache.set(url, { type: 'disabled' });
-    showPreviewMessage(i18n('previewDisabled') || 'Preview disabled');
+    showPreviewMessage(i18n('previewDisabled') || '网页预览未启用');
     return;
   }
   if (result.error) {
     previewSessionCache.set(url, { type: 'error' });
-    showPreviewMessage(i18n('previewError') || 'Failed to load');
+    showPreviewMessage(i18n('previewError') || '预览加载失败');
     return;
   }
   if (result.preview && (result.preview.title || result.preview.image)) {
@@ -2214,11 +2231,11 @@ function drawPreviewFromCache(entry, itemEl) {
   if (entry.type === 'ok') {
     showPreviewContent(entry.data);
   } else if (entry.type === 'empty') {
-    showPreviewMessage(i18n('previewEmpty') || 'No preview available');
+    showPreviewMessage(i18n('previewEmpty') || '暂无可用预览');
   } else if (entry.type === 'disabled') {
-    showPreviewMessage(i18n('previewDisabled') || 'Preview disabled');
+    showPreviewMessage(i18n('previewDisabled') || '网页预览未启用');
   } else {
-    showPreviewMessage(i18n('previewError') || 'Failed to load');
+    showPreviewMessage(i18n('previewError') || '预览加载失败');
   }
   // 内容变化后用实际尺寸重新定位
   requestAnimationFrame(() => {

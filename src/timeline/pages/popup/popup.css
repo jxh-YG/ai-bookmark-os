@@ -59,8 +59,16 @@
   box-sizing: border-box;
 }
 
+html {
+  width: 420px !important;
+  min-width: 420px !important;
+  max-width: 420px !important;
+}
+
 body {
-  width: 420px;
+  width: 420px !important;
+  min-width: 420px !important;
+  max-width: 420px !important;
   min-height: 600px;
   max-height: 600px;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -84,15 +92,26 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-medium);
+  background: color-mix(in srgb, var(--border-medium) 70%, transparent);
   border-radius: var(--radius-full);
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-tertiary);
+  background: color-mix(in srgb, var(--accent) 28%, var(--border-medium));
   background-clip: content-box;
+}
+
+.main,
+.tag-bar,
+.search-suggest,
+.modal-body,
+.palette-results,
+.deleted-list,
+.edit-folder-tree {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--border-medium) 70%, transparent) transparent;
 }
 
 /* ===== Unified Popup Chrome ===== */
@@ -1498,13 +1517,6 @@ body.theme-dark .bookmark-menu {
   margin-bottom: 8px;
   padding: 4px 0;
 }
-.edit-folder-tree::-webkit-scrollbar {
-  width: 4px;
-}
-.edit-folder-tree::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 2px;
-}
 .folder-tree-item {
   display: flex;
   align-items: center;
@@ -2453,8 +2465,9 @@ mark.hl {
 
 /* ===== Embedded AI workspace (unified product shell) ===== */
 body.ai-mode {
-  width: 420px;
-  min-width: 420px;
+  width: 420px !important;
+  min-width: 420px !important;
+  max-width: 420px !important;
   height: 640px;
   max-height: 640px;
   overflow: hidden;
@@ -2668,4 +2681,12 @@ button:not(:disabled):active,
 .icon-btn:not(:disabled):active,
 .btn:not(:disabled):active {
   transform: scale(0.97);
+}
+
+
+/* popup fixed chrome size guard */
+html, body {
+  width: 420px !important;
+  min-width: 420px !important;
+  max-width: 420px !important;
 }

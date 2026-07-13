@@ -43,21 +43,30 @@
     "message": "$COUNT$ min ago",
     "description": "Relative time",
     "placeholders": {
-      "count": { "content": "$1", "example": "5" }
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
     }
   },
   "hoursAgo": {
     "message": "$COUNT$ hours ago",
     "description": "Relative time",
     "placeholders": {
-      "count": { "content": "$1", "example": "3" }
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
     }
   },
   "daysAgo": {
     "message": "$COUNT$ days ago",
     "description": "Relative time",
     "placeholders": {
-      "count": { "content": "$1", "example": "2" }
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
     }
   },
   "today": {
@@ -72,7 +81,10 @@
     "message": "$COUNT$ bookmarks",
     "description": "Bookmark count in date group",
     "placeholders": {
-      "count": { "content": "$1", "example": "12" }
+      "count": {
+        "content": "$1",
+        "example": "12"
+      }
     }
   },
   "untitled": {
@@ -99,14 +111,20 @@
     "message": "Synced, $COUNT$ new bookmarks",
     "description": "Toast message",
     "placeholders": {
-      "count": { "content": "$1", "example": "5" }
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
     }
   },
   "syncSuccessTotal": {
     "message": "Synced, $COUNT$ bookmarks total",
     "description": "Toast message",
     "placeholders": {
-      "count": { "content": "$1", "example": "100" }
+      "count": {
+        "content": "$1",
+        "example": "100"
+      }
     }
   },
   "syncFailed": {
@@ -133,7 +151,10 @@
     "message": "Clear all bookmark records?\n\n$COUNT$ records will be removed. This does not affect your original Chrome bookmarks.",
     "description": "Confirm dialog",
     "placeholders": {
-      "count": { "content": "$1", "example": "50" }
+      "count": {
+        "content": "$1",
+        "example": "50"
+      }
     }
   },
   "allCleared": {
@@ -154,7 +175,7 @@
   },
   "back": {
     "message": "Back",
-    "description": "Back button tooltip"
+    "description": "Back button"
   },
   "appearance": {
     "message": "Appearance",
@@ -240,7 +261,10 @@
     "message": "$COUNT$ clicks",
     "description": "Click count label",
     "placeholders": {
-      "count": { "content": "$1", "example": "42" }
+      "count": {
+        "content": "$1",
+        "example": "42"
+      }
     }
   },
   "heatLevel1": {
@@ -366,10 +390,6 @@
   "deletedEmptyHint": {
     "message": "Deleted bookmarks will appear here",
     "description": "Empty state hint"
-  },
-  "back": {
-    "message": "Back",
-    "description": "Back button"
   },
   "cmdQuickBookmark": {
     "message": "Quick Bookmark",
@@ -763,12 +783,30 @@
     "message": "Total: $TOTAL$ · Success: $SUCCESS$ · Fail: $FAIL$ · Cache: $CACHE$ ($RATE$) · Avg: $AVG$",
     "description": "AI logs stats format",
     "placeholders": {
-      "total": { "content": "$1", "example": "36" },
-      "success": { "content": "$2", "example": "3" },
-      "fail": { "content": "$3", "example": "0" },
-      "cache": { "content": "$4", "example": "6" },
-      "avg": { "content": "$5", "example": "1.3s" },
-      "rate": { "content": "$6", "example": "16.7%" }
+      "total": {
+        "content": "$1",
+        "example": "36"
+      },
+      "success": {
+        "content": "$2",
+        "example": "3"
+      },
+      "fail": {
+        "content": "$3",
+        "example": "0"
+      },
+      "cache": {
+        "content": "$4",
+        "example": "6"
+      },
+      "avg": {
+        "content": "$5",
+        "example": "1.3s"
+      },
+      "rate": {
+        "content": "$6",
+        "example": "16.7%"
+      }
     }
   },
   "aiRefreshLogs": {
@@ -850,5 +888,11 @@
   "aiLogTime": {
     "message": "Time",
     "description": "AI log time label"
+  },
+  "confirmPurgeDeleted": {
+    "message": "Permanently delete this record? This cannot be undone."
+  },
+  "confirmClearAllDeleted": {
+    "message": "Clear all $1 recently deleted records?"
   }
 }

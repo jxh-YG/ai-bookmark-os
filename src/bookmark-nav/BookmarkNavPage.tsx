@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  Tags,
   X,
   PanelLeft,
   LayoutGrid,
@@ -20,6 +21,7 @@ import { getFlatBookmarks } from '../core/bookmarks';
 import { hashUrl } from '../core/cache';
 import type { ClassifyResult, FlatBookmark } from '../types';
 import { BookmarkCard } from './BookmarkCard';
+import { getTagColor } from './tagColor';
 
 type LoadStatus = 'loading' | 'ready' | 'empty' | 'error';
 type LabelLike = { summary?: string; tags?: string[] };
@@ -308,6 +310,8 @@ export function BookmarkNavPage() {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [activeFolderId, setActiveFolderId] = useState('all');
+  const [activeTags, setActiveTags] = useState<string[]>([]);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(() => new Set());
 
   const loadBookmarks = useCallback(async () => {
@@ -381,27 +385,32 @@ export function BookmarkNavPage() {
     const q = normalize(query);
 
     return bookmarks.filter((bookmark) => {
-      const label = classifyResult?.labels[bookmark.id];
-      const cacheLabel = labelCache[hashUrl(bookmark.url)];
-      const meta = bookmarkMeta[bookmark.id];
       if (selectedIds && !selectedIds.has(bookmark.id)) return false;
+      const label = getBookmarkLabel(bookmark);
+      const meta = bookmarkMeta[bookmark.id];
+      const enrichment = buildBookmarkEnrichment(bookmark, label, meta);
+      const tags = enrichment.tags;
+      if (activeTags.length > 0) {
+        const lowered = tags.map((item) => item.toLowerCase());
+        if (!activeTags.every((tag) => lowered.includes(tag.toLowerCase()))) return false;
+      }
       if (!q) return true;
       return [
         bookmark.title,
         bookmark.url,
         bookmark.folderPath,
         label?.summary,
-        cacheLabel?.summary,
+        enrichment.summary,
         meta?.title,
         meta?.description,
-        ...(label?.tags ?? []),
-        ...(cacheLabel?.tags ?? []),
+        ...tags,
       ]
         .join(' ')
         .toLowerCase()
         .includes(q);
     });
-  }, [activeFolderId, bookmarks, bookmarkMeta, classifyResult, folderTree, labelCache, query]);
+  }, [activeFolderId, activeTags, bookmarks, bookmarkMeta, folderTree, getBookmarkLabel, query]);
+
 
   useEffect(() => {
     if (status !== 'ready' || typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
@@ -451,6 +460,38 @@ export function BookmarkNavPage() {
     setExpandedFolderIds(collectFolderIds(folderTree));
   }, [folderTree]);
 
+  const tagStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const bookmark of bookmarks) {
+      const label = getBookmarkLabel(bookmark);
+      const meta = bookmarkMeta[bookmark.id];
+      const tags = buildBookmarkEnrichment(bookmark, label, meta).tags;
+      for (const tag of tags) counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count, color: getTagColor(tag) }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh-CN'));
+  }, [bookmarkMeta, bookmarks, getBookmarkLabel]);
+
+  const toggleTag = useCallback((tag: string) => {
+    setActiveTags((current) => (
+      current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]
+    ));
+  }, []);
+
+  const clearTags = useCallback(() => setActiveTags([]), []);
+
+  useEffect(() => {
+    if (!tagMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest?.('.bookmark-tag-dropdown')) setTagMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [tagMenuOpen]);
+
+
   const openBookmark = useCallback((bookmark: FlatBookmark) => {
     if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
       chrome.tabs.create({ url: bookmark.url });
@@ -487,13 +528,13 @@ export function BookmarkNavPage() {
         </button>
       </header>
 
-      <section className="bookmark-nav-toolbar" aria-label="书签筛选">
+            <section className="bookmark-nav-toolbar" aria-label="书签筛选">
         <div className="bookmark-nav-search">
           <Search size={18} strokeWidth={2} aria-hidden="true" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索标题、网址、文件夹或 AI 标签"
+            placeholder="搜索标题、网址、文件夹或标签"
           />
           {query ? (
             <button type="button" className="bookmark-nav-clear" onClick={() => setQuery('')} aria-label="清空搜索">
@@ -501,6 +542,69 @@ export function BookmarkNavPage() {
             </button>
           ) : null}
         </div>
+
+        <div className="bookmark-tag-dropdown" data-open={tagMenuOpen ? '1' : '0'}>
+          <button
+            type="button"
+            className={`bookmark-tag-dropdown__trigger${activeTags.length ? ' has-value' : ''}`}
+            onClick={() => setTagMenuOpen((open) => !open)}
+            aria-expanded={tagMenuOpen}
+            aria-haspopup="listbox"
+          >
+            <Tags size={15} strokeWidth={2} aria-hidden="true" />
+            <span className="bookmark-tag-dropdown__text">
+              {activeTags.length === 0
+                ? '标签筛选'
+                : activeTags.length === 1
+                  ? activeTags[0]
+                  : `已选 ${activeTags.length} 个标签`}
+            </span>
+            {activeTags.length > 0 ? (
+              <span className="bookmark-tag-dropdown__badge">{activeTags.length}</span>
+            ) : null}
+            <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+          </button>
+          {tagMenuOpen ? (
+            <div className="bookmark-tag-dropdown__menu" role="listbox" aria-label="选择标签">
+              <div className="bookmark-tag-dropdown__head">
+                <strong>按标签筛选</strong>
+                {activeTags.length > 0 ? (
+                  <button type="button" onClick={clearTags}>清除</button>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className={`bookmark-tag-dropdown__item bookmark-tag-dropdown__item--all${activeTags.length === 0 ? ' is-active' : ''}`}
+                onClick={() => { clearTags(); setTagMenuOpen(false); }}
+              >
+                <span className="bookmark-tag-dropdown__dot bookmark-tag-dropdown__dot--all" aria-hidden="true" />
+                <span className="bookmark-tag-dropdown__item-main">全部标签</span>
+                <span className="bookmark-tag-dropdown__count">{bookmarks.length}</span>
+              </button>
+              <div className="bookmark-tag-dropdown__list">
+                {tagStats.map(({ tag, count, color }) => {
+                  const active = activeTags.includes(tag);
+                  return (
+                    <button
+                      type="button"
+                      key={tag}
+                      className={`bookmark-tag-dropdown__item${active ? ' is-active' : ''}`}
+                      onClick={() => toggleTag(tag)}
+                    >
+                      <span className="bookmark-tag-dropdown__dot" style={{ background: color }} aria-hidden="true" />
+                      <span className="bookmark-tag-dropdown__item-main">{tag}</span>
+                      <span className="bookmark-tag-dropdown__count">{count}</span>
+                    </button>
+                  );
+                })}
+                {tagStats.length === 0 ? (
+                  <p className="bookmark-tag-dropdown__empty">暂无可用标签</p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
         <div className="bookmark-nav-stats" aria-label="书签统计">
           <span>{bookmarks.length} 个书签</span>
           <span>{totalFolders} 个文件夹</span>
@@ -557,6 +661,7 @@ export function BookmarkNavPage() {
             </p>
           </div>
 
+
           {status === 'loading' ? (
             <section className="bookmark-grid" aria-label="正在加载书签">
               {Array.from({ length: 8 }, (_, index) => <div className="bookmark-skeleton" key={index} />)}
@@ -584,7 +689,10 @@ export function BookmarkNavPage() {
             <section className="bookmark-nav-state">
               <Search size={34} strokeWidth={1.8} aria-hidden="true" />
               <h2>没有匹配结果</h2>
-              <p>换一个文件夹或关键词试试。</p>
+              <p>{activeTags.length ? '换一组标签或清除筛选后再试。' : '换一个文件夹或关键词试试。'}</p>
+              {activeTags.length ? (
+                <button type="button" onClick={clearTags}>清除标签筛选</button>
+              ) : null}
             </section>
           ) : null}
 
@@ -601,7 +709,9 @@ export function BookmarkNavPage() {
                     summary={enrichment.summary}
                     tags={enrichment.tags}
                     faviconUrl={getFaviconUrl(bookmark.url)}
+                    activeTags={activeTags}
                     onOpen={openBookmark}
+                    onTagClick={toggleTag}
                   />
                 );
               })}

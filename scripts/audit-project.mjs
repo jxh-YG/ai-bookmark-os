@@ -41,6 +41,7 @@ const requiredFiles = [
   'dist/ai/sidepanel.html',
   'dist/ai/bookmark-nav.html',
   'dist/ai/options.html',
+  'dist/ai/options.js',
   'dist/background/background.js',
   'dist/background/ai-sw-bridge.js',
   'dist/shared/smart-tagger.js',
@@ -85,7 +86,9 @@ if (aiAssets.some((file) => /^options-/.test(file))) fail('legacy AI options bun
 else pass('no legacy AI options bundle');
 
 const aiOptionsHtml = text('dist/ai/options.html');
-if (!aiOptionsHtml.includes("location.replace('../pages/settings/settings.html#ai')")) {
+const aiOptionsScript = text('dist/ai/options.js');
+if (!aiOptionsHtml.includes('<script src="options.js"></script>') ||
+    !aiOptionsScript.includes("location.replace('../pages/settings/settings.html#ai')")) {
   fail('dist/ai/options.html should redirect to unified settings');
 } else {
   pass('AI options redirect');
@@ -147,10 +150,10 @@ for (const bad of ['�', '璁', '缁', '鍒', 'BookmarkPilot', 'bookmark-pilot'
 }
 
 const gitignore = text('.gitignore');
-for (const ignored of ['vendor/markline', 'dist', 'dist-ai', 'node_modules', '.sources']) {
+for (const ignored of ['vendor/markline', 'dist', 'node_modules', '.sources']) {
   if (!gitignore.includes(ignored)) fail(`.gitignore missing ${ignored}`);
 }
-if (['vendor/markline', 'dist', 'dist-ai', 'node_modules', '.sources'].every((ignored) => gitignore.includes(ignored))) {
+if (['vendor/markline', 'dist', 'node_modules', '.sources'].every((ignored) => gitignore.includes(ignored))) {
   pass('external and generated folders ignored');
 }
 

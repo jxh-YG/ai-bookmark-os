@@ -815,3 +815,14 @@ body {
     width: min(100% - 64px, 1720px);
   }
 }
+
+/* checker full-bleed */
+.checker-container,
+.checker-content,
+.summary-bar,
+.result-list,
+.checker-header {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}

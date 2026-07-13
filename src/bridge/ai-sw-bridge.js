@@ -191,19 +191,6 @@
     }
   }
 
-  const PENDING_KEY = 'pendingNewBookmarks';
-  async function getPending() {
-    const data = await chrome.storage.local.get(PENDING_KEY);
-    return data[PENDING_KEY] || [];
-  }
-  async function setPending(ids) {
-    await chrome.storage.local.set({ [PENDING_KEY]: ids });
-    try {
-      await chrome.action.setBadgeText({ text: ids.length ? String(ids.length) : '' });
-      if (ids.length) await chrome.action.setBadgeBackgroundColor({ color: '#0A84FF' });
-    } catch (_) {}
-  }
-
   try {
     chrome.sidePanel &&
       chrome.sidePanel.setPanelBehavior &&
@@ -245,30 +232,24 @@
     }
   });
 
-  chrome.bookmarks.onCreated.addListener(async (id, node) => {
-    if (!node.url || !/^https?:/.test(node.url)) return;
-    const data = await chrome.storage.local.get('classifyResult');
-    if (!data.classifyResult) return;
-    const pending = await getPending();
-    if (!pending.includes(id)) {
-      pending.push(id);
-      await setPending(pending);
-    }
-  });
-
-  chrome.bookmarks.onRemoved.addListener(async (id) => {
-    const pending = await getPending();
-    const next = pending.filter((p) => p !== id);
-    if (next.length !== pending.length) await setPending(next);
-  });
 
   // Extra command for AI side panel without overriding AI Bookmark OS commands
   if (chrome.commands && chrome.commands.onCommand) {
     chrome.commands.onCommand.addListener((command) => {
       if (command === 'open-ai-sidepanel') {
         chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-          if (tab && tab.windowId != null && chrome.sidePanel && chrome.sidePanel.open) {
-            chrome.sidePanel.open({ windowId: tab.windowId });
+          const open = () => {
+            if (tab && tab.windowId != null && chrome.sidePanel && chrome.sidePanel.open) {
+              chrome.sidePanel.open({ windowId: tab.windowId });
+            }
+          };
+          if (chrome.sidePanel && chrome.sidePanel.setOptions) {
+            chrome.sidePanel
+              .setOptions({ path: 'ai/sidepanel.html', enabled: true })
+              .then(open)
+              .catch(open);
+          } else {
+            open();
           }
         });
       }
@@ -290,9 +271,10 @@
     });
   } catch (_) {}
 
-  getPending().then((ids) => {
-    try {
-      chrome.action.setBadgeText({ text: ids.length ? String(ids.length) : '' });
-    } catch (_) {}
-  });
+  // Clear legacy pending-pyramid-classify queue. AI assist tagging already handles new bookmarks.
+  chrome.storage.local.remove('pendingNewBookmarks').then(() => {
+    chrome.action.getBadgeText({}).then((text) => {
+      if (text && /^\d+$/.test(text)) chrome.action.setBadgeText({ text: '' }).catch(() => {});
+    }).catch(() => {});
+  }).catch(() => {});
 })();

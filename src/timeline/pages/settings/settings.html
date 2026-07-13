@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="settings.css?v=2">
   <link rel="stylesheet" href="../../shared/apple-page-polish.css">
 </head>
-<body>
+<body data-page="settings">
   <!-- 顶栏：靠左 -->
   <header class="settings-header">
     <button id="backBtn" class="back-btn" data-i18n-title="back">
@@ -200,7 +200,7 @@
               <div class="setting-desc" data-i18n="omniboxKeywordDesc">Type in address bar to search bookmarks directly</div>
             </div>
             <div class="setting-control">
-              <kbd class="shortcut-key">mk</kbd>
+              <kbd class="shortcut-key">bk</kbd>
             </div>
           </div>
           <div id="shortcutConflicts" class="conflict-banner" style="display:none;">
@@ -654,7 +654,7 @@
       <!-- AI 辅助分类 -->
       <div class="panel-section" id="panel-ai">
         <h2 class="panel-title" data-i18n="aiSection">AI 设置</h2>
-        <div class="setting-desc tagrules-intro">在此统一配置「AI 辅助标签」与「AI 金字塔分类」。两者可使用不同服务商、URL 与 Key。</div>
+        <div class="setting-desc tagrules-intro">在此统一配置「AI 辅助标签」与「AI 金字塔分类」。两边服务商类型与设置项名称保持一致，可分别填写不同 Key。</div>
 
         <div class="ai-subhead ai-subhead--static">
           <div>
@@ -679,17 +679,18 @@
 
           <div class="setting-row">
             <div class="setting-main">
-              <div class="setting-label" data-i18n="aiProvider">Provider</div>
-              <div class="setting-desc" data-i18n="aiProviderDesc">Choose your AI service provider</div>
+              <div class="setting-label" >服务商</div>
+              <div class="setting-desc">选择内置服务商后自动使用对应接口；选“自定义”时再填写地址</div>
             </div>
             <div class="setting-control">
               <select id="aiProviderSelect" class="select-control">
-                <option value="zhipu" data-i18n="aiProviderZhipu">Zhipu AI (GLM-4-Flash, free)</option>
-                <option value="deepseek" data-i18n="aiProviderDeepSeek">DeepSeek</option>
-                <option value="google" data-i18n="aiProviderGoogle">Google Gemini</option>
-                <option value="openai" data-i18n="aiProviderOpenAI">OpenAI</option>
-                <option value="tongyi" data-i18n="aiProviderTongyi">Alibaba Tongyi</option>
-                <option value="custom" data-i18n="aiProviderCustom">Custom</option>
+                <option value="agnes">Agnes AI</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="openai">OpenAI (Codex)</option>
+                <option value="claude">Claude (Anthropic)</option>
+                <option value="gemini">Gemini (Google)</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="custom">自定义</option>
               </select>
             </div>
           </div>
@@ -698,21 +699,22 @@
           <div id="aiCustomFields" class="ai-custom-fields" style="display:none;">
             <div class="setting-row">
               <div class="setting-main">
-                <div class="setting-label" data-i18n="aiCustomFormat">API Format</div>
-                <div class="setting-desc" data-i18n="aiCustomFormatDesc">Choose the API protocol format</div>
+                <div class="setting-label" >API 协议</div>
+                <div class="setting-desc">选择 API 协议格式</div>
               </div>
               <div class="setting-control">
                 <select id="aiCustomFormatSelect" class="select-control">
-                  <option value="openai" data-i18n="aiFormatOpenAI">OpenAI Chat Completions</option>
-                  <option value="anthropic" data-i18n="aiFormatAnthropic">Anthropic Messages</option>
+                  <option value="openai">OpenAI Chat Completions</option>
+                  <option value="anthropic">Anthropic Messages</option>
+                  <option value="gemini">Google Gemini</option>
                 </select>
               </div>
             </div>
 
             <div class="setting-row">
               <div class="setting-main">
-                <div class="setting-label" data-i18n="aiCustomEndpoint">API Base URL</div>
-                <div class="setting-desc" data-i18n="aiCustomEndpointDesc">The full API endpoint URL</div>
+                <div class="setting-label" >API Base URL</div>
+                <div class="setting-desc">自定义服务端点地址</div>
               </div>
               <div class="setting-control">
                 <input type="text" id="aiCustomEndpointInput" class="tagrule-input" style="width: 320px;" placeholder="https://api.example.com/v1">
@@ -721,8 +723,8 @@
 
             <div class="setting-row ai-full-url-row">
               <div class="setting-main">
-                <div class="setting-label" data-i18n="aiFullUrl">Use full URL</div>
-                <div class="setting-desc" data-i18n="aiFullUrlDesc">Use the URL exactly as entered without appending a path</div>
+                <div class="setting-label" >使用完整 URL</div>
+                <div class="setting-desc">按输入地址原样请求，不自动追加路径</div>
               </div>
               <div class="setting-control">
                 <label class="toggle-switch">
@@ -740,11 +742,11 @@
                   <line x1="12" y1="16" x2="12.01" y2="16"/>
                 </svg>
                 <div class="ai-hint-content">
-                  <div class="ai-hint-text" id="aiEndpointHintText" data-i18n="aiEndpointHintOpenAI">
-                    Please enter an endpoint compatible with the OpenAI API. Do not end with a slash. /chat/completions will be appended to the URL.
+                  <div class="ai-hint-text" id="aiEndpointHintText">
+                    请填写兼容 OpenAI API 的服务端点地址，不要以斜杠结尾。/chat/completions 将会被补充到你填写的地址末尾。
                   </div>
-                  <div class="ai-hint-text" id="aiEndpointHintFullUrl" data-i18n="aiEndpointHintFullUrl" style="display:none;">
-                    Please enter the full request URL. The request will use this URL directly without appending any path.
+                  <div class="ai-hint-text" id="aiEndpointHintFullUrl" style="display:none;">
+                    请填写完整请求 URL。请求将直接使用该地址，不会再追加任何路径。
                   </div>
                 </div>
               </div>
@@ -753,22 +755,22 @@
 
           <div class="setting-row">
             <div class="setting-main">
-              <div class="setting-label" data-i18n="aiApiKey">API Key</div>
-              <div class="setting-desc" data-i18n="aiApiKeyDesc">Your API key is stored locally and never synced</div>
+              <div class="setting-label" >API Key</div>
+              <div class="setting-desc">仅保存在本机，不会同步或上传</div>
             </div>
             <div class="setting-control">
               <input type="password" id="aiApiKeyInput" class="tagrule-input" style="width: 220px;" placeholder="sk-...">
-              <button id="aiTestBtn" class="btn btn-secondary btn-sm" data-i18n="aiTest">Test</button>
+              <button id="aiTestBtn" class="btn btn-secondary btn-sm" data-i18n="aiTest">测试连接</button>
             </div>
           </div>
 
           <div class="setting-row">
             <div class="setting-main">
-              <div class="setting-label" data-i18n="aiModel">Custom Model</div>
-              <div class="setting-desc" data-i18n="aiModelDesc">Leave empty to use the recommended model</div>
+              <div class="setting-label" >自定义模型</div>
+              <div class="setting-desc">留空则使用该服务商推荐模型</div>
             </div>
             <div class="setting-control">
-              <input type="text" id="aiModelInput" class="tagrule-input" style="width: 220px;" placeholder="glm-4-flash">
+              <input type="text" id="aiModelInput" class="tagrule-input" style="width: 220px;" placeholder="agnes-2.0-flash">
             </div>
           </div>
 

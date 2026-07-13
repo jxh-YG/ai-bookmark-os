@@ -1,8 +1,15 @@
 node_modules
 dist
-dist-ai
 .sources
 vendor/markline
 .DS_Store
 *.log
 *.tsbuildinfo
+
+# Local audit and one-off migration artifacts
+task_plan.md
+progress.md
+findings.md
+tmp-*.json
+tmp-ui-shots/
+scripts/_*.mjs

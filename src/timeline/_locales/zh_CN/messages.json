@@ -43,21 +43,30 @@
     "message": "$COUNT$ 分钟前",
     "description": "相对时间",
     "placeholders": {
-      "count": { "content": "$1", "example": "5" }
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
     }
   },
   "hoursAgo": {
     "message": "$COUNT$ 小时前",
     "description": "相对时间",
     "placeholders": {
-      "count": { "content": "$1", "example": "3" }
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
     }
   },
   "daysAgo": {
     "message": "$COUNT$ 天前",
     "description": "相对时间",
     "placeholders": {
-      "count": { "content": "$1", "example": "2" }
+      "count": {
+        "content": "$1",
+        "example": "2"
+      }
     }
   },
   "today": {
@@ -72,7 +81,10 @@
     "message": "$COUNT$ 个书签",
     "description": "日期分组书签数量",
     "placeholders": {
-      "count": { "content": "$1", "example": "12" }
+      "count": {
+        "content": "$1",
+        "example": "12"
+      }
     }
   },
   "untitled": {
@@ -99,14 +111,20 @@
     "message": "已同步，新增 $COUNT$ 个书签",
     "description": "提示消息",
     "placeholders": {
-      "count": { "content": "$1", "example": "5" }
+      "count": {
+        "content": "$1",
+        "example": "5"
+      }
     }
   },
   "syncSuccessTotal": {
     "message": "已同步，共 $COUNT$ 个书签",
     "description": "提示消息",
     "placeholders": {
-      "count": { "content": "$1", "example": "100" }
+      "count": {
+        "content": "$1",
+        "example": "100"
+      }
     }
   },
   "syncFailed": {
@@ -133,7 +151,10 @@
     "message": "确定要清空所有书签记录吗？\n\n共 $COUNT$ 条记录，此操作不影响 Chrome 原始书签。",
     "description": "确认对话框",
     "placeholders": {
-      "count": { "content": "$1", "example": "50" }
+      "count": {
+        "content": "$1",
+        "example": "50"
+      }
     }
   },
   "allCleared": {
@@ -154,7 +175,7 @@
   },
   "back": {
     "message": "返回",
-    "description": "返回按钮提示"
+    "description": "返回按钮"
   },
   "appearance": {
     "message": "外观",
@@ -240,7 +261,10 @@
     "message": "$COUNT$ 次点击",
     "description": "点击次数标签",
     "placeholders": {
-      "count": { "content": "$1", "example": "42" }
+      "count": {
+        "content": "$1",
+        "example": "42"
+      }
     }
   },
   "heatLevel1": {
@@ -366,10 +390,6 @@
   "deletedEmptyHint": {
     "message": "删除的书签会出现在这里",
     "description": "空状态提示"
-  },
-  "back": {
-    "message": "返回",
-    "description": "返回按钮"
   },
   "cmdQuickBookmark": {
     "message": "一键收藏",
@@ -767,12 +787,30 @@
     "message": "总计 $TOTAL$ 条 · 成功 $SUCCESS$ 次 · 失败 $FAIL$ 次 · 缓存命中 $CACHE$ 次（命中率 $RATE$）· 平均 $AVG$",
     "description": "AI 日志统计摘要格式",
     "placeholders": {
-      "total": { "content": "$1", "example": "36" },
-      "success": { "content": "$2", "example": "3" },
-      "fail": { "content": "$3", "example": "0" },
-      "cache": { "content": "$4", "example": "6" },
-      "avg": { "content": "$5", "example": "1.3s" },
-      "rate": { "content": "$6", "example": "16.7%" }
+      "total": {
+        "content": "$1",
+        "example": "36"
+      },
+      "success": {
+        "content": "$2",
+        "example": "3"
+      },
+      "fail": {
+        "content": "$3",
+        "example": "0"
+      },
+      "cache": {
+        "content": "$4",
+        "example": "6"
+      },
+      "avg": {
+        "content": "$5",
+        "example": "1.3s"
+      },
+      "rate": {
+        "content": "$6",
+        "example": "16.7%"
+      }
     }
   },
   "aiRefreshLogs": {
@@ -854,5 +892,11 @@
   "aiLogTime": {
     "message": "时间",
     "description": "AI 日志时间标签"
+  },
+  "confirmPurgeDeleted": {
+    "message": "确定要彻底删除该记录吗？此操作不可撤销。"
+  },
+  "confirmClearAllDeleted": {
+    "message": "确定要清空全部 $1 条最近删除记录吗？"
   }
 }

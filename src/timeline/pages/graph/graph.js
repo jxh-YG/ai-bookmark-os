@@ -654,7 +654,7 @@ function updateLabelVisibility() {
 
 // ===== 悬浮卡片 =====
 function showHoverCard(node, event) {
-  hoverTitle.textContent = node.data('fullTitle') || node.data('label') || '(untitled)';
+  hoverTitle.textContent = node.data('fullTitle') || node.data('label') || '（无标题）';
   hoverMeta.textContent = node.data('domain') || '';
 
   hoverTags.innerHTML = '';

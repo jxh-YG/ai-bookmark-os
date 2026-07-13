@@ -1896,18 +1896,54 @@ mark.sa-hl {
 }
 
 /* ===== Responsive ===== */
+/* Narrow / split-screen: keep sidebar usable (do NOT auto-hide folder tree & tags).
+   Auto-collapsing on viewport width broke split view with Chrome side panel / MDI. */
 @media (max-width: 720px) {
   .sa-sidebar {
+    width: min(220px, 42vw);
+    min-width: 168px;
+    max-width: min(280px, 48vw);
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .sa-sidebar.collapsed {
     width: 40px;
     min-width: 40px;
+    max-width: 40px;
     overflow: hidden;
+  }
+  .sa-sidebar-tab span[data-i18n],
+  .sa-sidebar-tab .sa-tab-badge {
+    /* keep labels if space allows; allow wrap/shrink instead of hiding tree */
+  }
+  .sa-sidebar-panel {
+    display: flex !important;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
   }
   .sa-sidebar .sa-sidebar-section-title,
   .sa-sidebar .sa-sidebar-section-actions,
   .sa-sidebar .sa-folder-tree,
   .sa-sidebar .sa-tag-filter,
-  .sa-sidebar .sa-sidebar-divider {
-    display: none;
+  .sa-sidebar .sa-sidebar-divider,
+  .sa-sidebar .sa-sidebar-panel {
+    display: revert;
+  }
+  .sa-sidebar:not(.collapsed) .sa-folder-tree,
+  .sa-sidebar:not(.collapsed) .sa-tag-filter,
+  .sa-sidebar:not(.collapsed) .sa-sidebar-section-title,
+  .sa-sidebar:not(.collapsed) .sa-sidebar-section-actions,
+  .sa-sidebar:not(.collapsed) .sa-sidebar-divider {
+    display: block !important;
+  }
+  .sa-sidebar:not(.collapsed) .sa-sidebar-section-header,
+  .sa-sidebar:not(.collapsed) .sa-sidebar-section-actions {
+    display: flex !important;
+  }
+  .sa-sidebar:not(.collapsed) .sa-tag-filter {
+    display: flex !important;
+    flex-wrap: wrap;
   }
   .sa-list-header,
   .sa-list-item {
@@ -1916,6 +1952,14 @@ mark.sa-hl {
   .sa-list-item-domain,
   .sa-list-item-time {
     display: none;
+  }
+}
+
+/* Very narrow only: icon rail when user hasn't expanded */
+@media (max-width: 520px) {
+  .sa-sidebar:not(.collapsed) {
+    width: min(200px, 56vw);
+    min-width: 156px;
   }
 }
 
@@ -2347,4 +2391,59 @@ body.standalone-mode,
 .sa-command-input {
   background: var(--bg-glass-soft, rgba(245, 249, 255, 0.58));
   border-color: var(--border-glass, rgba(255, 255, 255, 0.68));
+}
+
+/* standalone full-bleed */
+html, body.standalone-mode, .sa-layout, .sa-main, .sa-content {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+body.standalone-mode {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+
+/* sidebar panel height fix — keep folder/tags visible in split layouts */
+.sa-body,
+.sa-body-main {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.sa-sidebar {
+  align-self: stretch;
+  min-height: 0;
+  height: auto;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.sa-sidebar:not(.collapsed) {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.sa-sidebar:not(.collapsed) > .sa-sidebar-tabs {
+  flex: 0 0 auto;
+}
+
+.sa-sidebar:not(.collapsed) > .sa-sidebar-panel {
+  display: flex !important;
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+}
+
+.sa-sidebar:not(.collapsed) .sa-folder-tree {
+  display: block !important;
+  min-height: 80px;
+}
+
+.sa-sidebar:not(.collapsed) .sa-tag-filter {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 6px;
 }

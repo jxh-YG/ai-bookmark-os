@@ -322,9 +322,9 @@ async function refreshPreviewCacheStats() {
     const res = await chrome.runtime.sendMessage({ action: 'getPreviewCacheStats' });
     const stats = (res && res.stats) || { count: 0, totalChars: 0 };
     if (stats.count === 0) {
-      previewCacheStatsDesc.textContent = i18n('previewCacheEmpty') || 'Empty';
+      previewCacheStatsDesc.textContent = i18n('previewCacheEmpty') || '空';
     } else {
-      const text = (i18n('previewCacheStatsText') || '$1 entries · $2 chars')
+      const text = (i18n('previewCacheStatsText') || '$1 条 · $2 字符')
         .replace('$1', stats.count)
         .replace('$2', stats.totalChars);
       previewCacheStatsDesc.textContent = text;
@@ -421,7 +421,7 @@ async function refreshRssLastUpdated() {
     const res = await chrome.runtime.sendMessage({ action: 'rssGetFeeds' });
     const feeds = (res && res.feeds) || [];
     if (feeds.length === 0) {
-      rssLastUpdatedDesc.textContent = i18n('rssNoFeeds') || 'No subscriptions';
+      rssLastUpdatedDesc.textContent = i18n('rssNoFeeds') || '暂无订阅';
       return;
     }
     let latest = 0;
@@ -429,11 +429,11 @@ async function refreshRssLastUpdated() {
       if (f.lastFetched && f.lastFetched > latest) latest = f.lastFetched;
     }
     if (latest === 0) {
-      rssLastUpdatedDesc.textContent = i18n('rssNever') || 'Never';
+      rssLastUpdatedDesc.textContent = i18n('rssNever') || '从未更新';
     } else {
       const d = new Date(latest);
       const ts = d.toLocaleString();
-      rssLastUpdatedDesc.textContent = (i18n('rssLastUpdated') || 'Last updated: $1').replace('$1', ts);
+      rssLastUpdatedDesc.textContent = (i18n('rssLastUpdated') || '上次更新：$1').replace('$1', ts);
     }
   } catch {
     rssLastUpdatedDesc.textContent = '—';
@@ -467,29 +467,74 @@ async function refreshRssUnreadBadge() {
 let _aiProviderInputCache = {};
 
 // ===== AI 辅助分类设置 =====
+// Keep in sync with TREE_PROVIDERS / AI pyramid classification
+const ASSIST_PROVIDERS = {
+  agnes: { id: 'agnes', label: 'Agnes AI', defaultModel: 'agnes-2.0-flash', baseUrl: 'https://apihub.agnes-ai.com/v1' },
+  openrouter: { id: 'openrouter', label: 'OpenRouter', defaultModel: 'openai/gpt-4o-mini', baseUrl: 'https://openrouter.ai/api/v1' },
+  openai: { id: 'openai', label: 'OpenAI (Codex)', defaultModel: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
+  claude: { id: 'claude', label: 'Claude (Anthropic)', defaultModel: 'claude-3-5-haiku-latest', baseUrl: 'https://api.anthropic.com/v1' },
+  gemini: { id: 'gemini', label: 'Gemini (Google)', defaultModel: 'gemini-2.0-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' },
+  deepseek: { id: 'deepseek', label: 'DeepSeek', defaultModel: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1' },
+  custom: { id: 'custom', label: '自定义', defaultModel: 'gpt-4o-mini', baseUrl: '' },
+};
+const ASSIST_LEGACY_ENDPOINTS = {
+  zhipu: { endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', format: 'openai', model: 'glm-4-flash' },
+  tongyi: { endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', format: 'openai', model: 'qwen-turbo' },
+  google: { endpoint: 'https://generativelanguage.googleapis.com/v1beta', format: 'gemini', model: 'gemini-2.0-flash' },
+};
+function normalizeAssistProvider(provider, config = {}) {
+  let p = provider || 'agnes';
+  if (p === 'google') p = 'gemini';
+  if (Object.prototype.hasOwnProperty.call(ASSIST_PROVIDERS, p)) return { provider: p, config };
+  const legacy = ASSIST_LEGACY_ENDPOINTS[p];
+  if (legacy) {
+    return {
+      provider: 'custom',
+      config: {
+        ...config,
+        customEndpoint: config.customEndpoint || legacy.endpoint,
+        customFormat: config.customFormat || legacy.format,
+        model: config.model || legacy.model,
+      }
+    };
+  }
+  return { provider: 'custom', config };
+}
+
 async function loadAISettings() {
   try {
     const res = await chrome.runtime.sendMessage({ action: 'getAIConfig' });
     const c = (res && res.config) || {};
     aiEnabledToggle.checked = !!c.enabled;
-    aiProviderSelect.value = c.provider || 'zhipu';
-    aiApiKeyInput.value = c.apiKey || '';
-    aiModelInput.value = c.model || '';
-    aiTimeoutInput.value = String(c.timeout ?? 8);
-    if (aiAssistLogicToggle) aiAssistLogicToggle.checked = c.assistClassificationEnabled !== false;
-    if (aiAssistPromptInput) aiAssistPromptInput.value = c.assistPrompt || DEFAULT_AI_ASSIST_PROMPT;
-    if (aiCustomFormatSelect) aiCustomFormatSelect.value = c.customFormat || 'openai';
-    if (aiCustomEndpointInput) aiCustomEndpointInput.value = c.customEndpoint || '';
-    if (aiFullUrlToggle) aiFullUrlToggle.checked = !!c.customFullUrl;
-    const provider = c.provider || 'zhipu';
+    const normalized = normalizeAssistProvider(c.provider, c);
+    const cfg = normalized.config;
+    let provider = normalized.provider;
+    if (aiProviderSelect && ![...aiProviderSelect.options].some((o) => o.value === provider)) {
+      provider = 'custom';
+    }
+    if (aiProviderSelect) aiProviderSelect.value = provider;
+    aiApiKeyInput.value = cfg.apiKey || '';
+    aiModelInput.value = cfg.model || '';
+    if (aiModelInput) {
+      aiModelInput.placeholder = (ASSIST_PROVIDERS[provider] && ASSIST_PROVIDERS[provider].defaultModel) || 'agnes-2.0-flash';
+    }
+    aiTimeoutInput.value = String(cfg.timeout ?? 8);
+    if (aiAssistLogicToggle) aiAssistLogicToggle.checked = cfg.assistClassificationEnabled !== false;
+    if (aiAssistPromptInput) aiAssistPromptInput.value = cfg.assistPrompt || DEFAULT_AI_ASSIST_PROMPT;
+    if (aiCustomFormatSelect) {
+      const fmt = cfg.customFormat === 'google' ? 'gemini' : (cfg.customFormat || 'openai');
+      aiCustomFormatSelect.value = fmt;
+    }
+    if (aiCustomEndpointInput) aiCustomEndpointInput.value = cfg.customEndpoint || '';
+    if (aiFullUrlToggle) aiFullUrlToggle.checked = !!cfg.customFullUrl;
     _aiProviderInputCache = {
       [provider]: {
-        apiKey: c.apiKey || '',
-        model: c.model || '',
-        endpoint: c.customEndpoint || ''
+        apiKey: cfg.apiKey || '',
+        model: cfg.model || '',
+        endpoint: cfg.customEndpoint || ''
       }
     };
-    aiProviderSelect.dataset.previousProvider = provider;
+    if (aiProviderSelect) aiProviderSelect.dataset.previousProvider = provider;
   } catch (e) {
     aiEnabledToggle.checked = false;
   }
@@ -502,20 +547,23 @@ async function loadAISettings() {
 function switchAIProvider(newProvider) {
   const previousProvider = aiProviderSelect.dataset.previousProvider || aiProviderSelect.value;
 
-  // 保存当前 provider 的值到对应缓存
   _aiProviderInputCache[previousProvider] = {
     apiKey: aiApiKeyInput.value,
     model: aiModelInput.value,
     endpoint: aiCustomEndpointInput ? aiCustomEndpointInput.value : ''
   };
 
-  // 恢复目标 provider 的缓存值，没有缓存则清空
   const cached = _aiProviderInputCache[newProvider] || {};
   aiApiKeyInput.value = cached.apiKey || '';
   aiModelInput.value = cached.model || '';
   if (aiCustomEndpointInput) aiCustomEndpointInput.value = cached.endpoint || '';
+  if (aiModelInput) {
+    aiModelInput.placeholder = (ASSIST_PROVIDERS[newProvider] && ASSIST_PROVIDERS[newProvider].defaultModel) || 'model-name';
+  }
 
   aiProviderSelect.dataset.previousProvider = newProvider;
+  toggleCustomFields();
+  updateAIEndpointHint();
 }
 
 function toggleCustomFields() {
@@ -533,8 +581,13 @@ function updateAIEndpointHint() {
 
   if (!isFullUrl) {
     const format = aiCustomFormatSelect ? aiCustomFormatSelect.value : 'openai';
-    const key = format === 'anthropic' ? 'aiEndpointHintAnthropic' : 'aiEndpointHintOpenAI';
-    aiEndpointHintText.textContent = i18n(key);
+    if (format === 'anthropic') {
+      aiEndpointHintText.textContent = i18n('aiEndpointHintAnthropic') || '请填写兼容 Anthropic Messages 的服务端点地址，不要以斜杠结尾。/v1/messages 将会被补充到地址末尾。';
+    } else if (format === 'gemini' || format === 'google') {
+      aiEndpointHintText.textContent = '请填写 Gemini API Base（例如 https://generativelanguage.googleapis.com/v1beta）。模型名会拼接到请求路径中。';
+    } else {
+      aiEndpointHintText.textContent = i18n('aiEndpointHintOpenAI') || '请填写兼容 OpenAI API 的服务端点地址，不要以斜杠结尾。/chat/completions 将会被补充到你填写的地址末尾。';
+    }
   }
 }
 
@@ -560,13 +613,13 @@ function validateAIConfig(config) {
   const isCustom = config.provider === 'custom';
 
   if (!config.apiKey) {
-    errors.push({ field: 'apiKey', message: i18n('aiApiKeyRequired') || 'Please enter API Key' });
+    errors.push({ field: 'apiKey', message: i18n('aiApiKeyRequired') || '请填写 API Key' });
   }
   if (!config.model) {
-    errors.push({ field: 'model', message: i18n('aiModelRequired') || 'Please enter Model' });
+    errors.push({ field: 'model', message: i18n('aiModelRequired') || '请填写模型名' });
   }
   if (isCustom && !config.customEndpoint) {
-    errors.push({ field: 'customEndpoint', message: i18n('aiCustomEndpointRequired') || 'Please enter API Base URL' });
+    errors.push({ field: 'customEndpoint', message: i18n('aiCustomEndpointRequired') || '请填写 API 地址' });
   }
 
   return { valid: errors.length === 0, errors };
@@ -606,11 +659,12 @@ async function saveAIConfig() {
   }
   clearAIValidationErrors();
   try {
-    await chrome.runtime.sendMessage({ action: 'setAIConfig', config });
+    const res = await chrome.runtime.sendMessage({ action: 'setAIConfig', config });
+    if (!res || !res.success) throw new Error(res?.error || 'save_failed');
     await refreshAIStatus();
     showToast(i18n('settingsSaved'), 'success');
   } catch (e) {
-    showToast(i18n('saveFailed') || 'Save failed', 'error');
+    showToast(i18n('saveFailed') || '保存失败', 'error');
   }
 }
 
@@ -636,11 +690,11 @@ async function refreshAIStatus() {
     const hasKey = !!(aiApiKeyInput.value || '').trim();
 
     if (!enabled) {
-      aiStatusDesc.textContent = i18n('aiStatusDisabled') || 'AI disabled';
+      aiStatusDesc.textContent = i18n('aiStatusDisabled') || 'AI 已关闭';
       return;
     }
     if (!hasKey) {
-      aiStatusDesc.textContent = i18n('aiStatusNoKey') || 'API Key not set';
+      aiStatusDesc.textContent = i18n('aiStatusNoKey') || '未填写 API Key';
       return;
     }
 
@@ -648,7 +702,7 @@ async function refreshAIStatus() {
     const success = stats.successCount || 0;
     const fail = stats.failCount || 0;
     const avg = stats.avgLatencyMs || 0;
-    const template = i18n('aiStatusFormat') || 'Triggered: $1 · Success: $2 · Fail: $3 · Avg: $4ms';
+    const template = i18n('aiStatusFormat') || '触发 $1 次 · 成功 $2 次 · 失败 $3 次 · 平均 $4ms';
     aiStatusDesc.textContent = template
       .replace('$1', triggered)
       .replace('$2', success)
@@ -662,12 +716,12 @@ async function refreshAIStatus() {
 async function testAIConnection() {
   const config = buildAIConfigFromUI();
   if (!config.apiKey) {
-    showToast(i18n('aiStatusNoKey') || 'Please enter API Key', 'error');
+    showToast(i18n('aiStatusNoKey') || '请填写 API Key', 'error');
     return;
   }
 
   aiTestBtn.disabled = true;
-  aiTestBtn.textContent = i18n('aiTesting') || 'Testing...';
+  aiTestBtn.textContent = i18n('aiTesting') || '测试中...';
   try {
     const res = await chrome.runtime.sendMessage({ action: 'testAIConnection', config });
     if (res && res.ok) {
@@ -677,38 +731,38 @@ async function testAIConnection() {
         // 自动保存，使模型名称持久化
         saveAIConfig();
       }
-      showToast((i18n('aiTestSuccess') || 'Connected. Sample tag: $1').replace('$1', res.sampleTag || '—'), 'success');
+      showToast((i18n('aiTestSuccess') || '连接成功，示例标签：$1').replace('$1', res.sampleTag || '—'), 'success');
     } else {
-      showToast((i18n('aiTestFailed') || 'Connection failed: $1').replace('$1', res?.error || 'Unknown'), 'error');
+      showToast((i18n('aiTestFailed') || '连接失败：$1').replace('$1', res?.error || '未知'), 'error');
     }
   } catch (e) {
-    showToast(i18n('aiTestFailed') || 'Connection failed', 'error');
+    showToast(i18n('aiTestFailed') || '连接失败', 'error');
   } finally {
     aiTestBtn.disabled = false;
-    aiTestBtn.textContent = i18n('aiTest') || 'Test';
+    aiTestBtn.textContent = i18n('aiTest') || '测试连接';
   }
 }
 
 async function clearAICache() {
   try {
     await chrome.runtime.sendMessage({ action: 'clearAICache' });
-    showToast(i18n('aiCacheCleared') || 'AI cache cleared', 'success');
+    showToast(i18n('aiCacheCleared') || 'AI 缓存已清除', 'success');
     await refreshAIStatus();
   } catch (e) {
-    showToast(i18n('clearFailed') || 'Clear failed', 'error');
+    showToast(i18n('clearFailed') || '清除失败', 'error');
   }
 }
 
 function formatAILogType(type) {
   const map = {
-    trigger: i18n('aiLogTrigger') || 'Triggered',
-    trigger_skip: i18n('aiLogTriggerSkip') || 'Skipped',
-    cache_hit: i18n('aiLogCacheHit') || 'Cache Hit',
-    classify_success: i18n('aiLogClassifySuccess') || 'Success',
-    classify_fail: i18n('aiLogClassifyFail') || 'Failed',
-    backfill_success: i18n('aiLogBackfillSuccess') || 'Backfilled',
-    backfill_fail: i18n('aiLogBackfillFail') || 'Backfill Failed',
-    backfill_skip: i18n('aiLogBackfillSkip') || 'Backfill Skipped'
+    trigger: i18n('aiLogTrigger') || '触发分类',
+    trigger_skip: i18n('aiLogTriggerSkip') || '跳过触发',
+    cache_hit: i18n('aiLogCacheHit') || '缓存命中',
+    classify_success: i18n('aiLogClassifySuccess') || '分类成功',
+    classify_fail: i18n('aiLogClassifyFail') || '分类失败',
+    backfill_success: i18n('aiLogBackfillSuccess') || '回填成功',
+    backfill_fail: i18n('aiLogBackfillFail') || '回填失败',
+    backfill_skip: i18n('aiLogBackfillSkip') || '回填跳过'
   };
   return map[type] || type;
 }
@@ -818,7 +872,7 @@ async function renderAILogs() {
       stats = await getAILogStats();
     }
 
-    const statsTemplate = i18n('aiLogsStatsFormat') || 'Total: $TOTAL$ · Success: $SUCCESS$ · Fail: $FAIL$ · Cache: $CACHE$ ($RATE$) · Avg: $AVG$';
+    const statsTemplate = i18n('aiLogsStatsFormat') || '总计 $TOTAL$ 条 · 成功 $SUCCESS$ 次 · 失败 $FAIL$ 次 · 缓存命中 $CACHE$ 次（命中率 $RATE$）· 平均 $AVG$';
     const cacheHitRate = typeof stats.cacheHitRate === 'number' && !isNaN(stats.cacheHitRate)
       ? stats.cacheHitRate
       : 0;
@@ -836,7 +890,7 @@ async function renderAILogs() {
     const visibleLogs = logs.filter(shouldShowAILog);
 
     if (visibleLogs.length === 0) {
-      aiLogsList.innerHTML = `<div class="ai-log-empty">${i18n('aiLogsEmpty') || 'No logs yet'}</div>`;
+      aiLogsList.innerHTML = `<div class="ai-log-empty">${i18n('aiLogsEmpty') || '暂无日志'}</div>`;
       return;
     }
 
@@ -864,7 +918,7 @@ async function renderAILogs() {
     }).join('');
   } catch (e) {
     aiLogsStats.textContent = '—';
-    aiLogsList.innerHTML = `<div class="ai-log-empty" style="color: var(--danger);">${i18n('aiLogsLoadFailed') || 'Failed to load logs'}</div>`;
+    aiLogsList.innerHTML = `<div class="ai-log-empty" style="color: var(--danger);">${i18n('aiLogsLoadFailed') || '加载日志失败'}</div>`;
   }
 }
 
@@ -877,27 +931,27 @@ function toggleAILogs() {
 }
 
 async function clearAILogsUI() {
-  if (!confirm(i18n('aiClearLogsConfirm') || 'Clear all AI classification logs?')) return;
+  if (!confirm(i18n('aiClearLogsConfirm') || '确定清空所有 AI 辅助分类日志？')) return;
   try {
     const res = await chrome.runtime.sendMessage({ action: 'clearAILogs' });
     const ok = res && res.success;
     if (ok) {
-      showToast(i18n('aiLogsCleared') || 'Logs cleared', 'success');
+      showToast(i18n('aiLogsCleared') || '日志已清空', 'success');
       await renderAILogs();
     } else {
-      showToast(i18n('clearFailed') || 'Clear failed', 'error');
+      showToast(i18n('clearFailed') || '清除失败', 'error');
     }
   } catch (e) {
     try {
       const ok = await clearAILogs();
       if (ok) {
-        showToast(i18n('aiLogsCleared') || 'Logs cleared', 'success');
+        showToast(i18n('aiLogsCleared') || '日志已清空', 'success');
         await renderAILogs();
       } else {
-        showToast(i18n('clearFailed') || 'Clear failed', 'error');
+        showToast(i18n('clearFailed') || '清除失败', 'error');
       }
     } catch (e2) {
-      showToast(i18n('clearFailed') || 'Clear failed', 'error');
+      showToast(i18n('clearFailed') || '清除失败', 'error');
     }
   }
 }
@@ -1011,7 +1065,7 @@ previewMaxEntriesSelect.addEventListener('change', async (e) => {
 clearPreviewCacheBtn.addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ action: 'clearPreviewCache' });
   await refreshPreviewCacheStats();
-  showToast(i18n('previewCacheCleared') || 'Cleared', 'success');
+  showToast(i18n('previewCacheCleared') || '已清除', 'success');
 });
 
 mdiWindowEnabledToggle.addEventListener('change', async (e) => {
@@ -1058,11 +1112,11 @@ rssProxyFallbackToggle.addEventListener('change', async (e) => {
 rssProxySaveBtn.addEventListener('click', async () => {
   const v = (rssProxyUrlInput.value || '').trim();
   if (!v) {
-    showToast(i18n('rssProxyUrlRequired') || 'Proxy URL is required', 'error');
+    showToast(i18n('rssProxyUrlRequired') || '请填写代理 URL', 'error');
     return;
   }
   if (!v.includes('{url}')) {
-    showToast(i18n('rssProxyUrlPlaceholderMissing') || 'Proxy URL must contain {url} placeholder', 'error');
+    showToast(i18n('rssProxyUrlPlaceholderMissing') || '代理 URL 必须包含 {url} 占位符', 'error');
     return;
   }
   await saveRssSetting({ proxyUrl: v });
@@ -1073,12 +1127,12 @@ rssProxySaveBtn.addEventListener('click', async () => {
 rssProxyTestBtn.addEventListener('click', async () => {
   const v = (rssProxyUrlInput.value || '').trim();
   if (!v || !v.includes('{url}')) {
-    rssProxyTestResult.textContent = i18n('rssProxyUrlPlaceholderMissing') || 'Proxy URL must contain {url} placeholder';
+    rssProxyTestResult.textContent = i18n('rssProxyUrlPlaceholderMissing') || '代理 URL 必须包含 {url} 占位符';
     rssProxyTestResult.className = 'proxy-test-result proxy-test-result--fail';
     return;
   }
   const original = rssProxyTestBtn.innerHTML;
-  rssProxyTestBtn.innerHTML = '<span>' + (i18n('rssProxyTesting') || 'Testing...') + '</span>';
+  rssProxyTestBtn.innerHTML = '<span>' + (i18n('rssProxyTesting') || '测试中...') + '</span>';
   rssProxyTestBtn.disabled = true;
   rssProxyTestResult.textContent = '';
   rssProxyTestResult.className = 'proxy-test-result';
@@ -1088,15 +1142,15 @@ rssProxyTestBtn.addEventListener('click', async () => {
       proxyUrl: v
     });
     if (res && res.success) {
-      const okText = (i18n('rssProxyTestOk') || 'OK: $1 articles').replace('$1', res.itemCount || 0);
+      const okText = (i18n('rssProxyTestOk') || '成功：$1 篇文章').replace('$1', res.itemCount || 0);
       rssProxyTestResult.textContent = okText + ' — ' + (res.feedTitle || '');
       rssProxyTestResult.className = 'proxy-test-result proxy-test-result--ok';
     } else {
-      rssProxyTestResult.textContent = (i18n('rssProxyTestFail') || 'Failed: ') + (res?.error || 'unknown');
+      rssProxyTestResult.textContent = (i18n('rssProxyTestFail') || '失败：') + (res?.error || '未知');
       rssProxyTestResult.className = 'proxy-test-result proxy-test-result--fail';
     }
   } catch (e) {
-    rssProxyTestResult.textContent = (i18n('rssProxyTestFail') || 'Failed: ') + e.message;
+    rssProxyTestResult.textContent = (i18n('rssProxyTestFail') || '失败：') + e.message;
     rssProxyTestResult.className = 'proxy-test-result proxy-test-result--fail';
   } finally {
     rssProxyTestBtn.disabled = false;
@@ -1108,13 +1162,13 @@ rssRefreshAllBtn.addEventListener('click', async () => {
   rssRefreshAllBtn.disabled = true;
   const original = rssRefreshAllBtn.innerHTML;
   try {
-    rssRefreshAllBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="spinning"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg><span>' + (i18n('rssRefreshing') || 'Refreshing...') + '</span>';
+    rssRefreshAllBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="spinning"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg><span>' + (i18n('rssRefreshing') || '刷新中...') + '</span>';
     await chrome.runtime.sendMessage({ action: 'rssRefreshAll' });
-    showToast(i18n('rssRefreshAllDone') || 'Refreshed', 'success');
+    showToast(i18n('rssRefreshAllDone') || '已刷新', 'success');
     await refreshRssLastUpdated();
     await refreshRssUnreadBadge();
   } catch (e) {
-    showToast(i18n('rssRefreshFailed') || 'Refresh failed', 'error');
+    showToast(i18n('rssRefreshFailed') || '刷新失败', 'error');
   } finally {
     rssRefreshAllBtn.disabled = false;
     rssRefreshAllBtn.innerHTML = original;
@@ -2849,7 +2903,7 @@ function renderHealthScore(health) {
     healthScoreValue.textContent = '—';
     healthScoreValue.className = 'stats-health-score';
     healthScoreDetails.innerHTML = '';
-    healthScoreDesc.textContent = i18n('statsHealthScoreEmpty') || 'Add some bookmarks to see your health score';
+    healthScoreDesc.textContent = i18n('statsHealthScoreEmpty') || '添加一些书签后可查看健康度评分';
     return;
   }
 
@@ -2945,7 +2999,7 @@ function renderHealthFavorites(favorites) {
     const date = new Date(f.createdAt).toLocaleString();
     const rangeText = f.range && (f.range.start || f.range.end)
       ? `${f.range.start || '...'} ~ ${f.range.end || '...'}`
-      : i18n('statsAllTime') || 'All time';
+      : i18n('statsAllTime') || '全部时间';
     return `
       <div class="stats-favorite-item" data-id="${f.id}">
         <div class="stats-favorite-info">
@@ -2964,14 +3018,14 @@ function renderHealthFavorites(favorites) {
       const id = btn.dataset.id;
       await chrome.runtime.sendMessage({ action: 'deleteHealthScoreFavorite', id });
       await loadHealthFavorites();
-      showToast(i18n('deleted') || 'Deleted', 'success');
+      showToast(i18n('deleted') || '已删除', 'success');
     });
   });
 }
 
 async function handleFavoriteHealthScore() {
   if (!_currentHealthScore || _currentHealthScore.level === 'empty') {
-    showToast(i18n('statsNoScoreToFavorite') || 'No score to favorite', 'error');
+    showToast(i18n('statsNoScoreToFavorite') || '暂无可收藏的评分', 'error');
     return;
   }
 
@@ -2988,28 +3042,28 @@ async function handleFavoriteHealthScore() {
   const res = await chrome.runtime.sendMessage({ action: 'saveHealthScoreFavorite', record });
   if (res && res.success) {
     await loadHealthFavorites();
-    showToast(i18n('settingsSaved') || 'Saved', 'success');
+    showToast(i18n('settingsSaved') || '已保存', 'success');
   } else if (res && res.error === 'already_exists') {
-    showToast(i18n('statsFavoriteExists') || 'Already favorited today', 'info');
+    showToast(i18n('statsFavoriteExists') || '今天已收藏过该评分', 'info');
   } else {
-    showToast(i18n('saveFailed') || 'Save failed', 'error');
+    showToast(i18n('saveFailed') || '保存失败', 'error');
   }
 }
 
 function handleExportCsv() {
   if (!_cachedStats) {
-    showToast(i18n('statsNoData') || 'No data to export', 'error');
+    showToast(i18n('statsNoData') || '暂无可导出的数据', 'error');
     return;
   }
   const csv = BookmarkStats.statsToCsv(_cachedStats);
   const stamp = new Date().toISOString().slice(0, 10);
   downloadFile(`ai-bookmark-os-stats-${stamp}.csv`, '\uFEFF' + csv, 'text/csv;charset=utf-8;');
-  showToast(i18n('settingsSaved') || 'Exported', 'success');
+  showToast(i18n('settingsSaved') || '已导出', 'success');
 }
 
 function handleExportPdf() {
   if (!_cachedStats) {
-    showToast(i18n('statsNoData') || 'No data to export', 'error');
+    showToast(i18n('statsNoData') || '暂无可导出的数据', 'error');
     return;
   }
   const stamp = new Date().toISOString().slice(0, 10);
@@ -3067,7 +3121,7 @@ th { background: #f8f9fa; font-weight: 500; }
 
   const win = window.open('', '_blank');
   if (!win) {
-    showToast(i18n('statsPopupBlocked') || 'Popup blocked', 'error');
+    showToast(i18n('statsPopupBlocked') || '弹窗被拦截', 'error');
     return;
   }
   win.document.write(html);

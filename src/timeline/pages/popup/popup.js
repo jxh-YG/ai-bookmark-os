@@ -1035,7 +1035,7 @@ function showPlaceholderContent(title, url) {
   previewEmptyMsgEl.style.display = 'none';
   previewBodyEl.style.display = '';
   previewTitleEl.textContent = title || '';
-  previewDescEl.textContent = i18n('previewLoading') || 'Loading\u2026';
+  previewDescEl.textContent = i18n('previewLoading') || '正在加载…';
   previewDescEl.className = 'preview-desc preview-desc--loading';
   previewSiteEl.textContent = host;
 }
@@ -1365,19 +1365,19 @@ async function fetchAndRenderPreview(itemEl, url) {
   if (seq !== previewFetchSeq || itemEl !== previewHoverItem) return;
   if (!response || !response.success) {
     previewSessionCache.set(url, { type: 'error' });
-    showPreviewMessage(i18n('previewError') || 'Failed to load');
+    showPreviewMessage(i18n('previewError') || '预览加载失败');
     return;
   }
   const result = response.result || {};
   if (result.disabled) {
     previewEnabled = false;
     previewSessionCache.set(url, { type: 'disabled' });
-    showPreviewMessage(i18n('previewDisabled') || 'Preview disabled');
+    showPreviewMessage(i18n('previewDisabled') || '网页预览未启用');
     return;
   }
   if (result.error) {
     previewSessionCache.set(url, { type: 'error' });
-    showPreviewMessage(i18n('previewError') || 'Failed to load');
+    showPreviewMessage(i18n('previewError') || '预览加载失败');
     return;
   }
   if (result.preview && (result.preview.title || result.preview.image)) {
@@ -1426,11 +1426,11 @@ function drawPreviewFromCache(entry, itemEl) {
   if (entry.type === 'ok') {
     showPreviewContent(entry.data);
   } else if (entry.type === 'empty') {
-    showPreviewMessage(i18n('previewEmpty') || 'No preview available');
+    showPreviewMessage(i18n('previewEmpty') || '暂无可用预览');
   } else if (entry.type === 'disabled') {
-    showPreviewMessage(i18n('previewDisabled') || 'Preview disabled');
+    showPreviewMessage(i18n('previewDisabled') || '网页预览未启用');
   } else {
-    showPreviewMessage(i18n('previewError') || 'Failed to load');
+    showPreviewMessage(i18n('previewError') || '预览加载失败');
   }
   requestAnimationFrame(() => {
     if (previewHoverItem) repositionPreviewCard(previewHoverItem);
@@ -1583,8 +1583,8 @@ function showFolderSuggestion(folder) {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
     </svg>
-    <span class="folder-suggestion-text">${i18n('suggestedFolder') || 'Suggested'}: <strong>${escapeHtml(folder.path)}</strong></span>
-    <button class="folder-suggestion-apply">${i18n('apply') || 'Apply'}</button>
+    <span class="folder-suggestion-text">${i18n('suggestedFolder') || '建议目录'}: <strong>${escapeHtml(folder.path)}</strong></span>
+    <button class="folder-suggestion-apply">${i18n('apply') || '应用'}</button>
     <button class="folder-suggestion-dismiss">×</button>
   `;
 
@@ -1699,30 +1699,31 @@ async function handleEditSave() {
   const url = editUrl.value.trim();
   if (!url) { showToast(i18n('editFailed'), 'error'); return; }
   try {
-    // 如果文件夹有变更，先移动
     const targetFolderId = editingSelectedFolderId || editingFolderId;
-    if (targetFolderId && targetFolderId !== editingFolderId) {
-      try {
-        await chrome.bookmarks.move(editingBookmarkId, { parentId: targetFolderId });
-      } catch (moveErr) {
-        console.error('移动文件夹失败:', moveErr);
-        showToast(i18n('moveFailed'), 'error');
-        return;
-      }
-    }
-
     const result = await chrome.runtime.sendMessage({
       action: 'updateBookmark',
       id: editingBookmarkId,
       title, url, tags: editingTags
     });
-    if (result && result.success) {
-      showToast(targetFolderId && targetFolderId !== editingFolderId ? i18n('editAndMoveSuccess') : i18n('editSuccess'), 'success');
-      closeEditModal();
-      loadBookmarks();
-    } else {
+    if (!result || !result.success) {
       showToast(i18n('editFailed'), 'error');
+      return;
     }
+
+    if (targetFolderId && targetFolderId !== editingFolderId) {
+      try {
+        await chrome.bookmarks.move(editingBookmarkId, { parentId: targetFolderId });
+        showToast(i18n('editAndMoveSuccess'), 'success');
+      } catch (moveErr) {
+        console.error('移动文件夹失败:', moveErr);
+        showToast(i18n('editSuccess'), 'success');
+        showToast(i18n('moveFailed'), 'error');
+      }
+    } else {
+      showToast(i18n('editSuccess'), 'success');
+    }
+    closeEditModal();
+    loadBookmarks();
   } catch (err) {
     console.error('更新失败:', err);
     showToast(i18n('editFailed'), 'error');
@@ -1826,8 +1827,10 @@ function filterBookmarks(query) {
 
   if (filtered.length === 0) {
     timelineContent.style.display = 'none';
-    timelineEmpty.style.display = 'none';
-    searchEmpty.style.display = 'flex';
+    const hasActiveFilter = !!currentFilter || selectedTags.size > 0 || currentView !== 'all';
+    timelineEmpty.style.display = allBookmarks.length === 0 && !hasActiveFilter ? 'flex' : 'none';
+    searchEmpty.style.display = allBookmarks.length === 0 && !hasActiveFilter ? 'none' : 'flex';
+    bookmarkCount.textContent = '0';
   } else {
     renderTimeline(filtered);
   }
@@ -1899,6 +1902,28 @@ async function handleSync() {
   }
 }
 
+
+function formatQuickBookmarkError(codeOrMessage) {
+  const raw = String(codeOrMessage || "").trim();
+  const map = {
+    unsupported_page: i18n("quickBookmarkUnsupported") || "当前页面不支持快捷收藏（如浏览器内部页）",
+    error_page: i18n("quickBookmarkErrorPage") || "当前标签页是错误页，请先打开可访问的网页再收藏",
+    restricted_page: i18n("quickBookmarkRestricted") || "当前页面受浏览器限制，无法注入收藏建议面板",
+    tab_unavailable: i18n("quickBookmarkTabUnavailable") || "当前标签页不可用，请切换到普通网页后重试",
+    timeout: i18n("quickBookmarkTimeout") || "生成收藏建议超时，请稍后重试",
+    quick_bookmark_failed: i18n("quickBookmarkFailed") || "无法为当前页面创建收藏建议",
+  };
+  if (map[raw]) return map[raw];
+  const lower = raw.toLowerCase();
+  if (lower.includes("frame with id") && lower.includes("error page")) return map.error_page;
+  if (lower.includes("cannot access") || lower.includes("cannot be scripted")) return map.restricted_page;
+  // Avoid showing raw English chrome errors
+  if (/^[A-Za-z][A-Za-z0-9 ,.'":;_()\[\]#/-]{8,}$/.test(raw) && !/[\u4e00-\u9fff]/.test(raw)) {
+    return map.quick_bookmark_failed + "（" + (i18n("quickBookmarkTechDetail") || "技术详情已隐藏") + "）";
+  }
+  return raw;
+}
+
 async function handleQuickBookmarkClick() {
   if (!quickBookmarkBtn) return;
   quickBookmarkBtn.disabled = true;
@@ -1906,18 +1931,18 @@ async function handleQuickBookmarkClick() {
   try {
     const result = await chrome.runtime.sendMessage({ action: 'quickBookmark' });
     if (result?.pending) {
-      showToast('已打开 AI 分类建议，请在当前页面确认收藏', 'success');
+      showToast(i18n('quickBookmarkOpened') || '已打开 AI 分类建议，请在当前页面确认收藏', 'success');
       window.close();
       return;
     }
     if (result?.duplicated) {
-      showToast('该页面已经在书签中', 'info');
+      showToast(i18n('quickBookmarkDuplicated') || '该页面已经在书签中', 'info');
       return;
     }
-    showToast(result?.error ? `收藏建议失败：${result.error}` : '无法为当前页面创建收藏建议', 'error');
+    showToast(result?.error ? `${i18n('quickBookmarkSuggestFailed') || '收藏建议失败'}：${formatQuickBookmarkError(result.error)}` : (i18n('quickBookmarkFailed') || '无法为当前页面创建收藏建议'), 'error');
   } catch (err) {
     console.error('快捷收藏失败:', err);
-    showToast('快捷收藏失败', 'error');
+    showToast(i18n('quickBookmarkFailed') || '快捷收藏失败', 'error');
   } finally {
     quickBookmarkBtn.classList.remove('spinning');
     quickBookmarkBtn.disabled = false;
@@ -1934,7 +1959,7 @@ async function deleteBookmark(id, url, element) {
       element.style.transform = 'translateX(-20px)';
       setTimeout(async () => {
         element.remove();
-        allBookmarks = allBookmarks.filter((b) => b.id !== id && b.url !== url);
+        allBookmarks = allBookmarks.filter((b) => b.id !== id);
         duplicateIds = computeDuplicates(allBookmarks);
         await collectAllTags();
         renderTagBar();
@@ -1985,9 +2010,12 @@ async function togglePin(id, element) {
       // 重渲染
       filterBookmarks(searchInput.value);
       showToast(result.pinned ? i18n('pinned') : i18n('unpinned'), 'success');
+    } else {
+      showToast(i18n('saveFailed'), 'error');
     }
   } catch (err) {
     console.error('置顶失败:', err);
+    showToast(i18n('saveFailed'), 'error');
   }
 }
 
@@ -2061,7 +2089,7 @@ function setupBulkActions() {
     if (selectedIds.size === 0) return;
     try {
       const result = await chrome.runtime.sendMessage({
-        action: 'bulkUpdate', ids: [...selectedIds], action: 'pin'
+        action: 'bulkUpdate', ids: [...selectedIds], mode: 'pin'
       });
       if (result?.success) {
         showToast(i18n('pinnedCount', [String(result.updated)]), 'success');
@@ -2112,7 +2140,7 @@ function setupBulkActions() {
     if (tags.length === 0) { showToast(i18n('tagEmpty'), 'warning'); return; }
     try {
       const result = await chrome.runtime.sendMessage({
-        action: 'bulkUpdate', ids: [...selectedIds], addTags: tags, action: 'addTag'
+        action: 'bulkUpdate', ids: [...selectedIds], addTags: tags, mode: 'addTag'
       });
       if (result?.success) {
         showToast(i18n('taggedCount', [String(result.updated), String(tags.length)]), 'success');
@@ -2629,7 +2657,7 @@ deletedList.addEventListener('click', async (e) => {
       btn.disabled = false;
     }
   } else if (action === 'purge') {
-    if (!confirm('确定要彻底删除该记录吗？此操作不可撤销。')) return;
+    if (!confirm(i18n('confirmPurgeDeleted') || '确定要彻底删除该记录吗？此操作不可撤销。')) return;
     try {
       const res = await chrome.runtime.sendMessage({
         action: 'purgeTombstone',
@@ -2648,7 +2676,7 @@ deletedList.addEventListener('click', async (e) => {
 
 deletedClearAllBtn.addEventListener('click', async () => {
   if (!currentDeletedList.length) return;
-  if (!confirm(`确定要清空全部 ${currentDeletedList.length} 条最近删除记录吗？`)) return;
+  if (!confirm((i18n('confirmClearAllDeleted') || '确定要清空全部 $1 条最近删除记录吗？').replace('$1', String(currentDeletedList.length)))) return;
   try {
     const res = await chrome.runtime.sendMessage({ action: 'clearTombstones' });
     if (res && res.success) {
@@ -3076,9 +3104,11 @@ document.addEventListener('mousedown', (e) => {
 
 // ===== 监听后台消息 =====
 chrome.runtime.onMessage.addListener((message) => {
-  if (message.action === 'bookmarkAdded') {
+  if (message.action === 'bookmarkAdded' || message.action === 'bookmarksDeleted') {
     loadBookmarks();
-    showToast(i18n('newBookmarkDetected'), 'success');
+    if (message.action === 'bookmarkAdded') {
+      showToast(i18n('newBookmarkDetected'), 'success');
+    }
   } else if (message.action === 'tagsUpdated') {
     loadBookmarks();
   } else if (message.action === 'openCommandPalette') {

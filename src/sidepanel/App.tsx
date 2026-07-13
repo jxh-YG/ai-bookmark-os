@@ -7,7 +7,6 @@ import type {
 } from '../types';
 import {
   classify,
-  classifyIncremental,
   estimateClassify,
   expandDuplicateBookmarks,
   loadSavedResult,
@@ -53,7 +52,6 @@ export function App() {
   const [hasBackup, setHasBackup] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [undoing, setUndoing] = useState(false);
-  const [pendingIds, setPendingIds] = useState<string[]>([]);
   const [notice, setNotice] = useState('');
   const [estimate, setEstimate] = useState<ClassifyEstimate | null>(null);
   const [whatsNew, setWhatsNew] = useState<{ to: string; entries: ChangelogEntry[] } | null>(null);
@@ -66,9 +64,6 @@ export function App() {
     loadSavedResult().then(setResult);
     getBackup().then((b) => setHasBackup(!!b));
     getApplyRecord().then((r) => setCanUndo(!!r));
-    chrome.storage.local
-      .get('pendingNewBookmarks')
-      .then((data) => setPendingIds(data.pendingNewBookmarks ?? []));
     // 自动更新后首次打开：展示「新版本内容」弹窗（跨多版本更新会累积展示）
     chrome.storage.local.get('pendingWhatsNew').then((data) => {
       const p = data.pendingWhatsNew as { from: string; to: string } | undefined;
@@ -87,9 +82,6 @@ export function App() {
         const s = changes.settings.newValue as Settings;
         setUiSettings(s);
         applyAppearance(s);
-      }
-      if (area === 'local' && changes.pendingNewBookmarks) {
-        setPendingIds(changes.pendingNewBookmarks.newValue ?? []);
       }
     };
     chrome.storage.onChanged.addListener(onChanged);
@@ -121,8 +113,12 @@ export function App() {
       });
     };
     const onBmChanged = () => getFlatBookmarks().then(setBookmarks);
+    const onBmCreated = () => getFlatBookmarks().then(setBookmarks);
+    const onBmMoved = () => getFlatBookmarks().then(setBookmarks);
     chrome.bookmarks.onRemoved.addListener(onBmRemoved);
     chrome.bookmarks.onChanged.addListener(onBmChanged);
+    chrome.bookmarks.onCreated.addListener(onBmCreated);
+    chrome.bookmarks.onMoved.addListener(onBmMoved);
     // 系统深浅色变化时重新应用（system 模式）
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const onScheme = () => loadSettings().then((s) => applyColorMode(s.colorMode));
@@ -131,6 +127,8 @@ export function App() {
       chrome.storage.onChanged.removeListener(onChanged);
       chrome.bookmarks.onRemoved.removeListener(onBmRemoved);
       chrome.bookmarks.onChanged.removeListener(onBmChanged);
+      chrome.bookmarks.onCreated.removeListener(onBmCreated);
+      chrome.bookmarks.onMoved.removeListener(onBmMoved);
       mq.removeEventListener('change', onScheme);
     };
   }, []);
@@ -207,10 +205,11 @@ export function App() {
       setBookmarks(await getFlatBookmarks());
     } catch (e) {
       setError(`${d.applyFailed}: ${(e as Error).message}`);
+      setCanUndo(!!(await getApplyRecord().catch(() => null)));
     } finally {
       setApplying(false);
     }
-  }, [result]);
+  }, [d, result]);
 
   const doUndo = useCallback(async () => {
     if (!confirm(d.undoConfirm)) return;
@@ -218,7 +217,7 @@ export function App() {
     setError('');
     try {
       const n = await undoApply();
-      setCanUndo(false);
+      setCanUndo(!!(await getApplyRecord()));
       setNotice(d.undoDone(n));
       setBookmarks(await getFlatBookmarks());
     } catch (e) {
@@ -247,51 +246,13 @@ export function App() {
         (tree) => moveNode(tree, fromPath, toParentPath, toIndex),
       ),
       deleteConfirmText: d.deleteFolderConfirm,
+      renameLabel: resolveLang(uiSettings.language) === 'zh' ? '重命名' : 'Rename',
+      deleteLabel: resolveLang(uiSettings.language) === 'zh' ? '删除' : 'Delete',
+      moveToRootLabel: resolveLang(uiSettings.language) === 'zh' ? '移到顶层' : 'Move folder to top level',
     }),
-    [updateTree, d],
+    [updateTree, d, uiSettings.language],
   );
 
-  /** 增量归类新书签 */
-  const classifyPending = useCallback(async () => {
-    if (!result || pendingIds.length === 0) return;
-    setError('');
-    const settings = await loadSettings();
-    if (!settings.apiKey) {
-      openAiClassificationSettings();
-      return;
-    }
-    const all = await getFlatBookmarks();
-    setBookmarks(all);
-    const byId = new Map(all.map((b) => [b.id, b]));
-    const fresh = pendingIds.map((id) => byId.get(id)).filter((b): b is NonNullable<typeof b> => !!b);
-    if (fresh.length === 0) {
-      await chrome.storage.local.set({ pendingNewBookmarks: [] });
-      chrome.action.setBadgeText({ text: '' });
-      return;
-    }
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    try {
-      const r = await classifyIncremental(settings, fresh, result, setProgress, ctrl.signal);
-      const expanded = expandDuplicateBookmarks(r, all);
-      await chrome.storage.local.set({ classifyResult: expanded });
-      setResult(expanded);
-      await chrome.storage.local.set({ pendingNewBookmarks: [] });
-      chrome.action.setBadgeText({ text: '' });
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') {
-        setError(`${d.classifyFailed}: ${(e as Error).message}`);
-        setProgress({ phase: 'error', done: 0, total: 0 });
-      } else {
-        setProgress({ phase: 'idle', done: 0, total: 0 });
-      }
-    }
-  }, [result, pendingIds, d, openAiClassificationSettings]);
-
-  const dismissPending = useCallback(async () => {
-    await chrome.storage.local.set({ pendingNewBookmarks: [] });
-    chrome.action.setBadgeText({ text: '' });
-  }, []);
 
   const downloadBackup = useCallback(async () => {
     const backup = await getBackup();
@@ -376,7 +337,7 @@ export function App() {
                 onChange={(e) => setSearch(e.target.value)}
               />
               {search.trim() ? (
-                <button type="button" className="search-clear" onClick={() => setSearch("")} aria-label="Clear">
+                <button type="button" className="search-clear" onClick={() => setSearch("")} aria-label={resolveLang(uiSettings.language) === "zh" ? "清空" : "Clear"}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <line x1="18" y1="6" x2="6" y2="18" />
                     <line x1="6" y1="6" x2="18" y2="18" />
@@ -400,15 +361,6 @@ export function App() {
             </div>
           </div>
 
-          {pendingIds.length > 0 && result && !running && (
-            <div className="pending-banner">
-              <span>{d.pendingBanner(pendingIds.length)}</span>
-              <div className="pending-banner__actions">
-                <button type="button" className="btn btn-primary btn-sm" onClick={classifyPending}>{d.classifyPending}</button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={dismissPending}>{d.dismissPending}</button>
-              </div>
-            </div>
-          )}
 
           {(progress.phase === "done" || progress.phase === "error") && !running && (
             <div className={`status-bar ${progress.phase === "error" ? "status-bar--error" : "status-bar--ok"}`}>

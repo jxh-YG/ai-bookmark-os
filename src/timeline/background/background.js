@@ -1788,7 +1788,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         */
-        const filtered = bookmarks.filter((b) => b.id !== message.id && b.url !== message.url);
+        const filtered = bookmarks.filter((b) => b.id !== message.id);
         if (filtered.length !== bookmarks.length) {
           await setStoredBookmarks(filtered);
         }
@@ -1907,7 +1907,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'bulkUpdate':
       (async () => {
-        const { ids, tags, addTags, removeTags, action } = message;
+        // mode is the bulk operation (pin/addTag/...). Keep action as routing key only.
+        const { ids, tags, addTags, removeTags, mode } = message;
         if (!Array.isArray(ids) || ids.length === 0) {
           sendResponse({ success: false, error: 'No IDs provided' });
           return;
@@ -1917,20 +1918,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         let updated = 0;
         for (const item of bookmarks) {
           if (!idSet.has(item.id)) continue;
-          if (action === 'addTag' && addTags) {
+          if (mode === 'addTag' && addTags) {
             item.tags = Array.from(new Set([...(item.tags || []), ...addTags]));
             updated++;
-          } else if (action === 'removeTag' && removeTags) {
+          } else if (mode === 'removeTag' && removeTags) {
             item.tags = (item.tags || []).filter(t => !removeTags.includes(t));
             updated++;
-          } else if (action === 'setTags' && tags) {
+          } else if (mode === 'setTags' && tags) {
             item.tags = [...tags];
             updated++;
-          } else if (action === 'pin') {
+          } else if (mode === 'pin') {
             item.pinned = true;
             item.pinnedAt = Date.now();
             updated++;
-          } else if (action === 'unpin') {
+          } else if (mode === 'unpin') {
             item.pinned = false;
             item.pinnedAt = null;
             updated++;
@@ -2862,32 +2863,43 @@ chrome.bookmarks.onChanged.addListener((id, changeInfo) => {
   updateBookmark(id, changeInfo);
 });
 
-// 监听书签移动：用户手动将书签移入某目录时，自动学习"域名→目录名(标签)"映射
+let bookmarkMoveUpdateQueue = Promise.resolve();
+
+// 监听书签移动：同步本地镜像，并学习"域名→目录名(标签)"映射
 chrome.bookmarks.onMoved.addListener((id, moveInfo) => {
-  (async () => {
+  bookmarkMoveUpdateQueue = bookmarkMoveUpdateQueue.then(async () => {
     try {
       const bookmark = await chrome.bookmarks.get(id);
       if (!bookmark || !bookmark[0] || !bookmark[0].url) return;
       const b = bookmark[0];
-      // 获取新的父目录名
       const parent = await chrome.bookmarks.get(moveInfo.parentId);
-      if (!parent || !parent[0] || !parent[0].title) return;
-      const folderName = parent[0].title;
-      // 跳过根目录（书签栏/其他书签等），只学习有意义的子目录
-      const rootNames = ['书签栏', '其他书签', 'Other bookmarks', 'Bookmarks bar', ''];
-      if (rootNames.includes(folderName)) return;
+      if (!parent || !parent[0]) return;
+      const parentTitle = parent[0].title || '';
+      const folderName = isBrowserBookmarkRoot(parentTitle) ? '' : parentTitle;
+      const folderOptions = await loadBookmarkFolderOptions();
+      const folderPath = folderOptions.find((folder) => folder.id === moveInfo.parentId)?.path || '';
+
+      const bookmarks = await getStoredBookmarks();
+      const stored = bookmarks.find((item) => item.id === id);
+      if (stored) {
+        stored.parentId = moveInfo.parentId;
+        stored.folderName = folderName;
+        stored.folderPath = folderPath;
+        await setStoredBookmarks(bookmarks);
+        chrome.runtime.sendMessage({
+          action: 'bookmarksUpdated',
+          ids: [id],
+        }).catch(() => {});
+      }
 
       const domain = extractDomain(b.url);
-      if (!domain) return;
-
-      // 学习域名→标签映射（动态规则层）
-      if (typeof learnDomainTag === 'function') {
+      if (folderName && domain && typeof learnDomainTag === 'function') {
         await learnDomainTag(domain, folderName);
       }
     } catch (e) {
       // 静默失败，不影响书签移动
     }
-  })();
+  }).catch(() => {});
 });
 
 chrome.bookmarks.onRemoved.addListener((id, removeInfo) => {
@@ -2902,6 +2914,11 @@ chrome.bookmarks.onRemoved.addListener((id, removeInfo) => {
       // 已经被过滤了也要写 tombstone
       await addTombstone(target);
     }
+    chrome.runtime.sendMessage({
+      action: 'bookmarksDeleted',
+      ids: [id],
+      urls: removeInfo?.node?.url ? [removeInfo.node.url] : [],
+    }).catch(() => {});
   });
 });
 
@@ -3584,6 +3601,28 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 // ===== 一键收藏：自动建议目录 =====
 // activeTab: 可选，由调用方（如右键菜单）传入已知的 tab，避免重复查询
+
+// Map Chrome / scripting errors to stable codes or Chinese messages for UI.
+function localizeQuickBookmarkError(err) {
+  const raw = String(err?.message || err || "").trim();
+  const lower = raw.toLowerCase();
+  if (!raw) return "quick_bookmark_failed";
+  if (raw === "unsupported_page" || lower.includes("unsupported")) return "unsupported_page";
+  if (lower.includes("frame with id") && lower.includes("error page")) return "error_page";
+  if (lower.includes("cannot access contents of the page") || lower.includes("cannot access a chrome")) return "restricted_page";
+  if (lower.includes("extensions gallery") || lower.includes("chrome web store")) return "restricted_page";
+  if (lower.includes("the extensions gallery cannot be scripted")) return "restricted_page";
+  if (lower.includes("no tab with id") || lower.includes("no window with id")) return "tab_unavailable";
+  if (lower.includes("the tab was closed") || lower.includes("tabs cannot be edited")) return "tab_unavailable";
+  if (lower.includes("missing host permission") || lower.includes("cannot be scripted")) return "restricted_page";
+  if (lower.includes("timeout") || lower.includes("timed out")) return "timeout";
+  // Prefer not to leak raw English chrome messages to users.
+  if (/^[A-Za-z][A-Za-z0-9 ,.'":;_()\[\]#/-]{8,}$/.test(raw) && !/[\u4e00-\u9fff]/.test(raw)) {
+    return "quick_bookmark_failed";
+  }
+  return raw;
+}
+
 async function handleQuickBookmark(activeTab) {
   try {
     const tab = activeTab || (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
@@ -3606,7 +3645,7 @@ async function handleQuickBookmark(activeTab) {
     return { success: true, pending: true, draft };
   } catch (err) {
     console.error('快捷收藏建议失败:', err);
-    return { success: false, error: err?.message || String(err) };
+    return { success: false, error: localizeQuickBookmarkError(err) };
   }
 }
 

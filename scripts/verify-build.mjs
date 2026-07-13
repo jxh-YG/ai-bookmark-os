@@ -20,7 +20,9 @@ if (rootManifest.options_page !== 'options.html') {
   ok = false;
 }
 const rootOptions = readFileSync('options.html', 'utf8');
-if (!rootOptions.includes("src/timeline/pages/settings/settings.html#ai")) {
+const rootOptionsScript = readFileSync('options.js', 'utf8');
+if (!rootOptions.includes('<script src="options.js"></script>') ||
+    !rootOptionsScript.includes("location.replace('src/timeline/pages/settings/settings.html#ai')")) {
   console.error('root options.html should redirect to unified timeline settings');
   ok = false;
 } else {
@@ -44,6 +46,7 @@ const required = [
   'icons/icon128.png',
   'ai/sidepanel.html',
   'ai/options.html',
+  'ai/options.js',
   '_locales/zh_CN/messages.json',
   '_locales/en/messages.json',
 ];
@@ -94,7 +97,9 @@ if (aiAssets.some((f) => /^options-/.test(f))) {
 }
 
 const aiOptions = readFileSync(join(dist, 'ai/options.html'), 'utf8');
-if (!aiOptions.includes("location.replace('../pages/settings/settings.html#ai')")) {
+const aiOptionsScript = readFileSync(join(dist, 'ai/options.js'), 'utf8');
+if (!aiOptions.includes('<script src="options.js"></script>') ||
+    !aiOptionsScript.includes("location.replace('../pages/settings/settings.html#ai')")) {
   console.error('ai/options.html should redirect to unified AI settings');
   ok = false;
 } else {

@@ -279,6 +279,34 @@ assert.equal(scoreFolderProfileCandidates(
   ['产品'],
   null,
 ).length, 0);
+const aiRelayFolders = [
+  { id: 'ai-public-folder', title: '公益导航', path: 'AI 整理/人工智能/公益导航' },
+  { id: 'ai-relay-folder', title: 'API中转', path: 'AI 整理/人工智能/API中转' },
+];
+const aiRelayBookmark = {
+  title: '1024Token Subscription to API',
+  url: 'https://token.club',
+  domain: 'token.club',
+  metaDesc: '统一 AI API 接入与中转服务，支持 Claude、GPT、Gemini 模型',
+};
+const aiRelaySuggestion = {
+  tags: [{ tag: 'AI', confidence: 0.8 }],
+  summary: '1024Token 是一个将订阅转换为统一 AI API 的平台',
+  reason: '页面核心用途是提供 AI 模型统一 API 接入与中转服务，最匹配人工智能下的 API 中转分类。',
+};
+const broadHistory = Array.from({ length: 8 }, (_, idx) => ({
+  title: `AI public directory ${idx}`,
+  url: `https://public-ai-${idx}.test`,
+  domain: `public-ai-${idx}.test`,
+  metaDesc: 'AI tools and public navigation',
+  tags: ['AI', '开发', '工具'],
+  folderName: '公益导航',
+  folderPath: 'AI 整理/人工智能/公益导航',
+}));
+assert.equal(chooseBestBookmarkFolderCandidate([
+  ...scoreHistoricalFolderCandidates(broadHistory, ['AI', '开发', '工具'], aiRelayBookmark, aiRelaySuggestion, aiRelayFolders),
+  ...scoreExistingFolderCandidates(aiRelayFolders, ['AI', '开发', '工具'], aiRelayBookmark, aiRelaySuggestion),
+])?.folderPath, 'AI 整理/人工智能/API中转');
 
 const draft = buildLocalBookmarkSuggestion(
   { title: 'Example', url: 'https://example.test', domain: 'example.test' },

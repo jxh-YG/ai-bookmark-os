@@ -2485,7 +2485,8 @@ async function startApp() {
 })();
 
 (function bindWorkspaceEntries() {
-  const openTab = (path) => chrome.tabs.create({ url: chrome.runtime.getURL(path) });
+  const openTab = (path) => window.AIBookmarkPageRouter?.openOrFocusExtensionPage(path)
+    ?? chrome.tabs.create({ url: chrome.runtime.getURL(path) });
   const bookmarkNavBtn = document.getElementById('saBookmarkNavBtn');
   const checkerBtn = document.getElementById('saCheckerBtn');
   const graphBtn = document.getElementById('saGraphBtn');
@@ -2516,9 +2517,11 @@ async function openAiClassifyPanel() {
   } catch (err) {
     console.warn('bridge openSidePanel failed', err);
   }
-  chrome.tabs.create({ url: chrome.runtime.getURL('ai/sidepanel.html') });
+  await (window.AIBookmarkPageRouter?.openOrFocusExtensionPage('ai/sidepanel.html')
+    ?? chrome.tabs.create({ url: chrome.runtime.getURL('ai/sidepanel.html') }));
 }
 
 function openAiSettingsPage() {
-  chrome.tabs.create({ url: chrome.runtime.getURL('pages/settings/settings.html#ai') });
+  window.AIBookmarkPageRouter?.openOrFocusExtensionPage('pages/settings/settings.html#ai')
+    ?? chrome.tabs.create({ url: chrome.runtime.getURL('pages/settings/settings.html#ai') });
 }

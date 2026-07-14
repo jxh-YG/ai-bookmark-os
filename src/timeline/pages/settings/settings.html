@@ -18,6 +18,14 @@
       </svg>
     </button>
     <h1 class="header-title" data-i18n="settings">Settings</h1>
+    <nav class="page-nav" aria-label="AI Bookmark OS">
+      <button id="workspaceBtn" class="page-nav-btn" type="button">工作台</button>
+      <button id="aiClassifyBtn" class="page-nav-btn" type="button">AI 分类</button>
+      <button id="bookmarkNavBtn" class="page-nav-btn" type="button">书签导航</button>
+      <button id="checkerBtn" class="page-nav-btn" type="button">失效检查</button>
+      <button id="graphBtn" class="page-nav-btn" type="button">图谱</button>
+      <button id="settingsBtn" class="page-nav-btn active" type="button" aria-current="page">设置</button>
+    </nav>
   </header>
 
   <!-- 分栏布局：居中 -->
@@ -830,7 +838,7 @@
             <div class="setting-label">AI 金字塔分类</div>
             <div class="setting-desc">配置书签分类树所用的模型、API 地址与 Key。与上方「AI 辅助标签」相互独立，可使用不同服务商。</div>
           </div>
-          <a class="btn btn-secondary btn-sm" id="aiTreeOpenSidepanelBtn" href="#">打开分类侧栏</a>
+          <button class="btn btn-secondary btn-sm" id="aiTreeOpenSidepanelBtn" type="button">打开分类侧栏</button>
         </div>
 
         <div class="setting-card ai-tree-card" id="aiTreeCard">
@@ -1387,6 +1395,7 @@
   <div id="toastContainer" class="toast-container"></div>
 
   <script src="../../shared/i18n.js"></script>
+  <script src="../../shared/page-router.js"></script>
   <script src="../../shared/ai-logger.js"></script>
   <script src="../../shared/bookmark-stats.js"></script>
   <script src="../../shared/simple-charts.js"></script>

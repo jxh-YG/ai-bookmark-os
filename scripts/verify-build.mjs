@@ -44,6 +44,7 @@ const required = [
   'pages/checker/checker.html',
   'pages/graph/graph.html',
   'pages/standalone/standalone.html',
+  'shared/page-router.js',
   'shared/smart-tagger.js',
   'shared/ai-tagger.js',
   'shared/bookmark-stats.js',
@@ -51,6 +52,7 @@ const required = [
   'rules/frame_allow.json',
   'icons/icon128.png',
   'ai/sidepanel.html',
+  'ai/bookmark-nav.html',
   'ai/options.html',
   'ai/options.js',
   '_locales/zh_CN/messages.json',
@@ -128,21 +130,34 @@ if (!launch.includes('打开统一工作台') || !launch.includes('AI 金字塔�
 
 const standaloneHtml = readFileSync(join(dist, 'pages/standalone/standalone.html'), 'utf8');
 const standaloneJs = readFileSync(join(dist, 'pages/standalone/standalone.js'), 'utf8');
-for (const id of ['saAiClassifyBtn', 'saCheckerBtn', 'saGraphBtn', 'saSettingsBtn']) {
+for (const id of ['saAiClassifyBtn', 'saBookmarkNavBtn', 'saCheckerBtn', 'saGraphBtn', 'saSettingsBtn']) {
   if (!standaloneHtml.includes(id) || !standaloneJs.includes(id)) {
     console.error('standalone workspace missing unified entry:', id);
     ok = false;
   }
 }
-if (['saAiClassifyBtn', 'saCheckerBtn', 'saGraphBtn', 'saSettingsBtn'].every((id) => standaloneHtml.includes(id) && standaloneJs.includes(id))) {
+if (['saAiClassifyBtn', 'saBookmarkNavBtn', 'saCheckerBtn', 'saGraphBtn', 'saSettingsBtn'].every((id) => standaloneHtml.includes(id) && standaloneJs.includes(id))) {
   console.log('OK standalone unified workspace entries');
+}
+if (!standaloneHtml.includes('shared/page-router.js') || !standaloneJs.includes('AIBookmarkPageRouter')) {
+  console.error('standalone should use shared page router for feature entries');
+  ok = false;
+} else {
+  console.log('OK standalone page router');
+}
+const standaloneCss = readFileSync(join(dist, 'pages/standalone/standalone.css'), 'utf8');
+if (!standaloneCss.includes('grid-auto-rows: max-content') || !standaloneCss.includes('align-content: start')) {
+  console.error('standalone grid cards should keep content-height rows');
+  ok = false;
+} else {
+  console.log('OK standalone grid card row sizing');
 }
 
 for (const page of ['checker', 'graph']) {
   const html = readFileSync(join(dist, 'pages', page, `${page}.html`), 'utf8');
   const js = readFileSync(join(dist, 'pages', page, `${page}.js`), 'utf8');
   const css = readFileSync(join(dist, 'pages', page, `${page}.css`), 'utf8');
-  for (const id of ['workspaceBtn', 'aiClassifyBtn', 'settingsBtn']) {
+  for (const id of ['workspaceBtn', 'bookmarkNavBtn', 'aiClassifyBtn', 'checkerBtn', 'graphBtn', 'settingsBtn']) {
     if (!html.includes(id) || !js.includes(id)) {
       console.error(`${page} missing unified navigation entry:`, id);
       ok = false;
@@ -154,10 +169,22 @@ for (const page of ['checker', 'graph']) {
   } else {
     console.log('OK unified navigation', page);
   }
+  if (!html.includes('shared/page-router.js') || !js.includes('AIBookmarkPageRouter') || !css.includes('aria-current')) {
+    console.error(`${page} should reuse existing feature tabs and mark the active page`);
+    ok = false;
+  } else {
+    console.log('OK page router navigation', page);
+  }
 }
 
 // Ensure no old product names in user-facing popup banner
 const popup = readFileSync(join(dist, 'pages/popup/popup.html'), 'utf8');
+if (!popup.includes('shared/page-router.js')) {
+  console.error('popup should load shared page router');
+  ok = false;
+} else {
+  console.log('OK popup page router script');
+}
 if (/BookmarkPilot|Markline/i.test(popup)) {
   console.error('popup still contains old project names');
   ok = false;
@@ -219,6 +246,12 @@ if (!popupJs.includes('openAiClassifyPanel') || !popup.includes('aiClassifyBtn')
 
 // AI classify opens Chrome side panel; popup should close to avoid overlap
 const popupJsFull = readFileSync(join(dist, 'pages/popup/popup.js'), 'utf8');
+if (!popupJsFull.includes('AIBookmarkPageRouter')) {
+  console.error('popup feature entries should reuse existing extension tabs');
+  ok = false;
+} else {
+  console.log('OK popup feature tab reuse');
+}
 if (!popupJsFull.includes('sidePanel.open') || !popupJsFull.includes("path: 'ai/sidepanel.html'")) {
   console.error('AI classify should open side panel with ai/sidepanel.html');
   ok = false;
@@ -231,8 +264,60 @@ if (!popupJsFull.includes('window.close()')) {
 } else {
   console.log('OK popup auto-close after AI open');
 }
+
+const settingsHtml = readFileSync(join(dist, 'pages/settings/settings.html'), 'utf8');
+const settingsJs = readFileSync(join(dist, 'pages/settings/settings.js'), 'utf8');
+const settingsCss = readFileSync(join(dist, 'pages/settings/settings.css'), 'utf8');
+for (const id of ['workspaceBtn', 'bookmarkNavBtn', 'aiClassifyBtn', 'checkerBtn', 'graphBtn', 'settingsBtn']) {
+  if (!settingsHtml.includes(id) || !settingsJs.includes(id)) {
+    console.error('settings missing unified navigation entry:', id);
+    ok = false;
+  }
+}
+if (!settingsHtml.includes('shared/page-router.js') || !settingsJs.includes('AIBookmarkPageRouter') || !settingsJs.includes('openSettingsPanelFromLocation') || !settingsCss.includes('.page-nav')) {
+  console.error('settings should use unified page router navigation and hash panel switching');
+  ok = false;
+} else {
+  console.log('OK settings unified page navigation');
+}
+if (!settingsHtml.includes('aiTreeOpenSidepanelBtn') || !settingsJs.includes('openAiTreeClassifyPanel')) {
+  console.error('settings AI tree side panel entry missing');
+  ok = false;
+} else if (!settingsJs.includes('sidePanel.open') || !settingsJs.includes("const panelPath = 'ai/sidepanel.html'")) {
+  console.error('settings AI tree entry should open side panel directly');
+  ok = false;
+} else {
+  console.log('OK settings AI tree side panel entry');
+}
+for (const autosaveHook of [
+  'treeProviderSelect.addEventListener',
+  'treeApiKeyInput.addEventListener',
+  'treeModelInput.addEventListener',
+  'treeBaseUrlInput.addEventListener',
+  'treePromptAssign.addEventListener',
+]) {
+  if (!settingsJs.includes(autosaveHook)) {
+    console.error('settings AI tree autosave hook missing:', autosaveHook);
+    ok = false;
+  }
+}
+if (settingsJs.includes('treePromptAssign.addEventListener') && settingsJs.includes('treeApiKeyInput.addEventListener')) {
+  console.log('OK settings AI tree autosave hooks');
+}
+if (!settingsJs.includes('function autoSaveTreeSettings') || settingsJs.includes('treeApiKeyInput.addEventListener(\'change\', () => { saveTreeSettings();')) {
+  console.error('settings AI tree autosave should allow partial config');
+  ok = false;
+} else {
+  console.log('OK settings AI tree partial autosave');
+}
 // AI page should not ship health/dup panel
 const sideJs = aiAssets.map((f) => readFileSync(join(dist, 'ai/assets', f), 'utf8')).join('\n');
+if (!sideJs.includes('topbar-nav-btn') || !sideJs.includes('bookmark-page-nav') || (!sideJs.includes('tabs.query') && !sideJs.includes('tabs?.query'))) {
+  console.error('AI pages should include unified navigation and tab reuse helper');
+  ok = false;
+} else {
+  console.log('OK AI pages unified navigation');
+}
 if (sideJs.includes('healthCheckDup') && sideJs.includes('HealthPanel')) {
   console.error('AI page still contains health panel');
   ok = false;

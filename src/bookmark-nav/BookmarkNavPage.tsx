@@ -22,6 +22,7 @@ import { hashUrl } from '../core/cache';
 import type { ClassifyResult, FlatBookmark } from '../types';
 import { BookmarkCard } from './BookmarkCard';
 import { getTagColor } from './tagColor';
+import { openOrFocusExtensionPage } from '../core/pageRouter';
 
 type LoadStatus = 'loading' | 'ready' | 'empty' | 'error';
 type LabelLike = { summary?: string; tags?: string[] };
@@ -508,6 +509,9 @@ export function BookmarkNavPage() {
   );
   const activeTitle = activeFolder?.title ?? '全部书签';
   const activePath = activeFolder?.path ?? '浏览器真实书签树';
+  const openExtensionPage = useCallback((path: string) => {
+    void openOrFocusExtensionPage(path);
+  }, []);
 
   return (
     <main className="bookmark-nav-shell">
@@ -522,10 +526,20 @@ export function BookmarkNavPage() {
             <h1>AI 书签导航</h1>
           </div>
         </div>
-        <button className="bookmark-nav-refresh" type="button" onClick={loadBookmarks} disabled={status === 'loading'}>
-          {status === 'loading' ? <Loader2 size={16} className="spin" aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
-          <span>刷新</span>
-        </button>
+        <div className="bookmark-nav-header-actions">
+          <nav className="bookmark-page-nav" aria-label="AI Bookmark OS">
+            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/standalone/standalone.html')}>工作台</button>
+            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('ai/sidepanel.html')}>AI 分类</button>
+            <button type="button" className="bookmark-page-nav__btn is-active" aria-current="page">书签导航</button>
+            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/checker/checker.html')}>失效检查</button>
+            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/graph/graph.html')}>图谱</button>
+            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/settings/settings.html')}>设置</button>
+          </nav>
+          <button className="bookmark-nav-refresh" type="button" onClick={loadBookmarks} disabled={status === 'loading'}>
+            {status === 'loading' ? <Loader2 size={16} className="spin" aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
+            <span>刷新</span>
+          </button>
+        </div>
       </header>
 
             <section className="bookmark-nav-toolbar" aria-label="书签筛选">

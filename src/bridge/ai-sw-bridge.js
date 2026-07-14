@@ -212,23 +212,23 @@
       return true;
     }
     if (msg.type === 'openSidePanel' || msg.action === 'openAiSidePanel') {
-      chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-        const open = () => {
-          if (tab && tab.windowId != null && chrome.sidePanel && chrome.sidePanel.open) {
-            chrome.sidePanel.open({ windowId: tab.windowId });
+      (async () => {
+        try {
+          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (chrome.sidePanel && chrome.sidePanel.setOptions) {
+            await chrome.sidePanel.setOptions({ path: 'ai/sidepanel.html', enabled: true });
           }
-        };
-        if (chrome.sidePanel && chrome.sidePanel.setOptions) {
-          chrome.sidePanel
-            .setOptions({ path: 'ai/sidepanel.html', enabled: true })
-            .then(open)
-            .catch(open);
-        } else {
-          open();
+          if (tab && tab.windowId != null && chrome.sidePanel && chrome.sidePanel.open) {
+            await chrome.sidePanel.open({ windowId: tab.windowId });
+            sendResponse({ ok: true });
+            return;
+          }
+          sendResponse({ ok: false, error: 'sidePanel unavailable' });
+        } catch (err) {
+          sendResponse({ ok: false, error: err && err.message ? err.message : String(err) });
         }
-      });
-      sendResponse({ ok: true });
-      return false;
+      })();
+      return true;
     }
   });
 

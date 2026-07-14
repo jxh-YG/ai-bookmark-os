@@ -107,6 +107,47 @@ body {
   color: var(--text-primary);
 }
 
+.page-nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-left: auto;
+  padding: 3px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+}
+
+.page-nav-btn {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+}
+
+.page-nav-btn:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.page-nav-btn.active,
+.page-nav-btn[aria-current="page"] {
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.page-nav-btn:active {
+  transform: scale(0.97);
+}
+
 .back-btn {
   display: flex;
   align-items: center;
@@ -1856,6 +1897,18 @@ textarea,
   .settings-header {
     top: 0;
     border-radius: 0 0 var(--radius-lg, 16px) var(--radius-lg, 16px);
+  }
+
+  .page-nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    justify-content: stretch;
+    border-radius: var(--radius-md);
+  }
+
+  .page-nav-btn {
+    flex: 1 1 auto;
   }
 
   .settings-nav,

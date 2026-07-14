@@ -7,6 +7,8 @@ const backBtn = document.getElementById('backBtn');
 const workspaceBtn = document.getElementById('workspaceBtn');
 const bookmarkNavBtn = document.getElementById('bookmarkNavBtn');
 const aiClassifyBtn = document.getElementById('aiClassifyBtn');
+const checkerBtn = document.getElementById('checkerBtn');
+const graphBtn = document.getElementById('graphBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 const graphStats = document.getElementById('graphStats');
 const graphEmpty = document.getElementById('graphEmpty');
@@ -39,7 +41,8 @@ let currentClusterBy = 'domain';
 let particleAnimId = null;
 
 function openExtensionPage(path) {
-  chrome.tabs.create({ url: chrome.runtime.getURL(path) });
+  return window.AIBookmarkPageRouter?.openOrFocusExtensionPage(path)
+    ?? chrome.tabs.create({ url: chrome.runtime.getURL(path) });
 }
 
 async function openAiClassifyPanel() {
@@ -55,7 +58,7 @@ async function openAiClassifyPanel() {
   } catch (err) {
     console.warn('sidePanel open failed, fallback', err);
   }
-  openExtensionPage('ai/sidepanel.html');
+  await openExtensionPage('ai/sidepanel.html');
 }
 
 // ===== 主题检测 =====
@@ -1031,6 +1034,8 @@ backBtn.addEventListener('click', () => {
 workspaceBtn?.addEventListener('click', () => openExtensionPage('pages/standalone/standalone.html'));
 bookmarkNavBtn?.addEventListener('click', () => openExtensionPage('ai/bookmark-nav.html'));
 aiClassifyBtn?.addEventListener('click', openAiClassifyPanel);
+checkerBtn?.addEventListener('click', () => openExtensionPage('pages/checker/checker.html'));
+graphBtn?.addEventListener('click', () => {});
 settingsBtn?.addEventListener('click', () => openExtensionPage('pages/settings/settings.html'));
 
 // ===== 图例 =====

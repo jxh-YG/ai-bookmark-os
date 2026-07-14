@@ -1,5 +1,11 @@
 // ===== DOM 引用 =====
 const backBtn = document.getElementById('backBtn');
+const workspaceBtn = document.getElementById('workspaceBtn');
+const aiClassifyBtn = document.getElementById('aiClassifyBtn');
+const bookmarkNavBtn = document.getElementById('bookmarkNavBtn');
+const checkerBtn = document.getElementById('checkerBtn');
+const graphBtn = document.getElementById('graphBtn');
+const settingsBtn = document.getElementById('settingsBtn');
 const themeSelect = document.getElementById('themeSelect');
 const languageSelect = document.getElementById('languageSelect');
 const checkerFrequencySelect = document.getElementById('checkerFrequencySelect');
@@ -164,6 +170,15 @@ navItems.forEach(item => {
     }
   });
 });
+
+function openSettingsPanelFromLocation() {
+  const params = new URLSearchParams(window.location.search || '');
+  const targetPanel = params.get('panel') || window.location.hash.replace('#', '') || 'shortcuts';
+  const targetNav = document.querySelector(`.nav-item[data-panel="${targetPanel}"]`);
+  if (targetNav) targetNav.click();
+}
+
+window.addEventListener('hashchange', openSettingsPanelFromLocation);
 
 // ===== Toast 提示 =====
 function showToast(message, type = 'info') {
@@ -962,10 +977,22 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+function openExtensionPage(path) {
+  return window.AIBookmarkPageRouter?.openOrFocusExtensionPage(path)
+    ?? chrome.tabs.create({ url: chrome.runtime.getURL(path) });
+}
+
 // ===== 事件绑定 =====
 backBtn.addEventListener('click', () => {
   window.close();
 });
+
+workspaceBtn?.addEventListener('click', () => openExtensionPage('pages/standalone/standalone.html'));
+aiClassifyBtn?.addEventListener('click', () => openAiTreeClassifyPanel());
+bookmarkNavBtn?.addEventListener('click', () => openExtensionPage('ai/bookmark-nav.html'));
+checkerBtn?.addEventListener('click', () => openExtensionPage('pages/checker/checker.html'));
+graphBtn?.addEventListener('click', () => openExtensionPage('pages/graph/graph.html'));
+settingsBtn?.addEventListener('click', () => {});
 
 retentionDaysSelect.addEventListener('change', async (e) => {
   await saveRetentionDays(e.target.value);
@@ -1041,7 +1068,7 @@ checkerBackoffMaxSelect.addEventListener('change', async (e) => {
 });
 
 openCheckerBtn.addEventListener('click', () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('pages/checker/checker.html') });
+  openExtensionPage('pages/checker/checker.html');
 });
 
 previewEnabledToggle.addEventListener('change', async (e) => {
@@ -1898,6 +1925,42 @@ function toggleTreeCustomFields() {
   if (treeCustomFields) treeCustomFields.style.display = isCustom ? '' : 'none';
 }
 
+async function openAiTreeClassifyPanel() {
+  const panelPath = 'ai/sidepanel.html';
+  try {
+    if (chrome.sidePanel?.setOptions) {
+      await chrome.sidePanel.setOptions({ path: panelPath, enabled: true });
+    }
+    const win = chrome.windows?.getCurrent ? await chrome.windows.getCurrent() : null;
+    if (chrome.sidePanel?.open && win?.id != null) {
+      await chrome.sidePanel.open({ windowId: win.id });
+      showToast('已打开 AI 分类侧栏', 'success');
+      return;
+    }
+  } catch (err) {
+    console.warn('settings sidePanel open failed', err);
+  }
+
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'openSidePanel', action: 'openAiSidePanel' });
+    if (res?.ok) {
+      showToast('已打开 AI 分类侧栏', 'success');
+      return;
+    }
+    if (res?.error) console.warn('bridge openSidePanel failed', res.error);
+  } catch (err) {
+    console.warn('bridge openSidePanel failed', err);
+  }
+
+  try {
+    await openExtensionPage(panelPath);
+    showToast('已在新标签页打开 AI 分类', 'success');
+  } catch (err) {
+    console.warn('AI classify page open failed', err);
+    showToast('打开 AI 分类页面失败', 'error');
+  }
+}
+
 function updateTreeEndpointHint() {
   if (!treeEndpointHintText || !treeEndpointHintFullUrl) return;
   const isFullUrl = !!(treeFullUrlToggle && treeFullUrlToggle.checked);
@@ -2134,6 +2197,7 @@ async function loadTreeSettings() {
 
 async function saveTreeSettings(options = {}) {
   const quiet = !!options.quiet;
+  const isAuto = options.mode === 'auto';
   const data = await chrome.storage.local.get('settings');
   const next = readTreeSettingsFromUI(data.settings || {});
   const missing = [];
@@ -2148,16 +2212,27 @@ async function saveTreeSettings(options = {}) {
   } catch (_) {}
 
   if (missing.length) {
+    if (isAuto) {
+      setTreeStatus(`已自动保存 · 待配置：${missing.join('、')}`);
+      if (!quiet && typeof showToast === 'function') {
+        showToast(typeof i18n === 'function' ? (i18n('settingsSaved') || '已保存') : '已保存', 'success');
+      }
+      return true;
+    }
     setTreeStatus(`已保存 · 仍需填写：${missing.join('、')}`, 'err');
     if (!quiet && typeof showToast === 'function') showToast(`请填写：${missing.join('、')}`, 'error');
     return false;
   }
 
-  setTreeStatus(`已保存 · ${getTreeProvider(next.provider).label} · ${next.model}`, 'ok');
+  setTreeStatus(`${isAuto ? '已自动保存' : '已保存'} · ${getTreeProvider(next.provider).label} · ${next.model}`, 'ok');
   if (!quiet && typeof showToast === 'function') {
     showToast(typeof i18n === 'function' ? (i18n('settingsSaved') || '已保存') : '已保存', 'success');
   }
   return true;
+}
+
+function autoSaveTreeSettings(options = {}) {
+  return saveTreeSettings({ ...options, mode: 'auto' });
 }
 
 function buildTreeChatRequest(settings, userText) {
@@ -2317,17 +2392,38 @@ function bindTreeSettings() {
 
   treeProviderSelect.addEventListener('change', () => {
     switchTreeProvider(treeProviderSelect.value);
+    autoSaveTreeSettings();
   });
 
   if (treeApiStyleSelect) {
     treeApiStyleSelect.addEventListener('change', () => {
       updateTreeEndpointHint();
+      autoSaveTreeSettings();
     });
   }
   if (treeFullUrlToggle) {
     treeFullUrlToggle.addEventListener('change', () => {
       updateTreeEndpointHint();
+      autoSaveTreeSettings();
     });
+  }
+  if (treeBaseUrlInput) {
+    treeBaseUrlInput.addEventListener('change', () => { autoSaveTreeSettings(); });
+  }
+  if (treeApiKeyInput) {
+    treeApiKeyInput.addEventListener('change', () => { autoSaveTreeSettings(); });
+  }
+  if (treeModelInput) {
+    treeModelInput.addEventListener('change', () => { autoSaveTreeSettings(); });
+  }
+  if (treePromptLabel) {
+    treePromptLabel.addEventListener('change', () => { autoSaveTreeSettings(); });
+  }
+  if (treePromptBuild) {
+    treePromptBuild.addEventListener('change', () => { autoSaveTreeSettings(); });
+  }
+  if (treePromptAssign) {
+    treePromptAssign.addEventListener('change', () => { autoSaveTreeSettings(); });
   }
   if (treeSaveBtn) {
     treeSaveBtn.addEventListener('click', () => { saveTreeSettings(); });
@@ -2338,49 +2434,50 @@ function bindTreeSettings() {
   if (treeRespectFoldersToggle) {
     treeRespectFoldersToggle.addEventListener('change', () => {
       updateTreePreserveVisibility();
-      saveTreeSettings({ quiet: true });
+      autoSaveTreeSettings({ quiet: true });
     });
   }
   if (treeClearPreservedFoldersBtn) {
     treeClearPreservedFoldersBtn.addEventListener('click', () => {
       renderTreePreserveFolders([]);
-      saveTreeSettings({ quiet: true });
+      autoSaveTreeSettings();
+    });
+  }
+  if (treePreserveFoldersList) {
+    treePreserveFoldersList.addEventListener('change', (e) => {
+      if (e.target && e.target.matches('input[type="checkbox"]')) autoSaveTreeSettings();
     });
   }
   if (treeReusePreviousToggle) {
-    treeReusePreviousToggle.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
+    treeReusePreviousToggle.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
   }
   if (treeBuiltInRulesToggle) {
-    treeBuiltInRulesToggle.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
+    treeBuiltInRulesToggle.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
   }
   if (treeCacheToggle) {
-    treeCacheToggle.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
+    treeCacheToggle.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
   }
   if (treeMetadataToggle) {
-    treeMetadataToggle.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
+    treeMetadataToggle.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
   }
   if (treeRetryCountInput) {
-    treeRetryCountInput.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
+    treeRetryCountInput.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
   }
   if (treeRequestTimeoutInput) {
-    treeRequestTimeoutInput.addEventListener('change', () => { saveTreeSettings({ quiet: true }); });
+    treeRequestTimeoutInput.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
   }
   if (treeResetPromptsBtn) {
     treeResetPromptsBtn.addEventListener('click', () => {
       if (treePromptLabel) treePromptLabel.value = DEFAULT_TREE_PROMPTS.label;
       if (treePromptBuild) treePromptBuild.value = DEFAULT_TREE_PROMPTS.buildTree;
       if (treePromptAssign) treePromptAssign.value = DEFAULT_TREE_PROMPTS.assign;
-      setTreeStatus('已恢复默认提示词（记得保存）');
+      autoSaveTreeSettings();
     });
   }
   if (treeOpenSidepanelBtn) {
     treeOpenSidepanelBtn.addEventListener('click', async (e) => {
       e.preventDefault();
-      try {
-        await chrome.runtime.sendMessage({ type: 'openSidePanel', action: 'openAiSidePanel' });
-      } catch (_) {
-        chrome.tabs.create({ url: chrome.runtime.getURL('ai/sidepanel.html') });
-      }
+      await openAiTreeClassifyPanel();
     });
   }
 }
@@ -2403,16 +2500,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderAILogs();
 
   // 处理 URL hash / query，自动打开指定面板（如 #ai 或 ?panel=ai）
-  const params = new URLSearchParams(window.location.search || '');
-  const panelFromQuery = params.get('panel');
-  const hash = window.location.hash.replace('#', '');
-  const targetPanel = panelFromQuery || hash;
-  if (targetPanel) {
-    const targetNav = document.querySelector(`.nav-item[data-panel="${targetPanel}"]`);
-    if (targetNav) {
-      targetNav.click();
-    }
-  }
+  openSettingsPanelFromLocation();
 });
 
 // ===== 通知设置 =====

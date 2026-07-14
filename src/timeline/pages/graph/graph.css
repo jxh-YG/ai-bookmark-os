@@ -150,6 +150,7 @@ html, body {
 .page-nav {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-xs);
   margin-left: var(--space-md);
   padding: 3px;
@@ -175,6 +176,12 @@ html, body {
 .page-nav-btn:hover {
   background: var(--bg-secondary);
   color: var(--text-primary);
+}
+
+.page-nav-btn.active,
+.page-nav-btn[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .page-nav-btn:active {

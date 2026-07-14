@@ -134,6 +134,36 @@ button, input, select, textarea {
   display: flex;
   align-items: center;
   gap: var(--space-xs);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.topbar-nav-btn {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+}
+
+.topbar-nav-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.topbar-nav-btn.is-active,
+.topbar-nav-btn[aria-current="page"] {
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.topbar-nav-btn:active {
+  transform: scale(0.97);
 }
 
 .icon-btn {
@@ -360,7 +390,7 @@ button.danger:hover {
 }
 
 /* generic button fallback for remaining plain buttons */
-button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item) {
+button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item):not(.topbar-nav-btn) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -376,7 +406,7 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item) {
   transition: all var(--transition-fast);
 }
 
-button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item):hover {
+button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item):not(.topbar-nav-btn):hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
@@ -922,7 +952,7 @@ select {
   box-shadow: var(--shadow-sm);
 }
 
-button:not(.icon-btn):not(.search-clear):not(.pill):not(.nav-item),
+button:not(.icon-btn):not(.search-clear):not(.pill):not(.nav-item):not(.topbar-nav-btn),
 .btn.primary,
 .primary {
   border-radius: var(--radius-md, 10px);
@@ -1115,7 +1145,7 @@ body::before {
 .pill,
 .btn,
 .icon-btn,
-button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item) {
+button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item):not(.topbar-nav-btn) {
   border-radius: var(--radius-md, 10px);
 }
 
@@ -1189,7 +1219,7 @@ button.primary:hover {
 
 .btn,
 button.btn,
-button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item) {
+button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item):not(.topbar-nav-btn) {
   background: var(--bg-glass-soft, rgba(245,249,255,.58));
   border-color: var(--border-glass, rgba(255,255,255,.68));
 }

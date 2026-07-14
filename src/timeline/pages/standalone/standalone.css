@@ -1041,6 +1041,9 @@ body.theme-dark #saThemeBtn .theme-icon-light { display: none; }
 .sa-view--grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-auto-rows: max-content;
+  align-content: start;
+  align-items: start;
   gap: var(--space-md);
 }
 
@@ -1054,6 +1057,7 @@ body.theme-dark #saThemeBtn .theme-icon-light { display: none; }
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+  align-self: start;
 }
 
 .sa-grid-card:hover {

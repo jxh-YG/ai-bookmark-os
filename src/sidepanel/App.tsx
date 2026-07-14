@@ -30,6 +30,7 @@ import { applyColorMode, t } from '../core/i18n';
 import { Tree, type TreeEditHandlers } from './Tree';
 import { entriesSince, type ChangelogEntry } from '../core/changelog';
 import { resolveLang } from '../core/i18n';
+import { openOrFocusExtensionPage } from '../core/pageRouter';
 
 /** 应用外观设置到根元素 CSS 变量 + 颜色模式 */
 function applyAppearance(s: Settings) {
@@ -58,6 +59,9 @@ export function App() {
   const [uiSettings, setUiSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const abortRef = useRef<AbortController | null>(null);
   const d = t(uiSettings.language);
+  const openExtensionPage = useCallback((path: string) => {
+    void openOrFocusExtensionPage(path);
+  }, []);
 
   useEffect(() => {
     getFlatBookmarks().then(setBookmarks);
@@ -137,7 +141,7 @@ export function App() {
 
   const openAiClassificationSettings = useCallback(() => {
     setError('请先完成 AI 金字塔分类供应商设置，正在打开 AI 辅助分类设置。');
-    chrome.tabs.create({ url: chrome.runtime.getURL('pages/settings/settings.html#ai') });
+    void openOrFocusExtensionPage('pages/settings/settings.html#ai');
   }, []);
 
   /** 执行分类；limit 限制条数（试分类） */
@@ -309,12 +313,17 @@ export function App() {
               <span className="count-chip">{bookmarks.length}</span>
             </div>
             <div className="topbar-actions">
+              <button type="button" className="topbar-nav-btn" onClick={() => openExtensionPage('pages/standalone/standalone.html')}>工作台</button>
+              <button type="button" className="topbar-nav-btn is-active" aria-current="page">AI 分类</button>
+              <button type="button" className="topbar-nav-btn" onClick={() => openExtensionPage('ai/bookmark-nav.html')}>书签导航</button>
+              <button type="button" className="topbar-nav-btn" onClick={() => openExtensionPage('pages/checker/checker.html')}>失效检查</button>
+              <button type="button" className="topbar-nav-btn" onClick={() => openExtensionPage('pages/graph/graph.html')}>图谱</button>
               <button
                 type="button"
                 className="icon-btn"
                 title="AI 设置"
                 aria-label="AI 设置"
-                onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('pages/settings/settings.html#ai') })}
+                onClick={() => openExtensionPage('pages/settings/settings.html#ai')}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <circle cx="12" cy="12" r="3" />

@@ -2,6 +2,9 @@
 const backBtn = document.getElementById('backBtn');
 const workspaceBtn = document.getElementById('workspaceBtn');
 const aiClassifyBtn = document.getElementById('aiClassifyBtn');
+const bookmarkNavBtn = document.getElementById('bookmarkNavBtn');
+const checkerBtn = document.getElementById('checkerBtn');
+const graphBtn = document.getElementById('graphBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 const startCheckBtn = document.getElementById('startCheckBtn');
 const stopCheckBtn = document.getElementById('stopCheckBtn');
@@ -29,7 +32,8 @@ let checkedCount = 0;
 let totalCount = 0;
 
 function openExtensionPage(path) {
-  chrome.tabs.create({ url: chrome.runtime.getURL(path) });
+  return window.AIBookmarkPageRouter?.openOrFocusExtensionPage(path)
+    ?? chrome.tabs.create({ url: chrome.runtime.getURL(path) });
 }
 
 async function openAiClassifyPanel() {
@@ -45,7 +49,7 @@ async function openAiClassifyPanel() {
   } catch (err) {
     console.warn('sidePanel open failed, fallback', err);
   }
-  openExtensionPage('ai/sidepanel.html');
+  await openExtensionPage('ai/sidepanel.html');
 }
 
 // ===== Toast =====
@@ -488,6 +492,9 @@ backBtn.addEventListener('click', () => {
 
 workspaceBtn?.addEventListener('click', () => openExtensionPage('pages/standalone/standalone.html'));
 aiClassifyBtn?.addEventListener('click', openAiClassifyPanel);
+bookmarkNavBtn?.addEventListener('click', () => openExtensionPage('ai/bookmark-nav.html'));
+checkerBtn?.addEventListener('click', () => {});
+graphBtn?.addEventListener('click', () => openExtensionPage('pages/graph/graph.html'));
 settingsBtn?.addEventListener('click', () => openExtensionPage('pages/settings/settings.html'));
 
 startCheckBtn.addEventListener('click', startCheck);

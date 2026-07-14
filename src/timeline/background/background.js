@@ -714,6 +714,8 @@ function getBookmarkFolderEvidenceText(bookmark, aiSuggestion) {
     bookmark?.contentTitle,
     bookmark?.contentText,
     bookmark?.ogDescription,
+    aiSuggestion?.summary,
+    aiSuggestion?.reason,
     ...(Array.isArray(bookmark?.headings) ? bookmark.headings : []),
     ...(Array.isArray(bookmark?.contentHeadings) ? bookmark.contentHeadings : []),
     ...(Array.isArray(bookmark?.metaKeywords) ? bookmark.metaKeywords : []),
@@ -770,6 +772,8 @@ function collectBookmarkTokenWeights(bookmark, tags = [], aiSuggestion = null) {
   addText(strong, bookmark?.contentTitle, 4);
   addText(strong, bookmark?.contentText, 2);
   addText(strong, bookmark?.ogDescription, 3);
+  addText(strong, aiSuggestion?.summary, 3);
+  addText(strong, aiSuggestion?.reason, 4);
   for (const value of Array.isArray(bookmark?.headings) ? bookmark.headings : []) addText(strong, value, 3);
   for (const value of Array.isArray(bookmark?.metaKeywords) ? bookmark.metaKeywords : []) addText(strong, value, 3);
   for (const value of Array.isArray(aiSuggestion?.evidence) ? aiSuggestion.evidence : []) addText(strong, value, 3);
@@ -918,7 +922,7 @@ function scoreHistoricalFolderCandidates(storedBookmarks, suggestedTags, bookmar
     }
     const candidate = folderScore.get(key);
     candidate.count += overlap;
-    candidate.score += evidence.score + overlap * 10;
+    candidate.score = Math.max(candidate.score, evidence.score + overlap * 10);
     for (const reason of evidence.reasons) candidate.reasons.add(reason);
   }
   return [...folderScore.values()]
@@ -1104,8 +1108,11 @@ async function prepareBookmarkSuggestion(tab) {
     score: scoreFolderPathEvidence(suggestedFolder.path, tempItem, ruleTags, aiSuggestion).score,
     reasons: []
   } : null;
-  const profileCandidates = scoreFolderProfileCandidates(storedBookmarks, folderOptions, tempItem, tagNames, aiSuggestion);
-  const bestFolder = chooseBestBookmarkFolderCandidate([localFolder, acceptedAiFolder, ...profileCandidates]);
+  const folderScoringTags = draft.tags.length ? draft.tags : tagNames;
+  const historyCandidates = scoreHistoricalFolderCandidates(storedBookmarks, folderScoringTags, tempItem, aiSuggestion, folderOptions);
+  const existingCandidates = scoreExistingFolderCandidates(folderOptions, folderScoringTags, tempItem, aiSuggestion);
+  const profileCandidates = scoreFolderProfileCandidates(storedBookmarks, folderOptions, tempItem, folderScoringTags, aiSuggestion);
+  const bestFolder = chooseBestBookmarkFolderCandidate([localFolder, acceptedAiFolder, ...historyCandidates, ...existingCandidates, ...profileCandidates]);
   if (bestFolder) {
     draft.folderPath = bestFolder.folderPath || bestFolder.path || '';
     draft.folderId = bestFolder.id || '';

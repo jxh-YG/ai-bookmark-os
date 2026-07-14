@@ -2425,30 +2425,33 @@ async function openAiClassifyPanel() {
     console.warn('bridge openSidePanel failed', err);
   }
   // Last resort: open as extension page tab (not a small popup embed).
-  chrome.tabs.create({ url: chrome.runtime.getURL('ai/sidepanel.html') });
+  await openExtensionPage('ai/sidepanel.html', { closePopup: true });
   try { window.close(); } catch (_) {}
 }
 
 function openAiSettingsPage() {
-  chrome.tabs.create({ url: chrome.runtime.getURL('pages/settings/settings.html#ai') });
+  openExtensionPage('pages/settings/settings.html#ai');
 }
 
 function openBookmarkNavPage() {
-  chrome.tabs.create({ url: chrome.runtime.getURL('ai/bookmark-nav.html') });
-  try { window.close(); } catch (_) {}
+  openExtensionPage('ai/bookmark-nav.html', { closePopup: true });
 }
 
 function openWorkspacePage() {
-  chrome.tabs.create({
-    url: chrome.runtime.getURL('pages/standalone/standalone.html')
-  });
-  try { window.close(); } catch (_) {}
+  openExtensionPage('pages/standalone/standalone.html', { closePopup: true });
+}
+
+function openExtensionPage(path, options = {}) {
+  const opened = window.AIBookmarkPageRouter?.openOrFocusExtensionPage(path)
+    ?? chrome.tabs.create({ url: chrome.runtime.getURL(path) });
+  if (options.closePopup) Promise.resolve(opened).finally(() => { try { window.close(); } catch (_) {} });
+  return opened;
 }
 
 
 
 footerSettingsBtn.addEventListener('click', () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('pages/settings/settings.html') });
+  openExtensionPage('pages/settings/settings.html');
 });
 
 // 三点菜单
@@ -2465,12 +2468,12 @@ document.addEventListener('click', (e) => {
 
 menuCheckerBtn.addEventListener('click', () => {
   footerMenu.classList.remove('footer-menu--open');
-  chrome.tabs.create({ url: chrome.runtime.getURL('pages/checker/checker.html') });
+  openExtensionPage('pages/checker/checker.html', { closePopup: true });
 });
 
 menuGraphBtn.addEventListener('click', () => {
   footerMenu.classList.remove('footer-menu--open');
-  chrome.tabs.create({ url: chrome.runtime.getURL('pages/graph/graph.html') });
+  openExtensionPage('pages/graph/graph.html', { closePopup: true });
 });
 
 menuPanelBtn.addEventListener('click', () => {
@@ -2480,7 +2483,7 @@ menuPanelBtn.addEventListener('click', () => {
 
 menuStatsBtn.addEventListener('click', () => {
   footerMenu.classList.remove('footer-menu--open');
-  chrome.tabs.create({ url: chrome.runtime.getURL('pages/settings/settings.html#stats') });
+  openExtensionPage('pages/settings/settings.html#stats', { closePopup: true });
 });
 // AI classify entries
 const aiClassifyBtn = $('aiClassifyBtn');

@@ -165,6 +165,53 @@ button {
   transform: none;
 }
 
+.bookmark-nav-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bookmark-page-nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--nav-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.bookmark-page-nav__btn {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--nav-muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 680;
+  white-space: nowrap;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.bookmark-page-nav__btn:hover {
+  color: var(--nav-text);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.bookmark-page-nav__btn.is-active,
+.bookmark-page-nav__btn[aria-current="page"] {
+  color: var(--nav-accent);
+  background: var(--nav-accent-soft);
+}
+
+.bookmark-page-nav__btn:active {
+  transform: scale(0.97);
+}
+
 .bookmark-nav-toolbar {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto;
@@ -787,6 +834,15 @@ button {
     align-items: stretch;
     flex-direction: column;
     position: relative;
+  }
+
+  .bookmark-nav-header-actions,
+  .bookmark-page-nav {
+    width: 100%;
+  }
+
+  .bookmark-page-nav__btn {
+    flex: 1 1 auto;
   }
 
   .bookmark-nav-brand {

@@ -144,6 +144,7 @@ body {
 .page-nav {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-xs);
   margin-left: auto;
   padding: 3px;
@@ -169,6 +170,12 @@ body {
 .page-nav-btn:hover {
   background: var(--bg-page-gradient, var(--bg-primary));
   color: var(--text-primary);
+}
+
+.page-nav-btn.active,
+.page-nav-btn[aria-current="page"] {
+  background: var(--accent-light);
+  color: var(--accent);
 }
 
 .page-nav-btn:active {

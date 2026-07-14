@@ -1030,17 +1030,26 @@ document.querySelectorAll('.sa-view-btn').forEach(btn => {
 
 // ===== 搜索 =====
 let searchDebounce = null;
-saSearchInput.addEventListener('input', () => {
+function applySearchValue(value, { debounce = false, focus = false } = {}) {
   clearTimeout(searchDebounce);
-  const q = saSearchInput.value;
-  saSearchClear.style.display = q ? 'flex' : 'none';
-  searchDebounce = setTimeout(() => filterBookmarks(q), 200);
+  searchDebounce = null;
+  saSearchInput.value = value;
+  saSearchClear.style.display = value ? 'flex' : 'none';
+  if (debounce) {
+    searchDebounce = setTimeout(() => filterBookmarks(value), 200);
+  } else {
+    filterBookmarks(value);
+  }
+  if (focus) saSearchInput.focus();
+}
+saSearchInput.addEventListener('input', () => {
+  applySearchValue(saSearchInput.value, { debounce: true });
 });
 
-saSearchClear.addEventListener('click', () => {
-  saSearchInput.value = '';
-  saSearchClear.style.display = 'none';
-  filterBookmarks('');
+saSearchClear.addEventListener('click', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  applySearchValue('', { focus: true });
 });
 
 // ===== 排序下拉 =====

@@ -685,6 +685,309 @@ function matchBookmarkFolderOption(folderOptions, path) {
   return options.find(folder => normalizeBookmarkFolderPath(folder.path) === normalized) || null;
 }
 
+const FOLDER_EVIDENCE_STOP_WORDS = new Set([
+  'bookmark', 'bookmarks', 'folder', 'folders', 'other', 'misc', 'new', 'work', 'personal',
+  '书签', '收藏', '文件夹', '其他', '杂项', '资料', '归档', '临时'
+]);
+
+function tokenizeFolderEvidence(value) {
+  const text = String(value || '').toLowerCase();
+  const tokens = text
+    .split(/[^a-z0-9\u4e00-\u9fa5]+/i)
+    .map(part => part.trim())
+    .filter(part => part.length >= 2);
+  const chinese = text.match(/[\u4e00-\u9fa5]{2,}/g) || [];
+  return [...new Set([...tokens, ...chinese])];
+}
+
+function escapeFolderEvidenceRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getBookmarkFolderEvidenceText(bookmark, aiSuggestion) {
+  return [
+    bookmark?.title,
+    bookmark?.url,
+    bookmark?.domain,
+    bookmark?.metaDesc,
+    bookmark?.excerpt,
+    bookmark?.contentTitle,
+    bookmark?.contentText,
+    bookmark?.ogDescription,
+    ...(Array.isArray(bookmark?.headings) ? bookmark.headings : []),
+    ...(Array.isArray(bookmark?.contentHeadings) ? bookmark.contentHeadings : []),
+    ...(Array.isArray(bookmark?.metaKeywords) ? bookmark.metaKeywords : []),
+    ...(Array.isArray(bookmark?.contentMetaKeywords) ? bookmark.contentMetaKeywords : []),
+    ...(Array.isArray(bookmark?.structuredTypes) ? bookmark.structuredTypes : []),
+    ...(Array.isArray(bookmark?.contentStructuredTypes) ? bookmark.contentStructuredTypes : []),
+    ...(Array.isArray(aiSuggestion?.evidence) ? aiSuggestion.evidence : []),
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function folderEvidenceTokenMatchesText(token, evidenceText) {
+  const normalized = String(token || '').toLowerCase().trim();
+  if (normalized.length < 2 || FOLDER_EVIDENCE_STOP_WORDS.has(normalized)) return false;
+  if (/[\u4e00-\u9fa5]/.test(normalized)) return evidenceText.includes(normalized);
+  const re = new RegExp(`(^|[^a-z0-9])${escapeFolderEvidenceRegExp(normalized)}([^a-z0-9]|$)`, 'i');
+  return re.test(evidenceText);
+}
+
+function getFolderPathTokens(folderPath) {
+  return normalizeBookmarkFolderPath(folderPath).split('/').flatMap(tokenizeFolderEvidence);
+}
+
+function getTagTokens(tags) {
+  return new Set(normalizeTagList(tags).flatMap(tokenizeFolderEvidence));
+}
+
+function addWeightedToken(target, token, weight) {
+  const normalized = String(token || '').toLowerCase().trim();
+  if (!normalized || FOLDER_EVIDENCE_STOP_WORDS.has(normalized)) return;
+  target.set(normalized, (target.get(normalized) || 0) + weight);
+}
+
+function getUrlPathEvidence(url) {
+  const raw = String(url || '');
+  try {
+    const parsed = new URL(raw);
+    return [parsed.pathname, parsed.search, parsed.hash].filter(Boolean).join(' ');
+  } catch {
+    return raw.replace(/^[a-z]+:\/\/[^/]+/i, '');
+  }
+}
+
+function collectBookmarkTokenWeights(bookmark, tags = [], aiSuggestion = null) {
+  const strong = new Map();
+  const weak = new Map();
+  const addText = (target, value, weight) => {
+    const text = String(value || '').slice(0, 4000);
+    for (const token of tokenizeFolderEvidence(text)) addWeightedToken(target, token, weight);
+  };
+  addText(strong, bookmark?.title, 5);
+  addText(strong, getUrlPathEvidence(bookmark?.url), 4);
+  addText(strong, bookmark?.metaDesc, 3);
+  addText(strong, bookmark?.excerpt, 3);
+  addText(strong, bookmark?.contentTitle, 4);
+  addText(strong, bookmark?.contentText, 2);
+  addText(strong, bookmark?.ogDescription, 3);
+  for (const value of Array.isArray(bookmark?.headings) ? bookmark.headings : []) addText(strong, value, 3);
+  for (const value of Array.isArray(bookmark?.metaKeywords) ? bookmark.metaKeywords : []) addText(strong, value, 3);
+  for (const value of Array.isArray(aiSuggestion?.evidence) ? aiSuggestion.evidence : []) addText(strong, value, 3);
+  for (const tag of normalizeTagList(tags)) addText(weak, tag, 3);
+  for (const tag of normalizeTagList(aiSuggestion?.tags)) addText(weak, tag, 2);
+  return { strong, weak, domain: String(bookmark?.domain || extractDomain(bookmark?.url || '') || '').toLowerCase() };
+}
+
+function weightedTokenOverlap(left, right) {
+  let score = 0;
+  let count = 0;
+  for (const [token, leftWeight] of left) {
+    const rightWeight = right.get(token) || 0;
+    if (rightWeight <= 0) continue;
+    score += Math.min(leftWeight, rightWeight);
+    count += 1;
+  }
+  return { score, count };
+}
+
+function buildFolderProfiles(storedBookmarks, folderOptions = []) {
+  const profiles = new Map();
+  for (const item of storedBookmarks || []) {
+    const normalizedPath = normalizeBookmarkFolderPath(item?.folderPath);
+    if (!normalizedPath) continue;
+    const matchedFolder = folderOptions.length > 0 ? matchBookmarkFolderOption(folderOptions, normalizedPath) : { path: normalizedPath, id: '', title: item.folderName || '' };
+    if (!matchedFolder) continue;
+    const path = matchedFolder.path;
+    if (!profiles.has(path)) {
+      profiles.set(path, {
+        id: matchedFolder.id || '',
+        title: matchedFolder.title || item.folderName || path.split('/').filter(Boolean).slice(-1)[0] || '',
+        folderName: matchedFolder.title || item.folderName || path.split('/').filter(Boolean).slice(-1)[0] || '',
+        folderPath: path,
+        strong: new Map(),
+        weak: new Map(),
+        domains: new Map(),
+        count: 0
+      });
+    }
+    const profile = profiles.get(path);
+    const tokens = collectBookmarkTokenWeights(item, item.tags || []);
+    for (const [token, weight] of tokens.strong) addWeightedToken(profile.strong, token, Math.min(weight, 6));
+    for (const [token, weight] of tokens.weak) addWeightedToken(profile.weak, token, Math.min(weight, 3));
+    if (tokens.domain) profile.domains.set(tokens.domain, (profile.domains.get(tokens.domain) || 0) + 1);
+    profile.count += 1;
+  }
+  return profiles;
+}
+
+function scoreFolderProfileCandidates(storedBookmarks, folderOptions, bookmark, suggestedTags, aiSuggestion) {
+  const bookmarkTokens = collectBookmarkTokenWeights(bookmark, suggestedTags, aiSuggestion);
+  const candidates = [];
+  for (const profile of buildFolderProfiles(storedBookmarks, folderOptions).values()) {
+    const strongOverlap = weightedTokenOverlap(profile.strong, bookmarkTokens.strong);
+    const weakOverlap = weightedTokenOverlap(profile.weak, bookmarkTokens.weak);
+    const tagToContentOverlap = weightedTokenOverlap(profile.weak, bookmarkTokens.strong);
+    const sameDomainCount = bookmarkTokens.domain ? (profile.domains.get(bookmarkTokens.domain) || 0) : 0;
+    const hasReliableSimilarity = sameDomainCount > 0 || strongOverlap.count >= 2;
+    if (!hasReliableSimilarity) continue;
+    const score = sameDomainCount * 45 + strongOverlap.score * 8 + weakOverlap.score * 4 + tagToContentOverlap.score * 3 + Math.min(profile.count, 8);
+    if (score <= 0) continue;
+    candidates.push({
+      id: profile.id,
+      title: profile.title,
+      folderName: profile.folderName,
+      path: profile.folderPath,
+      folderPath: profile.folderPath,
+      exists: true,
+      score,
+      count: profile.count,
+      reasons: [
+        ...(sameDomainCount > 0 ? [`domain-history:${bookmarkTokens.domain}`] : []),
+        ...(strongOverlap.count > 0 ? [`profile-content:${strongOverlap.count}`] : []),
+        ...(weakOverlap.count > 0 ? [`profile-tag:${weakOverlap.count}`] : [])
+      ]
+    });
+  }
+  return candidates.sort((a, b) => b.score - a.score || b.count - a.count || a.folderPath.localeCompare(b.folderPath, 'zh'));
+}
+
+function folderTokenMatchesTag(token, tagTokens) {
+  const normalized = String(token || '').toLowerCase().trim();
+  if (!normalized || FOLDER_EVIDENCE_STOP_WORDS.has(normalized)) return false;
+  return tagTokens.has(normalized);
+}
+
+function scoreFolderPathEvidence(folderPath, bookmark, ruleTags, aiSuggestion) {
+  const normalized = normalizeBookmarkFolderPath(folderPath);
+  if (!normalized) return { score: 0, reasons: [] };
+  const evidenceText = getBookmarkFolderEvidenceText(bookmark, aiSuggestion);
+  const localTagTokens = getTagTokens(ruleTags);
+  const aiTagTokens = getTagTokens(aiSuggestion?.tags);
+  const reasons = [];
+  let score = 0;
+
+  const tokens = getFolderPathTokens(normalized).filter(token => !FOLDER_EVIDENCE_STOP_WORDS.has(token));
+  const parts = normalized.split('/').filter(Boolean);
+  const leafTokens = new Set(tokenizeFolderEvidence(parts[parts.length - 1] || '').filter(token => !FOLDER_EVIDENCE_STOP_WORDS.has(token)));
+  let leafMatched = leafTokens.size === 0;
+  for (const token of tokens) {
+    let matched = false;
+    if (folderTokenMatchesTag(token, localTagTokens)) {
+      score += 18;
+      reasons.push(`local-tag:${token}`);
+      matched = true;
+    }
+    if (folderTokenMatchesTag(token, aiTagTokens)) {
+      score += 12;
+      reasons.push(`ai-tag:${token}`);
+      matched = true;
+    }
+    if (folderEvidenceTokenMatchesText(token, evidenceText)) {
+      score += 30;
+      reasons.push(`content:${token}`);
+      matched = true;
+    }
+    if (matched && leafTokens.has(token)) leafMatched = true;
+  }
+  if (parts.length > 1 && !leafMatched) return { score: 0, reasons: [] };
+  if (tokens.length > 1 && score > 0) score += 6;
+
+  return { score, reasons: [...new Set(reasons)] };
+}
+
+function scoreHistoricalFolderCandidates(storedBookmarks, suggestedTags, bookmark, aiSuggestion, folderOptions = []) {
+  const tags = normalizeTagList(suggestedTags);
+  if (tags.length === 0) return [];
+  const tagSet = new Set(tags);
+  const folderScore = new Map();
+  for (const item of storedBookmarks || []) {
+    if (!item?.folderPath) continue;
+    const normalizedPath = normalizeBookmarkFolderPath(item.folderPath);
+    if (!normalizedPath) continue;
+    const matchedFolder = folderOptions.length > 0 ? matchBookmarkFolderOption(folderOptions, normalizedPath) : { path: normalizedPath, id: '', title: item.folderName || '' };
+    if (!matchedFolder) continue;
+    const overlap = normalizeTagList(item.tags).filter(tag => tagSet.has(tag)).length;
+    if (overlap <= 0) continue;
+    const evidence = scoreFolderPathEvidence(matchedFolder.path, bookmark, tags, aiSuggestion);
+    if (evidence.score <= 0) continue;
+    const key = matchedFolder.path;
+    if (!key) continue;
+    if (!folderScore.has(key)) {
+      const folderName = matchedFolder.title || item.folderName || key.split('/').filter(Boolean).slice(-1)[0] || '';
+      folderScore.set(key, { count: 0, score: 0, folderName, folderPath: key, reasons: new Set() });
+    }
+    const candidate = folderScore.get(key);
+    candidate.count += overlap;
+    candidate.score += evidence.score + overlap * 10;
+    for (const reason of evidence.reasons) candidate.reasons.add(reason);
+  }
+  return [...folderScore.values()]
+    .map(item => ({ ...item, reasons: [...item.reasons] }))
+    .sort((a, b) => b.score - a.score || b.count - a.count || a.folderPath.localeCompare(b.folderPath, 'zh'));
+}
+
+function scoreExistingFolderCandidates(folderOptions, suggestedTags, bookmark, aiSuggestion) {
+  const tags = normalizeTagList(suggestedTags);
+  const candidates = [];
+  const seen = new Set();
+  for (const folder of Array.isArray(folderOptions) ? folderOptions : []) {
+    const path = normalizeBookmarkFolderPath(folder?.path);
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    const evidence = scoreFolderPathEvidence(path, bookmark, tags, aiSuggestion);
+    if (evidence.score <= 0) continue;
+    candidates.push({
+      id: folder.id || '',
+      title: folder.title || path.split('/').filter(Boolean).slice(-1)[0] || '',
+      folderName: folder.title || path.split('/').filter(Boolean).slice(-1)[0] || '',
+      path,
+      folderPath: path,
+      exists: true,
+      score: evidence.score,
+      count: 0,
+      reasons: evidence.reasons
+    });
+  }
+  return candidates.sort((a, b) => b.score - a.score || a.folderPath.localeCompare(b.folderPath, 'zh'));
+}
+
+function chooseBestBookmarkFolderCandidate(candidates) {
+  const byPath = new Map();
+  for (const item of Array.isArray(candidates) ? candidates : []) {
+    const path = normalizeBookmarkFolderPath(item?.folderPath || item?.path);
+    if (!path) continue;
+    const itemScore = Number(item.score || 0);
+    if (itemScore <= 0) continue;
+    const current = byPath.get(path) || { ...item, folderPath: path, path, score: 0, count: 0, reasons: new Set(), exists: !!item.exists };
+    current.score = Math.max(current.score, itemScore);
+    current.count += Number(item.count || 0);
+    current.exists = current.exists || !!item.exists;
+    current.id = current.id || item.id || '';
+    current.title = current.title || item.title || item.folderName || '';
+    current.folderName = current.folderName || item.folderName || item.title || '';
+    for (const reason of item.reasons || []) current.reasons.add(reason);
+    byPath.set(path, current);
+  }
+  const list = [...byPath.values()].map(item => ({ ...item, reasons: [...item.reasons] }));
+  if (list.length === 0) return null;
+  return list.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (!!b.exists !== !!a.exists) return b.exists ? 1 : -1;
+    return (a.folderPath || a.path || '').localeCompare(b.folderPath || b.path || '', 'zh');
+  })[0] || null;
+}
+
+
+function chooseAISuggestedFolder(aiFolderPath, folderOptions, bookmark, ruleTags, aiSuggestion) {
+  const normalized = normalizeBookmarkFolderPath(aiFolderPath);
+  if (!normalized) return null;
+  const matched = matchBookmarkFolderOption(folderOptions, normalized);
+  if (!matched) return null;
+  const evidence = scoreFolderPathEvidence(matched.path, bookmark, ruleTags, aiSuggestion);
+  if (evidence.score <= 0) return null;
+  return { path: matched.path, id: matched.id || '', exists: true, score: evidence.score, reasons: evidence.reasons };
+}
+
 async function loadBookmarkFolderOptions() {
   const tree = await chrome.bookmarks.getTree();
   const options = [];
@@ -730,7 +1033,7 @@ function buildLocalBookmarkSuggestion(tempItem, ruleTags, suggestedFolder, aiSug
     url: tempItem.url,
     domain: tempItem.domain || extractDomain(tempItem.url),
     tags: finalTags,
-    folderName: suggestedFolder?.title || finalTags[0] || '',
+    folderName: suggestedFolder?.title || '',
     folderPath: suggestedFolder?.path || '',
     folderId: suggestedFolder?.id || '',
     summary: aiSuggestion?.summary || tempItem.excerpt || tempItem.metaDesc || '',
@@ -776,7 +1079,7 @@ async function prepareBookmarkSuggestion(tab) {
   const ruleTags = typeof autoTagBookmarkSync === 'function' ? autoTagBookmarkSync(tempItem) : [];
   const tagNames = normalizeTagList(ruleTags);
   const folderOptions = await loadBookmarkFolderOptions().catch(() => []);
-  const suggestedFolder = await suggestBookmarkFolderReadOnly(tab.url, tab.title, tagNames);
+  const suggestedFolder = await suggestBookmarkFolderReadOnly(tab.url, tab.title, tagNames, tempItem);
   let aiSuggestion = null;
   let aiError = '';
   try {
@@ -788,21 +1091,34 @@ async function prepareBookmarkSuggestion(tab) {
   }
 
   const draft = buildLocalBookmarkSuggestion(tempItem, ruleTags, suggestedFolder, aiSuggestion, aiError);
+  const storedBookmarks = await getStoredBookmarks().catch(() => []);
   const aiFolderPath = normalizeBookmarkFolderPath(aiSuggestion?.folderPath);
-  const matchedAiFolder = matchBookmarkFolderOption(folderOptions, aiFolderPath);
-  if (aiFolderPath) {
-    draft.folderPath = matchedAiFolder?.path || aiFolderPath;
-    draft.folderId = matchedAiFolder?.id || '';
-    draft.folderName = draft.folderPath.split('/').filter(Boolean).slice(-1)[0] || draft.folderName;
+  const acceptedAiFolder = chooseAISuggestedFolder(aiFolderPath, folderOptions, tempItem, ruleTags, aiSuggestion);
+  const localFolder = suggestedFolder ? {
+    id: suggestedFolder.id || '',
+    title: suggestedFolder.title || '',
+    folderName: suggestedFolder.title || '',
+    path: suggestedFolder.path || '',
+    folderPath: suggestedFolder.path || '',
+    exists: !!suggestedFolder.id,
+    score: scoreFolderPathEvidence(suggestedFolder.path, tempItem, ruleTags, aiSuggestion).score,
+    reasons: []
+  } : null;
+  const profileCandidates = scoreFolderProfileCandidates(storedBookmarks, folderOptions, tempItem, tagNames, aiSuggestion);
+  const bestFolder = chooseBestBookmarkFolderCandidate([localFolder, acceptedAiFolder, ...profileCandidates]);
+  if (bestFolder) {
+    draft.folderPath = bestFolder.folderPath || bestFolder.path || '';
+    draft.folderId = bestFolder.id || '';
+    draft.folderName = draft.folderPath.split('/').filter(Boolean).slice(-1)[0] || bestFolder.folderName || bestFolder.title || draft.folderName;
     draft.recommendedFolderPath = draft.folderPath;
-    draft.recommendedFolderExists = !!matchedAiFolder?.id;
+    draft.recommendedFolderExists = !!bestFolder.exists;
   } else {
-    draft.recommendedFolderPath = normalizeBookmarkFolderPath(suggestedFolder?.path || draft.folderPath || draft.folderName || draft.tags[0] || '');
-    draft.recommendedFolderExists = !!suggestedFolder?.id;
+    draft.recommendedFolderPath = '';
+    draft.recommendedFolderExists = false;
   }
   draft.folderOptions = folderOptions;
   if (!draft.folderPath && draft.tags.length) {
-    const fallbackFolder = await suggestBookmarkFolderReadOnly(tab.url, tab.title, draft.tags);
+    const fallbackFolder = await suggestBookmarkFolderReadOnly(tab.url, tab.title, draft.tags, tempItem);
     if (fallbackFolder) {
       draft.folderId = fallbackFolder.id || '';
       draft.folderName = fallbackFolder.title || draft.folderName;
@@ -867,11 +1183,7 @@ async function saveConfirmedBookmark(draft) {
     if (!parentId) return { success: false, error: 'folder_not_found' };
   }
   if (!parentId && !folderPath && folderName) {
-    const folder = await findOrCreateFolder(folderName);
-    if (folder) {
-      parentId = folder.id;
-      folderPath = folder.path || folderPath;
-    }
+    folderName = '';
   }
   if (parentId && !folderName) {
     try {
@@ -984,7 +1296,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
         return String(path || '').split('/').map(part => rootNames[part] || part).join('/');
       };
       panelState.existingFolderPath = localizeRootPath(panelState.existingFolderPath);
-      const recommendedPath = panelState.recommendedFolderPath || panelState.folderPath || panelState.folderName || '';
+      const recommendedPath = panelState.recommendedFolderPath || panelState.folderPath || '';
       const recommendedExists = !!panelState.recommendedFolderExists || !!panelState.folderId;
       const selectedPath = panelState.folderPath || recommendedPath || '';
       const folderOptionHtml = folderOptions.map(folder => {
@@ -1022,7 +1334,8 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           #${ROOT_ID} .ab-folder-search-row{position:relative}
           #${ROOT_ID} .ab-folder-combobox{position:relative}
           #${ROOT_ID} .ab-folder-search{padding-right:42px}
-          #${ROOT_ID} .ab-folder-toggle{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:32px;min-width:32px;height:32px;min-height:32px;padding:0;border-radius:8px;background:transparent;color:#48484a;font-size:18px;line-height:1;box-shadow:none}
+          #${ROOT_ID} .ab-folder-toggle{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:32px;min-width:32px;height:32px;min-height:32px;padding:0;border-radius:8px;background:transparent;color:#48484a;font-size:18px;line-height:1;box-shadow:none;display:flex;align-items:center;justify-content:center}
+          #${ROOT_ID} .ab-folder-toggle::before{content:"";width:8px;height:8px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:translateY(-2px) rotate(45deg)}
           #${ROOT_ID} .ab-folder-toggle:hover{background:rgba(0,0,0,.06);color:#1d1d1f;transform:translateY(-50%)}
           #${ROOT_ID} .ab-folder-results{display:none;position:absolute;z-index:2;top:calc(100% + 5px);left:0;right:0;max-height:240px;overflow:auto;border:1px solid rgba(0,0,0,.12);border-radius:8px;background:rgba(255,255,255,.98);box-shadow:0 12px 30px rgba(0,0,0,.16);padding:4px}
           #${ROOT_ID} .ab-folder-results.is-open{display:block}
@@ -1057,7 +1370,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
               <div class="ab-folder-row">
                 <div class="ab-folder-search-row ab-folder-combobox">
                   <input id="abFolderSearch" class="ab-folder-search" value="" placeholder="${copy.searchCategory}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="abFolderResults">
-                  <button type="button" id="abFolderToggle" class="ab-folder-toggle" aria-label="${copy.selectCategory}" title="${copy.selectCategory}" aria-expanded="false">&#x2304;</button>
+                  <button type="button" id="abFolderToggle" class="ab-folder-toggle" aria-label="${copy.selectCategory}" title="${copy.selectCategory}" aria-expanded="false"></button>
                   <div id="abFolderResults" class="ab-folder-results" role="listbox" aria-label="${copy.matchingCategories}"></div>
                 </div>
                 <select id="abFolderSelect" aria-label="${copy.selectCategory}">
@@ -2322,7 +2635,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const tempItem = { url: url || '', title: title || '', domain: extractDomain(url || '') };
         const tagResults = autoTagBookmarkSync(tempItem);
         const tags = tagResults.map(t => t.tag);
-        const result = await suggestBookmarkFolder(url, title, tags);
+        const result = await suggestBookmarkFolder(url, title, tags, tempItem);
         sendResponse({ success: true, folder: result });
       })();
       return true;
@@ -3658,45 +3971,18 @@ async function handleQuickBookmark(activeTab) {
 }
 
 // suggestedTags: 已由调用方通过 autoTagBookmarkSync 计算好的标签数组
-async function suggestBookmarkFolder(url, title, suggestedTags) {
+async function suggestBookmarkFolder(url, title, suggestedTags, bookmarkContext = null) {
   try {
-    // 没有标签 → 放到 Chrome 书签默认目录（书签栏根目录）
-    if (!suggestedTags || suggestedTags.length === 0) return null;
-
-    // 2. 优先按主标签名查找或创建同名目录（有则放入，无则创建）
-    //    避免 folderScore 被历史误存的路径（如"新建文件夹"）污染
-    const primaryTag = suggestedTags[0];
-    const folderInfo = await findOrCreateFolder(primaryTag);
-    if (folderInfo) {
-      return { id: folderInfo.id, title: primaryTag, path: folderInfo.path };
-    }
-
-    // 3. 创建失败 → 按已有书签的同标签目录分布后备匹配
+    const bookmarkEvidence = bookmarkContext || { url: url || '', title: title || '', domain: extractDomain(url || '') };
+    const folderOptions = await loadBookmarkFolderOptions().catch(() => []);
+    const existingCandidates = scoreExistingFolderCandidates(folderOptions, suggestedTags, bookmarkEvidence);
     const stored = await getStoredBookmarks();
-    const folderScore = new Map(); // folderPath -> { count, folderName, folderPath }
+    const historyCandidates = scoreHistoricalFolderCandidates(stored, suggestedTags, bookmarkEvidence, null, folderOptions);
+    const profileCandidates = scoreFolderProfileCandidates(stored, folderOptions, bookmarkEvidence, suggestedTags, null);
 
-    for (const item of stored) {
-      if (!item.tags || item.tags.length === 0 || !item.folderPath) continue;
-      const overlap = item.tags.filter(t => suggestedTags.includes(t)).length;
-      if (overlap > 0) {
-        const key = item.folderPath;
-        if (!folderScore.has(key)) {
-          folderScore.set(key, { count: 0, folderName: item.folderName, folderPath: item.folderPath });
-        }
-        folderScore.get(key).count += overlap;
-      }
-    }
+    const best = chooseBestBookmarkFolderCandidate([...historyCandidates, ...existingCandidates, ...profileCandidates]);
+    if (best) return { id: best.id || await findFolderIdByPath(best.folderPath), title: best.folderName || best.title, path: best.folderPath || best.path };
 
-    // 4. 有匹配的目录，返回得分最高的
-    if (folderScore.size > 0) {
-      const sorted = [...folderScore.values()].sort((a, b) => b.count - a.count);
-      const best = sorted[0];
-      // 查找对应的 Chrome 书签文件夹 ID
-      const folderId = await findFolderIdByPath(best.folderPath);
-      return { id: folderId, title: best.folderName, path: best.folderPath };
-    }
-
-    // 5. 都没有，返回 null → 保存到默认目录
     return null;
   } catch (err) {
     console.error('建议目录失败:', err);
@@ -3705,37 +3991,19 @@ async function suggestBookmarkFolder(url, title, suggestedTags) {
 }
 
 // 在整棵书签树中递归查找指定名称的文件夹，返回 { node, path }
-async function suggestBookmarkFolderReadOnly(url, title, suggestedTags) {
+async function suggestBookmarkFolderReadOnly(url, title, suggestedTags, bookmarkContext = null) {
   try {
-    if (!suggestedTags || suggestedTags.length === 0) return null;
-
-    const tree = await chrome.bookmarks.getTree();
-    const primaryTag = suggestedTags[0];
-    const existing = findFolderInTree(tree, primaryTag);
-    if (existing) {
-      return { id: existing.node.id, title: primaryTag, path: existing.path };
-    }
+    const bookmarkEvidence = bookmarkContext || { url: url || '', title: title || '', domain: extractDomain(url || '') };
+    const folderOptions = await loadBookmarkFolderOptions().catch(() => []);
+    const existingCandidates = scoreExistingFolderCandidates(folderOptions, suggestedTags, bookmarkEvidence);
 
     const stored = await getStoredBookmarks();
-    const folderScore = new Map();
-    for (const item of stored) {
-      if (!item.tags || item.tags.length === 0 || !item.folderPath) continue;
-      const overlap = item.tags.filter(t => suggestedTags.includes(t)).length;
-      if (overlap > 0) {
-        const key = item.folderPath;
-        if (!folderScore.has(key)) {
-          folderScore.set(key, { count: 0, folderName: item.folderName, folderPath: item.folderPath });
-        }
-        folderScore.get(key).count += overlap;
-      }
-    }
-    if (folderScore.size > 0) {
-      const best = [...folderScore.values()].sort((a, b) => b.count - a.count)[0];
-      const folderId = await findFolderIdByPath(best.folderPath);
-      return { id: folderId, title: best.folderName, path: best.folderPath };
-    }
+    const historyCandidates = scoreHistoricalFolderCandidates(stored, suggestedTags, bookmarkEvidence, null, folderOptions);
+    const profileCandidates = scoreFolderProfileCandidates(stored, folderOptions, bookmarkEvidence, suggestedTags, null);
+    const best = chooseBestBookmarkFolderCandidate([...historyCandidates, ...existingCandidates, ...profileCandidates]);
+    if (best) return { id: best.id || await findFolderIdByPath(best.folderPath), title: best.folderName || best.title, path: best.folderPath || best.path };
 
-    return primaryTag ? { id: '', title: primaryTag, path: primaryTag } : null;
+    return null;
   } catch (err) {
     console.error('只读目录建议失败:', err);
     return null;

@@ -1594,10 +1594,8 @@ body.theme-dark .ai-hint-card {
   margin-top: 4px;
 }
 
-#panel-ai .ai-tree-card .ai-subhead {
-  margin-top: 0;
-  margin-bottom: 8px;
-  background: color-mix(in srgb, var(--accent, #0A84FF) 6%, var(--bg-primary, #fff));
+#panel-ai .ai-tree-subhead {
+  margin-top: 16px;
 }
 
 #panel-ai .tree-url-input {

@@ -148,10 +148,25 @@ vm.runInContext(`${source.slice(start, end)}; this.helpers = {
   normalizeTagList,
   normalizeBookmarkFolderPath,
   matchBookmarkFolderOption,
+  chooseAISuggestedFolder,
+  scoreExistingFolderCandidates,
+  scoreFolderProfileCandidates,
+  chooseBestBookmarkFolderCandidate,
+  scoreHistoricalFolderCandidates,
   buildLocalBookmarkSuggestion
 };`, context);
 
-const { normalizeTagList, normalizeBookmarkFolderPath, matchBookmarkFolderOption, buildLocalBookmarkSuggestion } = context.helpers;
+const {
+  normalizeTagList,
+  normalizeBookmarkFolderPath,
+  matchBookmarkFolderOption,
+  chooseAISuggestedFolder,
+  scoreExistingFolderCandidates,
+  scoreFolderProfileCandidates,
+  chooseBestBookmarkFolderCandidate,
+  scoreHistoricalFolderCandidates,
+  buildLocalBookmarkSuggestion,
+} = context.helpers;
 
 assert.deepEqual([...normalizeTagList([' docs ', { tag: 'docs' }, { tag: 'AI' }])], ['docs', 'AI']);
 assert.equal(normalizeBookmarkFolderPath('Bookmarks bar/Work / Project'), 'Work/Project');
@@ -160,6 +175,110 @@ assert.deepEqual(
   { ...matchBookmarkFolderOption([{ id: '42', path: 'Work/Project' }], 'Bookmarks bar/Work/Project') },
   { id: '42', path: 'Work/Project' },
 );
+const folderOptions = [
+  { id: 'plugin-folder', title: '插件', path: '工具/插件' },
+  { id: 'mysql-folder', title: 'mysql', path: '数据库/mysql' },
+  { id: 'redis-folder', title: 'Redis', path: '数据库/Redis' },
+  { id: 'design-folder', title: '设计系统', path: '产品/设计系统' },
+  { id: 'notion-folder', title: 'Notion', path: '工具/插件/Notion' },
+];
+const pluginBookmark = {
+  title: 'Notion Forms browser plugin',
+  url: 'https://notionforms.io/plugin/contact',
+  domain: 'notionforms.io',
+  metaDesc: 'Install a Notion forms plugin for browser workflows'
+};
+assert.equal(chooseAISuggestedFolder(
+  'AI/Research',
+  folderOptions,
+  pluginBookmark,
+  [{ tag: '插件', score: 30 }],
+  { tags: [{ tag: '插件', confidence: 0.7 }], folderPath: 'AI/Research' },
+), null);
+const acceptedAiFolder = chooseAISuggestedFolder(
+  '工具/插件/Notion',
+  folderOptions,
+  pluginBookmark,
+  [{ tag: '插件', score: 30 }],
+  { tags: [{ tag: '插件', confidence: 0.7 }], folderPath: '工具/插件/Notion' },
+);
+assert.equal(acceptedAiFolder.path, '工具/插件/Notion');
+assert.equal(acceptedAiFolder.id, 'notion-folder');
+assert.equal(acceptedAiFolder.exists, true);
+assert.equal(acceptedAiFolder.score, 66);
+assert.deepEqual([...acceptedAiFolder.reasons], ['local-tag:插件', 'ai-tag:插件', 'content:notion']);
+assert.deepEqual(scoreExistingFolderCandidates(
+  folderOptions,
+  [],
+  { title: 'Design System tokens', url: 'https://example.test/design-system', metaDesc: '组件库与设计系统规范' },
+  null,
+).map(item => item.folderPath).join('|'), '产品/设计系统');
+assert.deepEqual(scoreExistingFolderCandidates(
+  folderOptions,
+  ['缓存'],
+  { title: 'Redis cache invalidation guide', url: 'https://example.test/redis-cache', metaDesc: 'Redis cache patterns' },
+  null,
+).map(item => item.folderPath).join('|'), '数据库/Redis');
+assert.deepEqual(scoreHistoricalFolderCandidates(
+  [
+    { tags: ['插件'], folderName: 'mysql', folderPath: '数据库/mysql' },
+    { tags: ['插件'], folderName: 'mysql', folderPath: '数据库/mysql' },
+    { tags: ['插件'], folderName: '插件', folderPath: '工具/插件' },
+  ],
+  ['插件'],
+  pluginBookmark,
+  null,
+  folderOptions,
+).map(item => item.folderPath).join('|'), '工具/插件');
+assert.deepEqual(scoreHistoricalFolderCandidates(
+  [{ tags: ['插件'], folderName: '已删除', folderPath: '已删除/插件' }],
+  ['插件'],
+  pluginBookmark,
+  null,
+  folderOptions,
+).length, 0);
+assert.equal(chooseBestBookmarkFolderCandidate([
+  ...scoreHistoricalFolderCandidates(
+    [{ tags: ['插件'], folderName: '插件', folderPath: '工具/插件' }],
+    ['插件'],
+    pluginBookmark,
+    null,
+    folderOptions,
+  ),
+  ...scoreExistingFolderCandidates(folderOptions, ['插件'], pluginBookmark, null),
+])?.folderPath, '工具/插件/Notion');
+const profileFolders = [
+  ...folderOptions,
+  { id: 'lab-folder', title: '灵感库', path: '灵感库' },
+  { id: 'ux-folder', title: '体验参考', path: '体验参考' },
+];
+const profileBookmarks = [
+  { title: 'Notion Forms plugin setup', url: 'https://notionforms.io/plugin/setup', domain: 'notionforms.io', metaDesc: 'Browser plugin for Notion forms', tags: ['插件'], folderName: 'Notion', folderPath: '工具/插件/Notion' },
+  { title: 'Interactive onboarding flow examples', url: 'https://example.test/onboarding-flow', domain: 'example.test', metaDesc: 'Product onboarding patterns and activation ideas', tags: ['产品'], folderName: '灵感库', folderPath: '灵感库' },
+  { title: 'Activation checklist patterns', url: 'https://example.test/activation-checklist', domain: 'example.test', metaDesc: 'User onboarding checklist for SaaS products', tags: ['产品'], folderName: '灵感库', folderPath: '灵感库' },
+  { title: 'Button hover motion reference', url: 'https://ux.example.test/motion', domain: 'ux.example.test', metaDesc: 'Micro interaction and hover motion design', tags: ['设计'], folderName: '体验参考', folderPath: '体验参考' },
+];
+assert.equal(scoreFolderProfileCandidates(
+  profileBookmarks,
+  profileFolders,
+  { title: 'Notion Forms embed plugin', url: 'https://notionforms.io/embed/plugin', domain: 'notionforms.io', metaDesc: 'Install plugin for Notion forms' },
+  ['插件'],
+  null,
+)[0]?.folderPath, '工具/插件/Notion');
+assert.equal(scoreFolderProfileCandidates(
+  profileBookmarks,
+  profileFolders,
+  { title: 'SaaS onboarding checklist examples', url: 'https://another.test/onboarding-checklist', domain: 'another.test', metaDesc: 'Product activation and onboarding flow patterns' },
+  ['产品'],
+  null,
+)[0]?.folderPath, '灵感库');
+assert.equal(scoreFolderProfileCandidates(
+  profileBookmarks,
+  profileFolders,
+  { title: 'Release notes', url: 'https://unrelated.test/releases', domain: 'unrelated.test', metaDesc: 'Version changelog and downloads' },
+  ['产品'],
+  null,
+).length, 0);
 
 const draft = buildLocalBookmarkSuggestion(
   { title: 'Example', url: 'https://example.test', domain: 'example.test' },
@@ -171,6 +290,16 @@ const draft = buildLocalBookmarkSuggestion(
 assert.deepEqual([...draft.tags], ['开发', 'AI']);
 assert.equal(draft.folderPath, 'Local');
 assert.equal(draft.summary, 'AI summary');
+
+const rejectedNarrowDraft = buildLocalBookmarkSuggestion(
+  { title: 'Notion Forms', url: 'https://notionforms.io/forms/contact', domain: 'notionforms.io' },
+  [{ tag: 'mysql', score: 50, signals: ['domain'] }],
+  null,
+  null,
+  '',
+);
+assert.equal(rejectedNarrowDraft.folderPath, '');
+assert.equal(rejectedNarrowDraft.folderName, '');
 
 const fallbackDraft = buildLocalBookmarkSuggestion(
   { title: 'Fallback', url: 'https://example.test/fallback', domain: 'example.test' },

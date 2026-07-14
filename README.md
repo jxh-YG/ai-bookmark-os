@@ -57,7 +57,7 @@ AI Bookmark OS 是一个 Manifest V3 Chrome 扩展，提供时间线书签管理
 - npm 9+
 - Chrome 114+
 
-## 安装方法
+## 从源码构建（开发者）
 
 ```bash
 npm ci
@@ -69,21 +69,42 @@ npm run preview:check
 
 首次开发时使用 `npm ci` 按 `package-lock.json` 安装确定版本的依赖。依赖发生主动变更时再使用 `npm install` 更新锁文件。
 
-## 使用方法
+## 在 Chrome 中加载扩展
+
+Chrome 114 或更高版本可用。先按以下两种来源之一确定“要选择的文件夹”，再执行共同的 Chrome 加载步骤。
+
+### 方式 A：使用 GitHub Release 扩展包（推荐）
+
+1. 在 [v1.0.0 Release](https://github.com/jxh-YG/ai-bookmark-os/releases/tag/v1.0.0) 下载 `ai-bookmark-os-v1.0.0-chrome-extension.zip`。
+2. 将 ZIP **完整解压**到任意本地文件夹。
+3. 在解压结果中找到直接包含 `manifest.json`、`background/`、`pages/`、`ai/` 和 `icons/` 的文件夹；**这个解压后的根文件夹就是要加载的扩展目录**。
+
+扩展包为了让 Chrome 直接加载，已经把构建产物 `dist/` 的内容放在 ZIP 根目录。因此下载并解压 Release 包后，**不会也不应该再看到一层 `dist/` 文件夹**。不要选择 ZIP 文件本身、`ai/` 或 `pages/` 等子目录，也不要下载或加载 `source.zip`。
+
+### 方式 B：从本仓库源码构建
+
+1. 克隆或下载本仓库源码。
+2. 运行上面的 `npm ci`、`npm run build` 和 `npm run preview:check`。
+3. 构建完成后，选择项目中的 `dist/` 文件夹；该目录直接包含 `dist/manifest.json`。
+
+不要加载项目根目录：根目录中的 `manifest.json` 是开发配置，引用了 `src/` 路径；可运行的打包配置位于 `dist/manifest.json`。
+
+### 共同的 Chrome 加载步骤
 
 1. 打开 Chrome：`chrome://extensions`
 2. 开启“开发者模式”
 3. 点击“加载已解压的扩展程序”
-4. 选择本项目的 `dist/` 目录
+4. 在文件选择器中选择上方方式 A 或方式 B 对应的文件夹
+5. 成功加载后，可在 Chrome 工具栏的扩展菜单中将 **AI Bookmark OS** 固定，点击图标打开时间线书签工作台
 
-注意：请加载 `dist/`，不要加载项目根目录。根目录包含开发源码和中间配置，最终可运行扩展以 `dist/manifest.json` 为准。
+升级 Release 版本时，下载并解压新版扩展包后，在 `chrome://extensions` 中移除旧版本或选择新目录重新加载；从源码开发时，重新构建后可点击扩展卡片上的刷新按钮。
 
 ### 使用入口
 
 - 工具栏图标：打开时间线弹窗
 - 弹窗顶部 AI 按钮或入口横幅：打开 AI 分类侧边栏，并自动关闭弹窗以避免遮挡
-- 启动导航页：`dist/index.html`
-- 完整管理窗口：`dist/pages/standalone/standalone.html` 或扩展内“完整工作台”入口
+- 启动导航页：从源码构建时为 `dist/index.html`；Release 扩展包解压后对应为根目录的 `index.html`
+- 完整管理窗口：从源码构建时为 `dist/pages/standalone/standalone.html`；Release 扩展包解压后对应为 `pages/standalone/standalone.html`，也可从扩展内“完整工作台”入口打开
 - AI 设置：时间线设置页的 AI 区域，或 AI 侧边栏右上角设置入口
 - 快捷键：
   - `Alt+Shift+A`：打开 AI 分类侧边栏
@@ -121,7 +142,7 @@ npm run test:regressions    # 核心业务回归检查
 npm run audit:project       # GitHub 发布前项目与产物审计
 ```
 
-生产构建完成后，加载或分发 `dist/` 目录。GitHub 仓库建议提交源码和依赖锁文件，不提交 `dist/` 与 `node_modules/`；发布 Chrome 扩展安装包时，应单独对 `dist/` 进行压缩。
+生产构建完成后，加载或分发 `dist/` 目录。GitHub 仓库建议提交源码和依赖锁文件，不提交 `dist/` 与 `node_modules/`；发布 Chrome 扩展安装包时，应压缩 **`dist/` 内的内容**，而不是把 `dist/` 文件夹再包一层。这样用户解压 Release ZIP 后即可直接选择解压根目录加载。
 
 开发期间可运行 `npm run dev` 监听 React/TypeScript AI 页面变更。该命令不是完整开发服务器，也不会自动同步原生时间线模块；需要重新生成完整扩展目录时，请执行 `npm run build`。
 
@@ -148,7 +169,8 @@ npm run audit:project       # GitHub 发布前项目与产物审计
 
 ### 加载扩展时报错怎么办？
 
-确认加载的是 `dist/` 目录，并先执行 `npm run build`。不要直接加载项目根目录。
+- 若使用 Release 扩展包：确认选择的是解压后直接含有 `manifest.json` 的根目录，而不是 ZIP、`source.zip` 或某个子目录。
+- 若使用源码：先执行 `npm run build`，再选择项目中的 `dist/`。不要直接加载项目根目录。
 
 ### AI 分类提示“回复中未找到 JSON”怎么办？
 
@@ -170,7 +192,7 @@ npm run audit:project       # GitHub 发布前项目与产物审计
 
 欢迎通过 GitHub Issue 报告缺陷、提出功能建议或补充可复现案例。提交 Pull Request 前请：
 
-1. 从最新 `master` 分支创建独立分支。
+1. 从最新 `main` 分支创建独立分支。
 2. 保持修改范围清晰，不提交 `dist/`、`node_modules/`、API Key 或本地配置。
 3. 运行 `npm run typecheck`、`npm run test:quick-bookmark`、`npm run test:regressions` 和 `npm run build`。
 4. 在 Pull Request 中说明修改目的、影响范围、验证方式；涉及界面时附上截图。

@@ -52,6 +52,20 @@ for (const part of ['background', 'content', 'pages', 'shared', 'rules', 'icons'
   if (existsSync(src)) copyDir(src, path.join(dist, part));
 }
 
+const licenseFiles = [
+  [path.join(root, 'LICENSE'), path.join(dist, 'LICENSE')],
+  [path.join(root, 'THIRD_PARTY_NOTICES.md'), path.join(dist, 'THIRD_PARTY_NOTICES.md')],
+  [path.join(timelineSource, 'LICENSE.markline'), path.join(dist, 'licenses', 'MIT-Markline.txt')],
+  [path.join(root, 'LICENSES', 'Apache-2.0.txt'), path.join(dist, 'licenses', 'Apache-2.0.txt')],
+  [path.join(root, 'LICENSES', 'MIT-React.txt'), path.join(dist, 'licenses', 'MIT-React.txt')],
+  [path.join(root, 'LICENSES', 'ISC-Lucide.txt'), path.join(dist, 'licenses', 'ISC-Lucide.txt')],
+];
+for (const [source, destination] of licenseFiles) {
+  mustExist(source, path.relative(root, source));
+  ensureDir(path.dirname(destination));
+  copyFileSync(source, destination);
+}
+
 // 2) Full AI UI under /ai
 
 // Prefer branded AI Bookmark OS icons over vendor defaults

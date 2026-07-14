@@ -2,6 +2,7 @@
   "name": "ai-bookmark-os",
   "private": true,
   "version": "1.0.0",
+  "license": "MIT",
   "description": "AI-assisted local-first bookmark management and classification for Chrome.",
   "repository": {
     "type": "git",
@@ -21,9 +22,9 @@
     "audit:project": "node scripts/audit-project.mjs"
   },
   "dependencies": {
+    "lucide-react": "^0.468.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "lucide-react": "^0.468.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.280",
@@ -31,6 +32,6 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^6.4.3"
   }
 }

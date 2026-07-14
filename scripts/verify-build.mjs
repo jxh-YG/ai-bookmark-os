@@ -31,6 +31,12 @@ if (!rootOptions.includes('<script src="options.js"></script>') ||
 
 const required = [
   'manifest.json',
+  'LICENSE',
+  'THIRD_PARTY_NOTICES.md',
+  'licenses/MIT-Markline.txt',
+  'licenses/Apache-2.0.txt',
+  'licenses/MIT-React.txt',
+  'licenses/ISC-Lucide.txt',
   'background/background.js',
   'background/ai-sw-bridge.js',
   'pages/popup/popup.html',

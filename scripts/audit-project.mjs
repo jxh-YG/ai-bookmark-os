@@ -31,8 +31,16 @@ function mustInclude(path, needles) {
 
 const requiredFiles = [
   'README.md',
+  'LICENSE',
+  'THIRD_PARTY_NOTICES.md',
   'docs/UI_APPLE_OS.md',
   'dist/manifest.json',
+  'dist/LICENSE',
+  'dist/THIRD_PARTY_NOTICES.md',
+  'dist/licenses/MIT-Markline.txt',
+  'dist/licenses/Apache-2.0.txt',
+  'dist/licenses/MIT-React.txt',
+  'dist/licenses/ISC-Lucide.txt',
   'dist/pages/popup/popup.html',
   'dist/pages/settings/settings.html',
   'dist/pages/standalone/standalone.html',
@@ -65,11 +73,15 @@ mustInclude('README.md', [
   '构建与部署',
   '截图与演示',
   '贡献指南',
+  '致谢',
   '许可证',
   '常见问题',
   '仓库整理',
   '请加载 `dist/`',
 ]);
+
+mustInclude('LICENSE', ['MIT License', 'Copyright (c) 2026 jxh-YG']);
+mustInclude('THIRD_PARTY_NOTICES.md', ['https://github.com/jdf12/Markline', 'Mozilla Readability', 'Cytoscape.js', 'Apache License 2.0']);
 
 mustInclude('docs/UI_APPLE_OS.md', ['设计原则', '统一设计变量', '组件规范', '书签导航页', '响应式与可用性']);
 

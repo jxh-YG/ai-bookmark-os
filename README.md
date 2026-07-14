@@ -175,8 +175,12 @@ npm run audit:project       # GitHub 发布前项目与产物审计
 3. 运行 `npm run typecheck`、`npm run test:quick-bookmark`、`npm run test:regressions` 和 `npm run build`。
 4. 在 Pull Request 中说明修改目的、影响范围、验证方式；涉及界面时附上截图。
 
+## 致谢
+
+AI Bookmark OS 的时间线书签管理基础和部分运行时模块参照 [Markline](https://github.com/jdf12/Markline) 改造而来。感谢 [jdf12](https://github.com/jdf12) 及 Markline 项目提供的开源实现与设计思路。Markline 基于 MIT License 发布，其原始许可声明已保留在 [`src/timeline/LICENSE.markline`](src/timeline/LICENSE.markline)。
+
 ## 许可证
 
-当前项目尚未选择正式开源许可证，`LICENSE` 文件待补充。在许可证明确前，项目源代码默认保留全部权利；公开访问仓库不代表自动授予复制、修改或再分发许可。
+AI Bookmark OS 基于 [MIT License](LICENSE) 开源。你可以自由使用、复制、修改、合并、发布和分发本项目，但需要保留原始版权与许可声明。
 
-项目中继承的 Markline 代码保留其原始许可说明，见 [`src/timeline/LICENSE.markline`](src/timeline/LICENSE.markline)。其他第三方库的版权与许可仍归各自权利人所有。
+项目中继承的 Markline、Mozilla Readability、Cytoscape.js 及其他依赖保留各自许可，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

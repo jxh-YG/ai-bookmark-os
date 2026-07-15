@@ -31,12 +31,24 @@ function normalizeText(value) {
   return String(value ?? '').trim().replace(/\s+/g, ' ');
 }
 
-function contentContextV2Key(bookmark, respectExistingFolders = true) {
+function contentContextV3Key(bookmark, settings) {
+  const includeFolderPath = settings.respectExistingFolders !== false;
+  const folderRulesVersion = `${includeFolderPath ? 'folders-v2' : 'folders-off'}:${settings.useBuiltInClassificationRules !== false ? 'builtin-v1' : 'builtin-off'}`;
+  const promptVersion = hashUrl(JSON.stringify({
+    label: settings.classifyPrompts?.label ?? '',
+    provider: settings.provider ?? '',
+    baseUrl: settings.baseUrl ?? '',
+    model: settings.model ?? '',
+    customApiStyle: settings.customApiStyle ?? '',
+    customFullUrl: !!settings.customFullUrl,
+  }));
   const signature = [
-    'content-context-v2',
+    'content-context-v3',
     normalizeUrl(bookmark.url),
     normalizeText(bookmark.title),
-    respectExistingFolders ? normalizeText(bookmark.folderPath) : '',
+    includeFolderPath ? normalizeText(bookmark.folderPath) : '',
+    folderRulesVersion,
+    promptVersion,
   ];
   return hashUrl(JSON.stringify(signature));
 }
@@ -80,6 +92,7 @@ const baseSettings = {
   useClassificationCache: true,
   usePageMetadata: false,
   useBuiltInClassificationRules: false,
+  classifyPrompts: { label: 'test label prompt', buildTree: '', assign: '' },
   aiRetryCount: 0,
   aiRequestTimeoutSeconds: 5,
 };
@@ -94,7 +107,7 @@ const bookmark = {
 async function testEstimateUsesContentContextV2() {
   const storage = createStorage({
     labelCache: {
-      [contentContextV2Key(bookmark)]: { summary: 'React hooks', tags: ['frontend'] },
+      [contentContextV3Key(bookmark, baseSettings)]: { summary: 'React hooks', tags: ['frontend'] },
     },
   });
   globalThis.chrome = { storage: { local: storage.local } };
@@ -107,13 +120,15 @@ async function testEstimateUsesContentContextV2() {
   assert.equal(renamed.cached, 0, '标题变化后不得复用旧标签');
 
   const moved = await estimateClassify([{ ...bookmark, folderPath: 'Bookmarks Bar/Work/React' }], baseSettings);
+  const modelChanged = await estimateClassify([bookmark], { ...baseSettings, model: 'next-model' });
+  assert.equal(modelChanged.cached, 0, '模型配置变化后不得复用旧标签');
   assert.equal(moved.cached, 0, '尊重原目录时，目录变化后不得复用旧标签');
 }
 
 async function testEstimateIgnoresFolderWhenDisabledAndMissesV1() {
   const storage = createStorage({
     labelCache: {
-      [contentContextV2Key(bookmark, false)]: { summary: 'React hooks', tags: ['frontend'] },
+      [contentContextV3Key(bookmark, { ...baseSettings, respectExistingFolders: false })]: { summary: 'React hooks', tags: ['frontend'] },
     },
   });
   globalThis.chrome = { storage: { local: storage.local } };
@@ -135,7 +150,7 @@ async function testEstimateIgnoresFolderWhenDisabledAndMissesV1() {
 async function testLabelingUsesTheSameSignatureAsEstimate() {
   const storage = createStorage({
     labelCache: {
-      [contentContextV2Key(bookmark)]: { summary: 'React hooks', tags: ['frontend'] },
+      [contentContextV3Key(bookmark, baseSettings)]: { summary: 'React hooks', tags: ['frontend'] },
     },
   });
   globalThis.chrome = {

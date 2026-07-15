@@ -309,9 +309,27 @@ function scheduleResultsRender() {
   }, 100);
 }
 
+async function requestCheckerPermission() {
+  const origins = ['<all_urls>'];
+  try {
+    if (await chrome.permissions.contains({ origins })) return true;
+
+    const approved = confirm('链接健康检查需要按需访问您主动检查的站点（所有网址）以读取 HTTP 状态。请求默认不会携带登录态或发送页面摘要。是否授予站点访问权限？');
+    if (!approved) return false;
+
+    return await chrome.permissions.request({ origins });
+  } catch (err) {
+    return false;
+  }
+}
+
 // ===== 开始检测 =====
 async function startCheck() {
   if (isChecking) return;
+  if (!await requestCheckerPermission()) {
+    showToast('未获得站点访问权限，可在下次开始检测时重试。', 'info');
+    return;
+  }
 
   const runId = activeRunId += 1;
   isChecking = true;

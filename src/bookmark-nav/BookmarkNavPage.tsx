@@ -22,7 +22,7 @@ import { hashUrl } from '../core/cache';
 import type { ClassifyResult, FlatBookmark } from '../types';
 import { BookmarkCard } from './BookmarkCard';
 import { getTagColor } from './tagColor';
-import { openOrFocusExtensionPage } from '../core/pageRouter';
+import { openAiClassificationPanel, openOrFocusExtensionPage } from '../core/pageRouter';
 
 type LoadStatus = 'loading' | 'ready' | 'empty' | 'error';
 type LabelLike = { summary?: string; tags?: string[] };
@@ -529,7 +529,7 @@ export function BookmarkNavPage() {
         <div className="bookmark-nav-header-actions">
           <nav className="bookmark-page-nav" aria-label="AI Bookmark OS">
             <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/standalone/standalone.html')}>工作台</button>
-            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('ai/sidepanel.html')}>AI 分类</button>
+            <button type="button" className="bookmark-page-nav__btn" onClick={() => void openAiClassificationPanel()}>AI 分类</button>
             <button type="button" className="bookmark-page-nav__btn is-active" aria-current="page">书签导航</button>
             <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/checker/checker.html')}>失效检查</button>
             <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/graph/graph.html')}>图谱</button>

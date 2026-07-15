@@ -269,11 +269,21 @@ const launchHtml = `<!doctype html>
     <a class="primary" href="pages/standalone/standalone.html">打开统一工作台</a>
     <div class="secondary">
       <a href="ai/bookmark-nav.html">书签导航</a>
-      <a href="ai/sidepanel.html">AI 金字塔分类</a>
+      <a id="launchAiClassifyBtn" href="ai/sidepanel.html">AI 金字塔分类</a>
       <a href="pages/settings/settings.html#ai">统一设置</a>
     </div>
     <p class="note">失效检测、知识图谱、RSS、统计和最近删除均可从统一工作台或弹窗菜单进入。快捷键：Alt+Shift+D 快速收藏 · Alt+Shift+B 打开弹窗 · Alt+Shift+A 打开 AI 分类侧边栏。</p>
   </main>
+  <script src="shared/page-router.js"></script>
+  <script>
+    document.getElementById('launchAiClassifyBtn')?.addEventListener('click', (event) => {
+      event.preventDefault();
+      const router = window.AIBookmarkPageRouter;
+      void (router?.openAiClassificationPanel?.()
+        ?? router?.openOrFocusExtensionPage('ai/sidepanel.html')
+        ?? chrome.tabs.create({ url: chrome.runtime.getURL('ai/sidepanel.html') }));
+    });
+  </script>
 </body>
 </html>`;
 writeFileSync(path.join(dist, 'index.html'), launchHtml, 'utf8');

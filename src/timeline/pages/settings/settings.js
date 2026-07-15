@@ -1928,33 +1928,15 @@ function toggleTreeCustomFields() {
 async function openAiTreeClassifyPanel() {
   const panelPath = 'ai/sidepanel.html';
   try {
-    if (chrome.sidePanel?.setOptions) {
-      await chrome.sidePanel.setOptions({ path: panelPath, enabled: true });
-    }
-    const win = chrome.windows?.getCurrent ? await chrome.windows.getCurrent() : null;
-    if (chrome.sidePanel?.open && win?.id != null) {
-      await chrome.sidePanel.open({ windowId: win.id });
+    const router = window.AIBookmarkPageRouter;
+    const opened = router?.openAiClassificationPanel
+      ? await router.openAiClassificationPanel()
+      : (await openExtensionPage(panelPath), 'tab');
+    if (opened === 'side-panel') {
       showToast('已打开 AI 分类侧栏', 'success');
-      return;
+    } else {
+      showToast('已在新标签页打开 AI 分类', 'success');
     }
-  } catch (err) {
-    console.warn('settings sidePanel open failed', err);
-  }
-
-  try {
-    const res = await chrome.runtime.sendMessage({ type: 'openSidePanel', action: 'openAiSidePanel' });
-    if (res?.ok) {
-      showToast('已打开 AI 分类侧栏', 'success');
-      return;
-    }
-    if (res?.error) console.warn('bridge openSidePanel failed', res.error);
-  } catch (err) {
-    console.warn('bridge openSidePanel failed', err);
-  }
-
-  try {
-    await openExtensionPage(panelPath);
-    showToast('已在新标签页打开 AI 分类', 'success');
   } catch (err) {
     console.warn('AI classify page open failed', err);
     showToast('打开 AI 分类页面失败', 'error');

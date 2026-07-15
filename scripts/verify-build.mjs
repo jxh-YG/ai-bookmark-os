@@ -127,6 +127,12 @@ if (!launch.includes('打开统一工作台') || !launch.includes('AI 金字塔�
 } else {
   console.log('OK consolidated launcher entries');
 }
+if (!launch.includes('launchAiClassifyBtn') || !launch.includes('shared/page-router.js') || !launch.includes('openAiClassificationPanel')) {
+  console.error('launcher AI classify entry should use the shared side panel opener');
+  ok = false;
+} else {
+  console.log('OK launcher AI side panel entry');
+}
 
 const standaloneHtml = readFileSync(join(dist, 'pages/standalone/standalone.html'), 'utf8');
 const standaloneJs = readFileSync(join(dist, 'pages/standalone/standalone.js'), 'utf8');
@@ -246,17 +252,20 @@ if (!popupJs.includes('openAiClassifyPanel') || !popup.includes('aiClassifyBtn')
 
 // AI classify opens Chrome side panel; popup should close to avoid overlap
 const popupJsFull = readFileSync(join(dist, 'pages/popup/popup.js'), 'utf8');
-if (!popupJsFull.includes('AIBookmarkPageRouter')) {
+const sharedPageRouter = readFileSync(join(dist, 'shared/page-router.js'), 'utf8');
+if (!popupJsFull.includes('AIBookmarkPageRouter') || !popupJsFull.includes('openAiClassificationPanel')) {
   console.error('popup feature entries should reuse existing extension tabs');
   ok = false;
 } else {
   console.log('OK popup feature tab reuse');
 }
-if (!popupJsFull.includes('sidePanel.open') || !popupJsFull.includes("path: 'ai/sidepanel.html'")) {
-  console.error('AI classify should open side panel with ai/sidepanel.html');
+if (!sharedPageRouter.includes('function openAiClassificationPanel')
+  || !sharedPageRouter.includes('sidePanel?.open')
+  || !sharedPageRouter.includes('response?.ok')) {
+  console.error('shared AI classify opener should use side panel and verify bridge responses');
   ok = false;
 } else {
-  console.log('OK side panel AI entry');
+  console.log('OK shared side panel AI entry');
 }
 if (!popupJsFull.includes('window.close()')) {
   console.error('popup should close after opening AI side panel');
@@ -283,11 +292,11 @@ if (!settingsHtml.includes('shared/page-router.js') || !settingsJs.includes('AIB
 if (!settingsHtml.includes('aiTreeOpenSidepanelBtn') || !settingsJs.includes('openAiTreeClassifyPanel')) {
   console.error('settings AI tree side panel entry missing');
   ok = false;
-} else if (!settingsJs.includes('sidePanel.open') || !settingsJs.includes("const panelPath = 'ai/sidepanel.html'")) {
-  console.error('settings AI tree entry should open side panel directly');
+} else if (!settingsJs.includes('openAiClassificationPanel')) {
+  console.error('settings AI tree entry should use the shared side panel opener');
   ok = false;
 } else {
-  console.log('OK settings AI tree side panel entry');
+  console.log('OK settings shared AI tree side panel entry');
 }
 for (const autosaveHook of [
   'treeProviderSelect.addEventListener',

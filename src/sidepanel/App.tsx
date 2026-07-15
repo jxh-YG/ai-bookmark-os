@@ -91,7 +91,7 @@ type PendingReuse = {
   plan: ClassifyResult;
   report: PlanCompatibilityReport;
   planVersionId: string;
-  versionCreatedAt: number;
+  versionArchivedAt: number;
 };
 type CompatibilityIssue = {
   planVersionId: string;
@@ -822,7 +822,7 @@ export function App() {
         plan: fork,
         report,
         planVersionId,
-        versionCreatedAt: selectedHistoricalVersion?.createdAt ?? plan.updatedAt ?? plan.createdAt,
+        versionArchivedAt: selectedHistoricalVersion?.archivedAt ?? plan.updatedAt ?? plan.createdAt,
       });
       setNotice('兼容性检查通过，已创建新的当前草稿副本。');
       setShowApplyModal(true);
@@ -1005,16 +1005,9 @@ export function App() {
     try {
       await saveClassifyResult(next);
       const status = await resolveDraftStatus(next);
-      const updatedDrafts = draftsRef.current.map((draft) => (
-        draft.storageKey === storageKey ? { ...draft, result: next } : draft
-      ));
-      const nextDrafts = updatedDrafts.some((draft) => draft.storageKey === storageKey)
-        ? updatedDrafts
-        : [...updatedDrafts, { storageKey, result: next }];
+      await refreshDraftList();
       resultRef.current = next;
-      draftsRef.current = nextDrafts;
       setResult(next);
-      setDrafts(nextDrafts);
       setDraftStatuses((previous) => ({ ...previous, [storageKey]: status }));
       if (activeDraftKeyRef.current === storageKey) setDraftStatus(status);
     } catch (e) {
@@ -1023,7 +1016,7 @@ export function App() {
       draftSaveLockRef.current = false;
       setSavingDraft(false);
     }
-  }, [resolveDraftStatus]);
+  }, [refreshDraftList, resolveDraftStatus]);
 
   /** 树编辑：更新 state 并持久化 */
   const updateTree = useCallback((mutate: (tree: CategoryNode[]) => CategoryNode[]) => {
@@ -1331,7 +1324,7 @@ export function App() {
                   <optgroup label="历史版本">
                     {historicalVersions.map((version) => (
                       <option key={version.versionId} value={`history:${version.versionId}`}>
-                        {classificationScopeLabel(version.scope)} · {new Date(version.createdAt).toLocaleString()} · {historyVersionOriginLabel(version)} · {version.application ? '已应用' : '兼容后可应用'}
+                        {classificationScopeLabel(version.scope)} · 归档时间 {new Date(version.archivedAt).toLocaleString()} · {historyVersionOriginLabel(version)} · {version.application ? '已应用' : '兼容后可应用'}
                       </option>
                     ))}
                   </optgroup>
@@ -1559,7 +1552,7 @@ export function App() {
                     ? partialText.applyDescription(modalResult.scope.targetDirectoryTitle)
                     : d.applyModalDesc}
                   <ul>
-                    {pendingReuse && <li>版本时间：{new Date(pendingReuse.versionCreatedAt).toLocaleString()}</li>}
+                    {pendingReuse && <li>版本归档时间：{new Date(pendingReuse.versionArchivedAt).toLocaleString()}</li>}
                     {pendingReuse && <li>方案范围：{classificationScopeLabel(pendingReuse.report.scope)}</li>}
                     <li>{d.applyFolders(applyPlan.folderCount)}</li>
                     <li>{d.applyMoves(applyPlan.moveCount)}</li>

@@ -35,3 +35,34 @@ export async function openOrFocusExtensionPage(path: string) {
 
   await chrome.tabs.create({ url: targetUrl });
 }
+
+/** Opens the AI classifier consistently from React extension pages. */
+export async function openAiClassificationPanel(): Promise<'side-panel' | 'tab'> {
+  const panelPath = 'ai/sidepanel.html';
+
+  try {
+    if (chrome.sidePanel?.setOptions) {
+      await chrome.sidePanel.setOptions({ path: panelPath, enabled: true });
+    }
+    const currentWindow = chrome.windows?.getCurrent
+      ? await chrome.windows.getCurrent()
+      : null;
+    if (chrome.sidePanel?.open && currentWindow?.id != null) {
+      await chrome.sidePanel.open({ windowId: currentWindow.id });
+      return 'side-panel';
+    }
+  } catch (error) {
+    console.warn('AI side panel open failed; trying the background bridge.', error);
+  }
+
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'openSidePanel', action: 'openAiSidePanel' });
+    if (response?.ok) return 'side-panel';
+    if (response?.error) console.warn('AI side panel bridge failed.', response.error);
+  } catch (error) {
+    console.warn('AI side panel bridge failed.', error);
+  }
+
+  await openOrFocusExtensionPage(panelPath);
+  return 'tab';
+}

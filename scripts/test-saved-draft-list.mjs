@@ -13,13 +13,13 @@ async function importTypeScript(entry) {
 }
 
 const storage = {
-  classifyResult: { tree: [], labels: {}, createdAt: 10, draftId: 'full' },
+  classifyResult: { tree: [], labels: {}, createdAt: 10, updatedAt: 40, draftId: 'full' },
   'partialClassifyResult:work': {
-    tree: [], labels: {}, createdAt: 30, draftId: 'work',
+    tree: [], labels: {}, createdAt: 30, updatedAt: 80, draftId: 'work',
     scope: { mode: 'partial', targetDirectoryId: 'work', targetDirectoryTitle: '工作', bookmarkCount: 2 },
   },
   'partialClassifyResult:study': {
-    tree: [], labels: {}, createdAt: 20, draftId: 'study',
+    tree: [], labels: {}, createdAt: 50, draftId: 'study',
     scope: { mode: 'partial', targetDirectoryId: 'study', targetDirectoryTitle: '学习', bookmarkCount: 1 },
   },
   'partialClassifyResult:broken': { invalid: true },
@@ -43,9 +43,9 @@ const drafts = await listSavedClassifyResults();
 assert.deepEqual(
   drafts.map((item) => [item.storageKey, item.result.draftId]),
   [
-    ['classifyResult', 'full'],
     ['partialClassifyResult:work', 'work'],
     ['partialClassifyResult:study', 'study'],
+    ['classifyResult', 'full'],
   ],
 );
 

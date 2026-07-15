@@ -810,6 +810,12 @@ function isSavedClassifyResult(value: unknown): value is ClassifyResult {
     && typeof candidate.createdAt === 'number';
 }
 
+function savedDraftTimestamp(result: ClassifyResult): number {
+  return typeof result.updatedAt === 'number' && Number.isFinite(result.updatedAt)
+    ? result.updatedAt
+    : result.createdAt;
+}
+
 /** 列出全量草稿与仍在存储上限内的局部草稿，供工作区切换。 */
 export async function listSavedClassifyResults(): Promise<SavedClassifyResult[]> {
   const data = await chrome.storage.local.get(null);
@@ -822,9 +828,11 @@ export async function listSavedClassifyResults(): Promise<SavedClassifyResult[]>
     .filter(([key, value]) => key.startsWith(PARTIAL_RESULT_STORAGE_PREFIX)
       && isSavedClassifyResult(value)
       && value.scope?.mode === 'partial')
-    .map(([storageKey, result]) => ({ storageKey, result: result as ClassifyResult }))
-    .sort((left, right) => right.result.createdAt - left.result.createdAt);
-  return [...results, ...partialResults];
+    .map(([storageKey, result]) => ({ storageKey, result: result as ClassifyResult }));
+  return [...results, ...partialResults].sort((left, right) => (
+    savedDraftTimestamp(right.result) - savedDraftTimestamp(left.result)
+    || left.storageKey.localeCompare(right.storageKey)
+  ));
 }
 
 export interface ClassifyEstimate {

@@ -168,6 +168,12 @@ async function testArchiveDeduplicatesAndKeepsTheTenNewestVersions() {
   const versions = await listClassificationPlanVersions();
   assert.equal(versions.length, 10);
   assert.equal(versions[0].versionId, 'draft-5', '重复归档应更新为最新归档版本');
+  for (let index = 1; index < versions.length; index += 1) {
+    assert.ok(
+      versions[index - 1].archivedAt >= versions[index].archivedAt,
+      '历史版本必须按归档时间倒序排列',
+    );
+  }
   assert.equal(versions.some((version) => version.versionId === 'draft-0'), false, '最旧版本应被淘汰');
   assert.equal(versions.some((version) => version.versionId === 'draft-1'), true);
   assert.equal(versions.find((version) => version.versionId === 'draft-5')?.updatedAt, 99);

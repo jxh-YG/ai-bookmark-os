@@ -19,6 +19,13 @@ assert.match(app, /基于当前书签重新分类/, '不兼容方案必须提供
 assert.match(app, /planVersionId:\s*appliedPlanVersionId/, '变更记录必须关联实际应用的方案版本');
 assert.match(app, /classificationPlanArchive/, '工作区必须监听历史版本存储变化');
 
+const historySelectorStart = app.indexOf('<optgroup label="历史版本">');
+const historySelectorEnd = app.indexOf('</optgroup>', historySelectorStart);
+assert.ok(historySelectorStart >= 0 && historySelectorEnd > historySelectorStart, '必须能定位历史版本选择器');
+const historySelector = app.slice(historySelectorStart, historySelectorEnd);
+assert.match(historySelector, /归档时间 \{new Date\(version\.archivedAt\)/, '历史版本必须按归档时间展示');
+assert.doesNotMatch(historySelector, /version\.createdAt/, '历史版本选择器不得显示与排序不一致的创建时间');
+
 const runClassifyStart = app.indexOf('const runClassify = useCallback');
 const runClassifyEnd = app.indexOf('/** 点击分类：先出成本预估确认 */', runClassifyStart);
 assert.ok(runClassifyStart >= 0 && runClassifyEnd > runClassifyStart, '必须能定位重新分类流程');

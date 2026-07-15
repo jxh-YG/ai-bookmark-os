@@ -46,17 +46,10 @@ function openExtensionPage(path) {
 }
 
 async function openAiClassifyPanel() {
-  try {
-    if (chrome.sidePanel?.setOptions) {
-      await chrome.sidePanel.setOptions({ path: 'ai/sidepanel.html', enabled: true });
-    }
-    const win = await chrome.windows.getCurrent();
-    if (chrome.sidePanel?.open && win?.id != null) {
-      await chrome.sidePanel.open({ windowId: win.id });
-      return;
-    }
-  } catch (err) {
-    console.warn('sidePanel open failed, fallback', err);
+  const router = window.AIBookmarkPageRouter;
+  if (router?.openAiClassificationPanel) {
+    await router.openAiClassificationPanel();
+    return;
   }
   await openExtensionPage('ai/sidepanel.html');
 }

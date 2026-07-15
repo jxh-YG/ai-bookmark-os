@@ -2476,21 +2476,8 @@ async function startApp() {
 
 // AI Bookmark OS entry
 (function bindAiClassifyEntry() {
-  async function openAi() {
-    try {
-      if (chrome.sidePanel && chrome.sidePanel.setOptions) {
-        await chrome.sidePanel.setOptions({ path: 'ai/sidepanel.html', enabled: true });
-      }
-      const win = await chrome.windows.getCurrent();
-      if (chrome.sidePanel && chrome.sidePanel.open && win && win.id != null) {
-        await openAiClassifyPanel();
-        return;
-      }
-    } catch (e) {}
-    openAiClassifyPanel();
-  }
   const btn = document.getElementById('saAiClassifyBtn');
-  if (btn) btn.addEventListener("click", openAi);
+  if (btn) btn.addEventListener("click", () => { void openAiClassifyPanel(); });
 })();
 
 (function bindWorkspaceEntries() {
@@ -2508,25 +2495,12 @@ async function startApp() {
 
 
 async function openAiClassifyPanel() {
-  try {
-    if (chrome.sidePanel && chrome.sidePanel.setOptions) {
-      await chrome.sidePanel.setOptions({ path: 'ai/sidepanel.html', enabled: true });
-    }
-    const win = await chrome.windows.getCurrent();
-    if (chrome.sidePanel && chrome.sidePanel.open && win && win.id != null) {
-      await chrome.sidePanel.open({ windowId: win.id });
-      return;
-    }
-  } catch (err) {
-    console.warn('sidePanel open failed, fallback', err);
-  }
-  try {
-    await chrome.runtime.sendMessage({ type: 'openSidePanel', action: 'openAiSidePanel' });
+  const router = window.AIBookmarkPageRouter;
+  if (router?.openAiClassificationPanel) {
+    await router.openAiClassificationPanel();
     return;
-  } catch (err) {
-    console.warn('bridge openSidePanel failed', err);
   }
-  await (window.AIBookmarkPageRouter?.openOrFocusExtensionPage('ai/sidepanel.html')
+  await (router?.openOrFocusExtensionPage('ai/sidepanel.html')
     ?? chrome.tabs.create({ url: chrome.runtime.getURL('ai/sidepanel.html') }));
 }
 

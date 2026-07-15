@@ -238,18 +238,20 @@
     chrome.commands.onCommand.addListener((command) => {
       if (command === 'open-ai-sidepanel') {
         chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+          const openFallback = () => chrome.tabs.create({ url: chrome.runtime.getURL('ai/sidepanel.html') });
           const open = () => {
             if (tab && tab.windowId != null && chrome.sidePanel && chrome.sidePanel.open) {
-              chrome.sidePanel.open({ windowId: tab.windowId });
+              return chrome.sidePanel.open({ windowId: tab.windowId }).catch(openFallback);
             }
+            return openFallback();
           };
           if (chrome.sidePanel && chrome.sidePanel.setOptions) {
             chrome.sidePanel
               .setOptions({ path: 'ai/sidepanel.html', enabled: true })
-              .then(open)
-              .catch(open);
+              .catch(() => undefined)
+              .then(open);
           } else {
-            open();
+            void open();
           }
         });
       }

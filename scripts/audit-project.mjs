@@ -155,7 +155,13 @@ if (['失败重连次数', '请求超时', 'aiRetryCount', 'aiRequestTimeoutSeco
 }
 
 const popupJs = text('dist/pages/popup/popup.js');
-if (!popupJs.includes('openAiClassifyPanel') || !popupJs.includes('sidePanel.open') || !popupJs.includes('window.close()')) {
+const sharedPageRouter = text('dist/shared/page-router.js');
+if (!popupJs.includes('openAiClassifyPanel')
+  || !popupJs.includes('openAiClassificationPanel')
+  || !popupJs.includes('window.close()')
+  || !sharedPageRouter.includes('function openAiClassificationPanel')
+  || !sharedPageRouter.includes('sidePanel?.open')
+  || !sharedPageRouter.includes('response?.ok')) {
   fail('popup AI side panel handoff incomplete');
 } else {
   pass('popup AI side panel handoff');

@@ -2400,32 +2400,12 @@ try {
 
 // ===== AI Bookmark OS: open AI classify side panel =====
 async function openAiClassifyPanel() {
-  // Open AI classify in the browser side panel of the current window,
-  // then close this popup so the two UIs do not overlap.
-  try {
-    if (chrome.sidePanel && chrome.sidePanel.setOptions) {
-      await chrome.sidePanel.setOptions({ path: 'ai/sidepanel.html', enabled: true });
-    }
-    const win = await chrome.windows.getCurrent();
-    if (chrome.sidePanel && chrome.sidePanel.open && win && win.id != null) {
-      await chrome.sidePanel.open({ windowId: win.id });
-      // Popup must close after side panel opens to avoid stacked layers.
-      try { window.close(); } catch (_) {}
-      return;
-    }
-  } catch (err) {
-    console.warn('sidePanel open failed, fallback', err);
+  const router = window.AIBookmarkPageRouter;
+  if (router?.openAiClassificationPanel) {
+    await router.openAiClassificationPanel();
+  } else {
+    await openExtensionPage('ai/sidepanel.html');
   }
-  // Fallback: ask background to open side panel, then close popup.
-  try {
-    await chrome.runtime.sendMessage({ type: 'openSidePanel', action: 'openAiSidePanel' });
-    try { window.close(); } catch (_) {}
-    return;
-  } catch (err) {
-    console.warn('bridge openSidePanel failed', err);
-  }
-  // Last resort: open as extension page tab (not a small popup embed).
-  await openExtensionPage('ai/sidepanel.html', { closePopup: true });
   try { window.close(); } catch (_) {}
 }
 

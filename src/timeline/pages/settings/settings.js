@@ -1829,6 +1829,7 @@ const DEFAULT_TREE_SETTINGS = {
   reusePreviousAiTree: false,
   useClassificationCache: true,
   usePageMetadata: true,
+  incrementalClassificationEnabled: false,
   useBuiltInClassificationRules: true,
   aiRetryCount: 5,
   aiRequestTimeoutSeconds: 90,
@@ -1861,6 +1862,7 @@ const treeReusePreviousToggle = document.getElementById('treeReusePreviousToggle
 const treeBuiltInRulesToggle = document.getElementById('treeBuiltInRulesToggle');
 const treeCacheToggle = document.getElementById('treeCacheToggle');
 const treeMetadataToggle = document.getElementById('treeMetadataToggle');
+const treeIncrementalToggle = document.getElementById('treeIncrementalToggle');
 const treeRetryCountInput = document.getElementById('treeRetryCountInput');
 const treeRequestTimeoutInput = document.getElementById('treeRequestTimeoutInput');
 
@@ -2100,6 +2102,7 @@ function readTreeSettingsFromUI(prev) {
     useBuiltInClassificationRules: treeBuiltInRulesToggle ? !!treeBuiltInRulesToggle.checked : true,
     useClassificationCache: treeCacheToggle ? !!treeCacheToggle.checked : true,
     usePageMetadata: treeMetadataToggle ? !!treeMetadataToggle.checked : true,
+    incrementalClassificationEnabled: treeIncrementalToggle ? !!treeIncrementalToggle.checked : false,
     aiRetryCount: clampTreeNumber(treeRetryCountInput && treeRetryCountInput.value, DEFAULT_TREE_SETTINGS.aiRetryCount, 0, 20),
     aiRequestTimeoutSeconds: clampTreeNumber(treeRequestTimeoutInput && treeRequestTimeoutInput.value, DEFAULT_TREE_SETTINGS.aiRequestTimeoutSeconds, 5, 600),
   };
@@ -2158,6 +2161,7 @@ async function loadTreeSettings() {
     if (treeBuiltInRulesToggle) treeBuiltInRulesToggle.checked = s.useBuiltInClassificationRules !== false;
     if (treeCacheToggle) treeCacheToggle.checked = s.useClassificationCache !== false;
     if (treeMetadataToggle) treeMetadataToggle.checked = s.usePageMetadata !== false;
+    if (treeIncrementalToggle) treeIncrementalToggle.checked = s.incrementalClassificationEnabled === true;
     if (treeRetryCountInput) treeRetryCountInput.value = String(clampTreeNumber(s.aiRetryCount, DEFAULT_TREE_SETTINGS.aiRetryCount, 0, 20));
     if (treeRequestTimeoutInput) treeRequestTimeoutInput.value = String(clampTreeNumber(s.aiRequestTimeoutSeconds, DEFAULT_TREE_SETTINGS.aiRequestTimeoutSeconds, 5, 600));
 
@@ -2441,6 +2445,9 @@ function bindTreeSettings() {
   }
   if (treeMetadataToggle) {
     treeMetadataToggle.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
+  }
+  if (treeIncrementalToggle) {
+    treeIncrementalToggle.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
   }
   if (treeRetryCountInput) {
     treeRetryCountInput.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });

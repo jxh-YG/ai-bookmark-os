@@ -13,6 +13,7 @@ import type {
 } from '../types';
 import {
   classify,
+  classifyIncremental,
   estimateClassify,
   expandDuplicateBookmarks,
   loadSavedResult,
@@ -74,6 +75,11 @@ import {
   getClassificationPlanVersionId,
   listClassificationPlanVersions,
 } from '../core/classificationPlanArchive';
+import {
+  completeIncrementalQueue,
+  loadIncrementalQueue,
+  markIncrementalQueueFailed,
+} from '../core/incrementalQueue';
 
 /** 应用外观设置到根元素 CSS 变量 + 颜色模式 */
 function applyAppearance(s: Settings) {
@@ -253,6 +259,7 @@ export function App() {
   const draftsRef = useRef<SavedClassifyResult[]>([]);
   const draftStatusRequestRef = useRef(0);
   const draftSaveLockRef = useRef(false);
+  const incrementalRunRef = useRef(false);
   const d = t(uiSettings.language);
   const partialText = resolveLang(uiSettings.language) === 'zh'
     ? {
@@ -529,12 +536,79 @@ export function App() {
     activeDraftKeyRef.current = activeDraftKey;
   }, [activeDraftKey, result]);
 
+  useEffect(() => {
+    if (!result || result.scope?.mode === 'partial' || !uiSettings.incrementalClassificationEnabled || !uiSettings.apiKey || incrementalRunRef.current) return;
+    let disposed = false;
+    const runIncremental = async () => {
+      const queue = await loadIncrementalQueue();
+      if (!queue.length || disposed || !acquireClassificationLock()) return;
+      incrementalRunRef.current = true;
+      const ids = queue.map((entry) => entry.id);
+      try {
+        const beforeSnapshot = await captureBookmarkSnapshot(FULL_CLASSIFICATION_SCOPE);
+        const allBookmarks = await getFlatBookmarks();
+        const byId = new Map(allBookmarks.map((bookmark) => [bookmark.id, bookmark]));
+        const pending = ids.map((id) => byId.get(id)).filter((bookmark): bookmark is FlatBookmark => !!bookmark);
+        const missingIds = ids.filter((id) => !byId.has(id));
+        if (missingIds.length) await completeIncrementalQueue(missingIds);
+        if (!pending.length) return;
+
+        const controller = new AbortController();
+        const incremental = await classifyIncremental(uiSettings, pending, result, setProgress, controller.signal, { persist: false });
+        const afterSnapshot = await captureBookmarkSnapshot(FULL_CLASSIFICATION_SCOPE);
+        if (beforeSnapshot.fingerprint !== afterSnapshot.fingerprint) {
+          throw new Error('bookmarks_changed_during_incremental_classification');
+        }
+        if (disposed) return;
+        await archiveClassificationPlan(result);
+        const next: ClassifyResult = {
+          ...incremental,
+          draftId: newDraftId(),
+          updatedAt: Date.now(),
+          source: sourceFromSnapshot(beforeSnapshot),
+          application: undefined,
+        };
+        await saveClassifyResult(next);
+        await completeIncrementalQueue(pending.map((bookmark) => bookmark.id));
+        resultRef.current = next;
+        setResult(next);
+        setNotice(`已增量归类 ${pending.length} 条新增书签，等待你审核后应用。`);
+        const draftsAfterIncrement = await refreshDraftList();
+        await refreshDraftStatuses(draftsAfterIncrement, afterSnapshot);
+      } catch (error) {
+        await markIncrementalQueueFailed(ids, (error as Error).message || 'incremental_classification_failed');
+      } finally {
+        incrementalRunRef.current = false;
+        releaseClassificationLock();
+      }
+    };
+    void runIncremental();
+    return () => { disposed = true; };
+  }, [
+    acquireClassificationLock,
+    refreshDraftList,
+    refreshDraftStatuses,
+    releaseClassificationLock,
+    result,
+    uiSettings,
+  ]);
+
   const running = progress.phase === 'labeling' || progress.phase === 'building' || progress.phase === 'assigning';
   const operationBusy = running || classificationPending || checkingCompatibility || applying || undoing || savingDraft;
 
   const openAiClassificationSettings = useCallback(() => {
     setError('请先完成 AI 金字塔分类供应商设置，正在打开 AI 辅助分类设置。');
     void openOrFocusExtensionPage('pages/settings/settings.html#ai');
+  }, []);
+
+  const requestPageMetadataPermission = useCallback(async (): Promise<boolean> => {
+    try {
+      const origins = ['<all_urls>'];
+      if (await chrome.permissions.contains({ origins })) return true;
+      return await chrome.permissions.request({ origins });
+    } catch {
+      return false;
+    }
   }, []);
 
   /** 执行分类；limit 限制条数（试分类） */
@@ -552,6 +626,10 @@ export function App() {
       if (!settings.apiKey) {
         openAiClassificationSettings();
         return;
+      }
+      if (settings.usePageMetadata !== false) {
+        const granted = await requestPageMetadataPermission();
+        if (!granted) setNotice('未授予站点访问权限：本次分类仅使用书签标题、URL 和目录，不抓取页面内容。');
       }
       ctrl = new AbortController();
       abortRef.current = ctrl;
@@ -604,6 +682,7 @@ export function App() {
     d,
     openAiClassificationSettings,
     partialText,
+    requestPageMetadataPermission,
     refreshDraftList,
     refreshDraftStatuses,
     refreshHistoricalVersions,
@@ -620,6 +699,10 @@ export function App() {
         openAiClassificationSettings();
         return;
       }
+      if (settings.usePageMetadata !== false) {
+        const granted = await requestPageMetadataPermission();
+        if (!granted) setNotice('未授予站点访问权限：本次分类仅使用书签标题、URL 和目录，不抓取页面内容。');
+      }
       const all = await getFlatBookmarks();
       setEstimate({
         ...(await estimateClassify(dedupeByUrl(all), settings)),
@@ -630,7 +713,7 @@ export function App() {
     } finally {
       releaseClassificationLock();
     }
-  }, [acquireClassificationLock, d, openAiClassificationSettings, releaseClassificationLock]);
+  }, [acquireClassificationLock, d, openAiClassificationSettings, releaseClassificationLock, requestPageMetadataPermission]);
 
   const openPartialClassify = useCallback(async () => {
     setError('');

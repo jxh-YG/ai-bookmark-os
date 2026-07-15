@@ -74,7 +74,7 @@
         method: 'GET',
         signal: ctrl.signal,
         redirect: 'follow',
-        credentials: 'include',
+        credentials: 'omit',
       });
       if (res.status === 404 || res.status === 410) {
         const firstResult = await analyzeMissingResponse(url, res);
@@ -83,7 +83,7 @@
           method: 'GET',
           signal: ctrl.signal,
           redirect: 'follow',
-          credentials: 'include',
+          credentials: 'omit',
           cache: 'no-store',
         });
         if (confirmation.status !== 404 && confirmation.status !== 410) {
@@ -119,7 +119,7 @@
         method: 'GET',
         signal: ctrl.signal,
         redirect: 'follow',
-        credentials: 'include',
+        credentials: 'omit',
       });
       const ct = res.headers.get('content-type') || '';
       if (!res.ok || !ct.includes('text/html')) return null;
@@ -149,7 +149,7 @@
         method: 'GET',
         signal: ctrl.signal,
         redirect: 'follow',
-        credentials: 'include',
+        credentials: 'omit',
       });
       const ct = res.headers.get('content-type') || '';
       if (!res.ok || !ct.includes('text/html')) return null;

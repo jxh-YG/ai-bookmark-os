@@ -402,6 +402,8 @@ export interface Settings {
   useClassificationCache?: boolean;
   /** 对标题信息不足的书签抓取页面 meta 作为补充语义 */
   usePageMetadata?: boolean;
+  /** 新增书签进入待处理队列，并在分类工作台打开时增量归类。 */
+  incrementalClassificationEnabled?: boolean;
   /** 注入系统内置分类规则增强；关闭后主要按用户提示词执行 */
   useBuiltInClassificationRules?: boolean;
   /** AI 请求失败后的重连次数（不含首次请求） */
@@ -428,6 +430,7 @@ export const DEFAULT_SETTINGS: Settings = {
   reusePreviousAiTree: false,
   useClassificationCache: true,
   usePageMetadata: true,
+  incrementalClassificationEnabled: false,
   useBuiltInClassificationRules: true,
   aiRetryCount: 5,
   aiRequestTimeoutSeconds: 90,

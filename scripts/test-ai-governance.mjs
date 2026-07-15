@@ -63,7 +63,8 @@ assert.match(background, /incrementalClassificationEnabled/);
 
 const classifier = readFileSync('src/core/classifier.ts', 'utf8');
 assert.match(classifier, /promptVersion/);
-assert.match(classifier, /classifyIncremental[\s\S]{0,1000}persist/);
+assert.match(classifier, /classifyIncremental[\s\S]{0,700}options:\s*ClassifyRunOptions/);
+assert.match(classifier, /if\s*\(options\.persist\s*!==\s*false\)\s*await saveClassifyResult/);
 
 const queue = await importTypeScript('src/core/incrementalQueue.ts');
 await queue.enqueueIncrementalBookmarks([{ id: 'new-1', createdAt: 1 }]);

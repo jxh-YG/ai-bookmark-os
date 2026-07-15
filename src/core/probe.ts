@@ -110,7 +110,7 @@ export async function fetchPageMeta(
       method: 'GET',
       signal: ctrl.signal,
       redirect: 'follow',
-      credentials: 'include',
+      credentials: 'omit',
     });
     const ct = resp.headers.get('content-type') ?? '';
     if (!resp.ok || !ct.includes('text/html')) return null;
@@ -138,9 +138,8 @@ export async function probeUrl(url: string): Promise<ProbeResult> {
       method: 'GET',
       signal: ctrl.signal,
       redirect: 'follow',
-      // 携带 Cookie：用户在浏览器中登录过的站点探测时生效，
-      // 避免已登录的页面被误报为「需登录」
-      credentials: 'include',
+      // 默认不携带登录态，避免健康检查将本地会话发送到任意书签域名。
+      credentials: 'omit',
     });
 
     // —— 协议层 ——
@@ -151,7 +150,7 @@ export async function probeUrl(url: string): Promise<ProbeResult> {
         method: 'GET',
         signal: ctrl.signal,
         redirect: 'follow',
-        credentials: 'include',
+        credentials: 'omit',
         cache: 'no-store',
       });
       if (confirmation.status !== 404 && confirmation.status !== 410) {

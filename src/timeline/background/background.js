@@ -840,6 +840,22 @@ async function syncAllBookmarks() {
 // 暂存一键收藏的标签/文件夹信息，供 onCreated → addSingleBookmark 消费
 // key: url, value: { tags, folderName, folderPath }
 const pendingQuickBookmarks = new Map();
+const INCREMENTAL_CLASSIFY_QUEUE_KEY = 'incrementalClassificationQueue';
+
+async function enqueueIncrementalClassification(id, bookmark) {
+  const data = await chrome.storage.local.get(['settings', INCREMENTAL_CLASSIFY_QUEUE_KEY]);
+  const settings = data.settings || {};
+  if (settings.incrementalClassificationEnabled !== true || !settings.apiKey || !bookmark?.url) return;
+  const current = Array.isArray(data[INCREMENTAL_CLASSIFY_QUEUE_KEY]) ? data[INCREMENTAL_CLASSIFY_QUEUE_KEY] : [];
+  const byId = new Map(current.filter(item => item && item.id).map(item => [item.id, item]));
+  if (!byId.has(id)) {
+    byId.set(id, { id, createdAt: bookmark.dateAdded || Date.now(), attempts: 0 });
+    const queue = [...byId.values()]
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .slice(-500);
+    await chrome.storage.local.set({ [INCREMENTAL_CLASSIFY_QUEUE_KEY]: queue });
+  }
+}
 
 function normalizeTagList(tags) {
   const normalized = new Map();
@@ -3371,6 +3387,7 @@ chrome.bookmarks.onCreated.addListener((id, bookmark) => {
           action: 'bookmarkAdded',
           bookmark: item
         }).catch(() => {}); // popup 可能未打开
+        enqueueIncrementalClassification(id, bookmark).catch(() => {});
       }
     });
   }
@@ -3510,9 +3527,8 @@ async function fetchOnce(url, method, deadlineMs, perAttemptMs) {
       method,
       signal: controller.signal,
       redirect: 'follow',
-      // Reuse a signed-in browser session where the site permits it. Some bookmark
-      // destinations require login and would otherwise be falsely reported.
-      credentials: 'include',
+      // Health checks must not send a browser login session to arbitrary URLs.
+      credentials: 'omit',
       cache: 'no-store'
     });
     clearTimeout(tid);

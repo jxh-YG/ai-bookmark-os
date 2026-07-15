@@ -189,7 +189,7 @@ const manifest = {
     'favicon',
     'windows',
   ],
-  host_permissions: ['<all_urls>'],
+  optional_host_permissions: ['<all_urls>'],
   background: {
     service_worker: 'background/background.js',
   },

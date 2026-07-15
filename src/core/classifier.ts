@@ -290,11 +290,23 @@ function normalizeCacheText(value: string): string {
 
 function classificationCacheKey(bookmark: FlatBookmark, settings?: Settings): string {
   const includeFolderPath = settings ? respectFolders(settings) : true;
+  const prompts = settings ? resolveClassifyPrompts(settings) : undefined;
+  const folderRulesVersion = `${includeFolderPath ? 'folders-v2' : 'folders-off'}:${settings?.useBuiltInClassificationRules !== false ? 'builtin-v1' : 'builtin-off'}`;
+  const promptVersion = hashUrl(JSON.stringify({
+    label: prompts?.label ?? '',
+    provider: settings?.provider ?? '',
+    baseUrl: settings?.baseUrl ?? '',
+    model: settings?.model ?? '',
+    customApiStyle: settings?.customApiStyle ?? '',
+    customFullUrl: !!settings?.customFullUrl,
+  }));
   const signature = [
-    'content-context-v2',
+    'content-context-v3',
     normalizedUrl(bookmark.url),
     normalizeCacheText(bookmark.title),
     includeFolderPath ? normalizeCacheText(bookmark.folderPath) : '',
+    folderRulesVersion,
+    promptVersion,
   ];
   return hashUrl(JSON.stringify(signature));
 }
@@ -461,6 +473,7 @@ async function labelBookmarks(
         cache[classificationCacheKey(bm, settings)] = {
           summary: label.summary,
           tags: label.tags,
+          cachedAt: Date.now(),
           ...(contexts.get(bm.id) ? { pageContext: contexts.get(bm.id) } : {}),
         };
       }
@@ -868,6 +881,7 @@ export async function classifyIncremental(
   existing: ClassifyResult,
   onProgress: ProgressFn,
   signal: AbortSignal,
+  options: ClassifyRunOptions = {},
 ): Promise<ClassifyResult> {
   const preservedPaths = preservedFolderSet(settings);
   const preservedTree = buildPreservedTree(newBookmarks, preservedPaths);
@@ -884,12 +898,13 @@ export async function classifyIncremental(
     onProgress({ phase: 'assigning', done: newBookmarks.length, total: newBookmarks.length });
   }
   const result: ClassifyResult = {
+    ...existing,
     tree,
     labels: { ...existing.labels, ...labels },
     createdAt: Date.now(),
-    ...(existing.scope?.mode === 'partial' ? { scope: existing.scope } : {}),
+    updatedAt: Date.now(),
   };
-  await saveClassifyResult(result);
+  if (options.persist !== false) await saveClassifyResult(result);
   onProgress({ phase: 'done', done: newBookmarks.length, total: newBookmarks.length });
   return result;
 }

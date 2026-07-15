@@ -1167,7 +1167,15 @@ export function App() {
     try {
       await saveClassifyResult(next);
       const status = await resolveDraftStatus(next);
-      await refreshDraftList();
+      const nextDrafts = [
+        ...draftsRef.current.filter((draft) => draft.storageKey !== storageKey),
+        { storageKey, result: next },
+      ].sort((left, right) => (
+        (right.result.updatedAt ?? right.result.createdAt) - (left.result.updatedAt ?? left.result.createdAt)
+        || left.storageKey.localeCompare(right.storageKey)
+      ));
+      draftsRef.current = nextDrafts;
+      setDrafts(nextDrafts);
       resultRef.current = next;
       setResult(next);
       setDraftStatuses((previous) => ({ ...previous, [storageKey]: status }));
@@ -1178,7 +1186,7 @@ export function App() {
       draftSaveLockRef.current = false;
       setSavingDraft(false);
     }
-  }, [refreshDraftList, resolveDraftStatus]);
+  }, [resolveDraftStatus]);
 
   /** 树编辑：更新 state 并持久化 */
   const updateTree = useCallback((mutate: (tree: CategoryNode[]) => CategoryNode[]) => {

@@ -30,6 +30,10 @@ let currentFilter = 'all';
 let checkQueue = [];
 let checkedCount = 0;
 let totalCount = 0;
+let activeRunId = 0;
+let resultsRenderTimer = null;
+let resultsRenderFrame = null;
+let resultStats = { ok: 0, broken: 0, warning: 0 };
 
 function openExtensionPage(path) {
   return window.AIBookmarkPageRouter?.openOrFocusExtensionPage(path)
@@ -163,17 +167,34 @@ async function loadAllBookmarks() {
 
 // ===== 更新摘要 =====
 function updateSummary() {
-  const okCount = results.filter(r => r.checkResult.status === 'ok').length;
-  const brokenCount = results.filter(r => r.checkResult.status === 'broken').length;
-  const warningCount = results.filter(r => r.checkResult.status === 'warning').length;
-
-  totalChecked.textContent = results.length;
-  totalOk.textContent = okCount;
-  totalBroken.textContent = brokenCount;
-  totalWarning.textContent = warningCount;
+  totalChecked.textContent = checkedCount;
+  totalOk.textContent = resultStats.ok;
+  totalBroken.textContent = resultStats.broken;
+  totalWarning.textContent = resultStats.warning;
 
   // 显示/隐藏一键删除按钮
-  deleteAllBrokenBtn.style.display = brokenCount > 0 ? 'inline-flex' : 'none';
+  deleteAllBrokenBtn.style.display = resultStats.broken > 0 ? 'inline-flex' : 'none';
+}
+
+function resetResultStats() {
+  resultStats = { ok: 0, broken: 0, warning: 0 };
+}
+
+function countResultStatus(status) {
+  if (status === 'ok' || status === 'broken' || status === 'warning') {
+    resultStats[status] += 1;
+  }
+}
+
+function refreshResultStats() {
+  resetResultStats();
+  checkedCount = 0;
+  for (const item of results) {
+    const status = item.checkResult?.status;
+    countResultStatus(status);
+    if (status !== 'checking') checkedCount += 1;
+  }
+  totalCount = results.length;
 }
 
 // ===== 更新进度 =====
@@ -270,14 +291,35 @@ function renderResults() {
   }
 }
 
+function scheduleResultsRender() {
+  if (resultsRenderTimer !== null || resultsRenderFrame !== null) return;
+
+  resultsRenderTimer = setTimeout(() => {
+    resultsRenderTimer = null;
+    const flush = () => {
+      resultsRenderFrame = null;
+      renderResults();
+    };
+
+    if (typeof requestAnimationFrame === 'function') {
+      resultsRenderFrame = requestAnimationFrame(flush);
+    } else {
+      resultsRenderFrame = setTimeout(flush, 0);
+    }
+  }, 100);
+}
+
 // ===== 开始检测 =====
 async function startCheck() {
   if (isChecking) return;
 
+  const runId = activeRunId += 1;
   isChecking = true;
   abortController = new AbortController();
   results = [];
   checkedCount = 0;
+  totalCount = 0;
+  resetResultStats();
 
   startCheckBtn.style.display = 'none';
   stopCheckBtn.style.display = 'inline-flex';
@@ -289,7 +331,20 @@ async function startCheck() {
   deleteAllBrokenBtn.style.display = 'none';
 
   // 加载书签
-  const bookmarks = await loadAllBookmarks();
+  let bookmarks;
+  try {
+    bookmarks = await loadAllBookmarks();
+  } catch (err) {
+    if (runId !== activeRunId) return;
+    isChecking = false;
+    startCheckBtn.style.display = 'inline-flex';
+    stopCheckBtn.style.display = 'none';
+    loadingState.style.display = 'none';
+    progressBar.style.display = 'none';
+    showToast(i18n('checkerErrNetwork'), 'error');
+    return;
+  }
+  if (runId !== activeRunId) return;
   totalCount = bookmarks.length;
 
   if (totalCount === 0) {
@@ -308,6 +363,7 @@ async function startCheck() {
 
   // 加载设置
   const settings = await getCheckSettings();
+  if (runId !== activeRunId) return;
   const concurrency = settings.checkerConcurrency || 5;
   const timeout = settings.checkerTimeout || 10000;
 
@@ -320,28 +376,31 @@ async function startCheck() {
   }
   renderResults();
   updateProgress();
+  updateSummary();
 
   // 并发检测
   let index = 0;
 
   async function processNext() {
-    while (index < results.length && isChecking) {
+    while (index < results.length && isChecking && runId === activeRunId) {
       const currentIndex = index++;
       const item = results[currentIndex];
+      let checkResult;
 
       try {
-        const checkResult = await checkUrl(item.bookmark.url, timeout);
-        item.checkResult = checkResult;
+        checkResult = await checkUrl(item.bookmark.url, timeout);
       } catch (err) {
-        item.checkResult = { status: 'warning', statusCode: 0, message: i18n('checkerErrNetwork') };
+        checkResult = { status: 'warning', statusCode: 0, message: i18n('checkerErrNetwork') };
       }
 
+      if (runId !== activeRunId) return;
+
+      item.checkResult = checkResult;
       checkedCount++;
+      countResultStatus(checkResult.status);
       updateProgress();
       updateSummary();
-
-      // 更新单个项的显示
-      renderResults();
+      scheduleResultsRender();
     }
   }
 
@@ -353,26 +412,37 @@ async function startCheck() {
 
   await Promise.all(workers);
 
+  if (runId !== activeRunId) return;
+
   isChecking = false;
+  abortController = null;
   startCheckBtn.style.display = 'inline-flex';
   stopCheckBtn.style.display = 'none';
 
-  const brokenCount = results.filter(r => r.checkResult.status === 'broken').length;
-  if (brokenCount > 0) {
-    showToast(i18n('checkerDoneBroken', [String(brokenCount)]), 'error');
+  if (resultStats.broken > 0) {
+    showToast(i18n('checkerDoneBroken', [String(resultStats.broken)]), 'error');
   } else {
     showToast(i18n('checkerDoneAllOk'), 'success');
   }
 
   // 保存检测结果
-  await saveCheckResults();
+  await saveCheckResults({ status: 'completed' });
 }
 
 // ===== 停止检测 =====
 function stopCheck() {
+  if (!isChecking) return;
+
+  activeRunId += 1;
   isChecking = false;
+  abortController?.abort();
+  abortController = null;
   startCheckBtn.style.display = 'inline-flex';
   stopCheckBtn.style.display = 'none';
+  updateProgress();
+  updateSummary();
+  scheduleResultsRender();
+  void saveCheckResults({ status: 'cancelled' });
   showToast(i18n('checkerStopped'), 'info');
 }
 
@@ -387,6 +457,7 @@ async function deleteSingleBookmark(id, url, element) {
       setTimeout(() => {
         results = results.filter(r => r.bookmark.id !== id || r.bookmark.url !== url);
         element.remove();
+        refreshResultStats();
         updateSummary();
         if (results.length === 0) {
           resultList.style.display = 'none';
@@ -424,6 +495,7 @@ async function deleteAllBroken() {
   }
 
   results = results.filter(r => r.checkResult.status !== 'broken' || !deletedIds.has(r.bookmark.id));
+  refreshResultStats();
   renderResults();
   updateSummary();
 
@@ -438,33 +510,50 @@ async function deleteAllBroken() {
 }
 
 // ===== 保存检测结果 =====
-async function saveCheckResults() {
-  const summary = {
-    timestamp: Date.now(),
-    total: results.length,
-    ok: results.filter(r => r.checkResult.status === 'ok').length,
-    broken: results.filter(r => r.checkResult.status === 'broken').length,
-    warning: results.filter(r => r.checkResult.status === 'warning').length,
-    brokenUrls: results.filter(r => r.checkResult.status === 'broken').map(r => ({
-      id: r.bookmark.id,
-      title: r.bookmark.title,
-      url: r.bookmark.url,
-      message: r.checkResult.message
-    }))
-  };
-  await chrome.storage.local.set({ checkerLastResult: summary });
+async function saveCheckResults({ status = 'completed' } = {}) {
+  const completed = resultStats.ok + resultStats.broken + resultStats.warning;
+  await chrome.storage.local.set({
+    checkerLastResult: {
+      timestamp: Date.now(),
+      status,
+      total: results.length,
+      completed,
+      pending: Math.max(0, results.length - completed),
+      results: results.map(({ bookmark, checkResult }) => ({
+        bookmark: { ...bookmark },
+        checkResult: { ...checkResult }
+      })),
+      ok: resultStats.ok,
+      broken: resultStats.broken,
+      warning: resultStats.warning,
+      brokenUrls: results.filter(r => r.checkResult.status === 'broken').map(r => ({
+        id: r.bookmark.id,
+        title: r.bookmark.title,
+        url: r.bookmark.url,
+        message: r.checkResult.message
+      }))
+    }
+  });
 }
 
 // ===== 加载上次检测结果 =====
 async function loadLastResults() {
   const data = await chrome.storage.local.get('checkerLastResult');
-  if (data.checkerLastResult) {
-    // 显示上次结果的摘要信息（不恢复完整列表）
-    const last = data.checkerLastResult;
-    if (last.brokenUrls && last.brokenUrls.length > 0) {
-      // 可以在这里显示提示
-    }
-  }
+  const last = data.checkerLastResult;
+  if (!last || !Array.isArray(last.results) || last.results.length === 0) return;
+
+  results = last.results.filter((item) => item?.bookmark?.id && item?.bookmark?.url && item?.checkResult?.status);
+  if (results.length === 0) return;
+
+  refreshResultStats();
+  summaryBar.style.display = 'flex';
+  progressBar.style.display = 'block';
+  emptyState.style.display = 'none';
+  loadingState.style.display = 'none';
+  resultList.style.display = 'block';
+  renderResults();
+  updateProgress();
+  updateSummary();
 }
 
 // ===== 筛选 =====

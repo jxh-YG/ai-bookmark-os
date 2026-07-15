@@ -210,6 +210,74 @@ function compatibilityIssueMessages(report: PlanCompatibilityReport): string[] {
   return messages;
 }
 
+function useDialogAccessibility(
+  isOpen: boolean,
+  onDismiss: () => void,
+  canDismiss = true,
+) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const onDismissRef = useRef(onDismiss);
+  const canDismissRef = useRef(canDismiss);
+
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+    canDismissRef.current = canDismiss;
+  }, [canDismiss, onDismiss]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+
+    const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ));
+    const focusInitial = () => (focusable()[0] ?? dialog).focus();
+    const frame = window.requestAnimationFrame(focusInitial);
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && canDismissRef.current) {
+        event.preventDefault();
+        onDismissRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const elements = focusable();
+      if (elements.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('keydown', onKeyDown);
+      if (restoreFocusRef.current?.isConnected) restoreFocusRef.current.focus();
+      restoreFocusRef.current = null;
+    };
+  }, [isOpen]);
+
+  return dialogRef;
+}
 
 export function App() {
   const [bookmarks, setBookmarks] = useState<FlatBookmark[]>([]);
@@ -260,6 +328,17 @@ export function App() {
   const draftStatusRequestRef = useRef(0);
   const draftSaveLockRef = useRef(false);
   const incrementalRunRef = useRef(false);
+  const closePartialModal = useCallback(() => setShowPartialModal(false), []);
+  const closeApplyModal = useCallback(() => setShowApplyModal(false), []);
+  const closeEstimate = useCallback(() => setEstimate(null), []);
+  const closeWhatsNew = useCallback(() => {
+    setWhatsNew(null);
+    void chrome.storage.local.remove('pendingWhatsNew');
+  }, []);
+  const partialDialogRef = useDialogAccessibility(showPartialModal, closePartialModal, !preparingPartial);
+  const applyDialogRef = useDialogAccessibility(showApplyModal, closeApplyModal, !applying);
+  const estimateDialogRef = useDialogAccessibility(!!estimate, closeEstimate, !classificationPending);
+  const whatsNewDialogRef = useDialogAccessibility(!!whatsNew, closeWhatsNew);
   const d = t(uiSettings.language);
   const partialText = resolveLang(uiSettings.language) === 'zh'
     ? {
@@ -1585,8 +1664,8 @@ export function App() {
           )}
 
           {showPartialModal && (
-            <div className="modal-backdrop" onClick={() => !preparingPartial && setShowPartialModal(false)}>
-              <div className="modal scope-modal" role="dialog" aria-modal="true" aria-labelledby="partialScopeTitle" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-backdrop" onClick={() => !preparingPartial && closePartialModal()}>
+              <div ref={partialDialogRef} className="modal scope-modal" role="dialog" aria-modal="true" aria-labelledby="partialScopeTitle" tabIndex={-1} onClick={(e) => e.stopPropagation()}>
                 <h3 id="partialScopeTitle">{partialText.selectorTitle}</h3>
                 <div className="modal-body">
                   <label className="scope-field" htmlFor="partialScopeFolder">
@@ -1612,7 +1691,7 @@ export function App() {
                   {partialError && <p className="modal-error" role="alert">{partialError}</p>}
                 </div>
                 <div className="actions">
-                  <button type="button" className="btn" onClick={() => setShowPartialModal(false)} disabled={preparingPartial}>{d.cancel}</button>
+                  <button type="button" className="btn" onClick={closePartialModal} disabled={preparingPartial}>{d.cancel}</button>
                   <button
                     type="button"
                     className="btn btn-primary"
@@ -1627,9 +1706,9 @@ export function App() {
           )}
 
           {showApplyModal && applyPlan && modalResult && (
-            <div className="modal-backdrop" onClick={() => !applying && setShowApplyModal(false)}>
-              <div className="modal" onClick={(e) => e.stopPropagation()}>
-                <h3>{modalResult.scope?.mode === 'partial' ? partialText.applyTitle : d.applyModalTitle}</h3>
+            <div className="modal-backdrop" onClick={() => !applying && closeApplyModal()}>
+              <div ref={applyDialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="applyDialogTitle" tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+                <h3 id="applyDialogTitle">{modalResult.scope?.mode === 'partial' ? partialText.applyTitle : d.applyModalTitle}</h3>
                 <div className="modal-body">
                   {modalResult.scope?.mode === 'partial'
                     ? partialText.applyDescription(modalResult.scope.targetDirectoryTitle)
@@ -1647,7 +1726,7 @@ export function App() {
                   <small>{modalResult.scope?.mode === 'partial' ? partialText.applyNote : d.applyNote} 应用完成后会在“变更记录”中保存实际前后对比。</small>
                 </div>
                 <div className="actions">
-                  <button type="button" className="btn" onClick={() => setShowApplyModal(false)} disabled={applying}>{d.cancel}</button>
+                  <button type="button" className="btn" onClick={closeApplyModal} disabled={applying}>{d.cancel}</button>
                   <button
                     type="button"
                     className="btn btn-primary"
@@ -1662,9 +1741,9 @@ export function App() {
           )}
 
           {estimate && (
-            <div className="modal-backdrop" onClick={() => setEstimate(null)}>
-              <div className="modal" onClick={(e) => e.stopPropagation()}>
-                <h3>{estimate.scope.mode === 'partial' ? partialText.estimateTitle : d.estimateTitle}</h3>
+            <div className="modal-backdrop" onClick={() => !classificationPending && closeEstimate()}>
+              <div ref={estimateDialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="estimateDialogTitle" tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+                <h3 id="estimateDialogTitle">{estimate.scope.mode === 'partial' ? partialText.estimateTitle : d.estimateTitle}</h3>
                 <div className="modal-body">
                   <ul>
                     {estimate.scope.mode === 'partial' && (
@@ -1681,7 +1760,7 @@ export function App() {
                   </small>
                 </div>
                 <div className="actions">
-                  <button type="button" className="btn" onClick={() => setEstimate(null)} disabled={classificationPending}>{d.cancel}</button>
+                  <button type="button" className="btn" onClick={closeEstimate} disabled={classificationPending}>{d.cancel}</button>
                   <button type="button" className="btn btn-primary" onClick={() => runClassify(estimate.scope)} disabled={classificationPending}>{d.startNow}</button>
                 </div>
               </div>
@@ -1692,13 +1771,10 @@ export function App() {
       {whatsNew && (
         <div
           className="modal-backdrop"
-          onClick={() => {
-            setWhatsNew(null);
-            chrome.storage.local.remove("pendingWhatsNew");
-          }}
+          onClick={closeWhatsNew}
         >
-          <div className="modal whatsnew" onClick={(e) => e.stopPropagation()}>
-            <h3>{d.whatsNewTitle(whatsNew.to)}</h3>
+          <div ref={whatsNewDialogRef} className="modal whatsnew" role="dialog" aria-modal="true" aria-labelledby="whatsNewDialogTitle" tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+            <h3 id="whatsNewDialogTitle">{d.whatsNewTitle(whatsNew.to)}</h3>
             <div className="wn-body">
               {whatsNew.entries.map((entry) => (
                 <div key={entry.version} className="wn-version">
@@ -1719,10 +1795,7 @@ export function App() {
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => {
-                  setWhatsNew(null);
-                  chrome.storage.local.remove("pendingWhatsNew");
-                }}
+                onClick={closeWhatsNew}
               >
                 {d.whatsNewOk}
               </button>

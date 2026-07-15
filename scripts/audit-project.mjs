@@ -21,7 +21,30 @@ function text(path) {
   return readFileSync(path, 'utf8');
 }
 
+const README_REQUIRED_SECTIONS = [
+  '项目简介',
+  '功能特性',
+  '从源码构建',
+  'Chrome',
+  '配置说明',
+  '构建与部署',
+];
+
+function mustIncludeReadmeSections() {
+  const content = text('README.md');
+  const missing = README_REQUIRED_SECTIONS.filter((section) => !new RegExp(`^#{2,3}\\s+.*${section}`, 'm').test(content));
+  if (missing.length > 0) {
+    fail(`README.md missing required sections: ${missing.join(', ')}`);
+  } else {
+    pass('README.md section structure');
+  }
+}
+
 function mustInclude(path, needles) {
+  if (path === 'README.md') {
+    mustIncludeReadmeSections();
+    return;
+  }
   const content = text(path);
   for (const needle of needles) {
     if (!content.includes(needle)) fail(`${path} missing: ${needle}`);

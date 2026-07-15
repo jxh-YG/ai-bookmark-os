@@ -5,13 +5,14 @@ import vm from 'node:vm';
 const helperSource = readFileSync('src/timeline/background/bookmark-data.js', 'utf8');
 const context = { Array, Date, Map, Object, Set, String, URL };
 vm.createContext(context);
-vm.runInContext(`${helperSource}; this.helpers = BookmarkData;`, context);
+vm.runInContext(`${helperSource}; this.helpers = globalThis.BookmarkData;`, context);
 
 const {
   buildImportPlan,
   buildRestoredBookmark,
   buildCheckerSummary,
 } = context.helpers;
+const plain = value => JSON.parse(JSON.stringify(value));
 
 const importPlan = buildImportPlan({
   incoming: [
@@ -28,21 +29,26 @@ const importPlan = buildImportPlan({
       folderPath: 'Development/Frontend',
       tags: ['duplicate'],
     },
+    { title: 'Specification', url: 'https://example.com/specification', folderPath: 'Docs' },
     { title: 'Unsupported', url: 'file:///private/notes.html' },
   ],
-  existing: [{ id: '1', url: 'https://example.com/react?a=1&b=2', parentId: 'folder-frontend' }],
+  existing: [{
+    id: '1',
+    url: 'https://example.com/react?a=1&b=2',
+    folderPath: 'AI Bookmark OS 导入/2026-07-16/Development/Frontend',
+  }],
   rootTitle: 'AI Bookmark OS 导入',
   rootDate: '2026-07-16',
   duplicateStrategy: 'skip',
 });
 
-assert.deepEqual([...importPlan.folders], [
-  { key: 'AI Bookmark OS 导入/2026-07-16', title: 'AI Bookmark OS 导入' },
-  { key: 'AI Bookmark OS 导入/2026-07-16/Development', title: 'Development' },
-  { key: 'AI Bookmark OS 导入/2026-07-16/Development/Frontend', title: 'Frontend' },
+assert.deepEqual(plain(importPlan.folders), [
+  { key: 'AI Bookmark OS 导入', parentKey: '', title: 'AI Bookmark OS 导入' },
+  { key: 'AI Bookmark OS 导入/2026-07-16', parentKey: 'AI Bookmark OS 导入', title: '2026-07-16' },
+  { key: 'AI Bookmark OS 导入/2026-07-16/Docs', parentKey: 'AI Bookmark OS 导入/2026-07-16', title: 'Docs' },
 ]);
-assert.equal(importPlan.create.length, 0);
-assert.equal(importPlan.skipped.length, 1);
+assert.equal(importPlan.create.length, 1);
+assert.equal(importPlan.skipped.length, 2);
 assert.equal(importPlan.invalid.length, 1);
 
 const createPlan = buildImportPlan({
@@ -53,7 +59,7 @@ const createPlan = buildImportPlan({
 });
 assert.equal(createPlan.create.length, 1);
 assert.equal(createPlan.create[0].folderKey, 'AI Bookmark OS 导入/2026-07-16/Docs');
-assert.deepEqual([...createPlan.create[0].metadata.tags], ['work']);
+assert.deepEqual(plain(createPlan.create[0].metadata.tags), ['work']);
 
 const restored = buildRestoredBookmark({
   id: 'old-id',
@@ -65,14 +71,14 @@ const restored = buildRestoredBookmark({
   pinned: true,
   contentText: 'cached content',
 }, new Set(['folder-a']));
-assert.deepEqual({ ...restored.create }, {
+assert.deepEqual(plain(restored.create), {
   parentId: 'folder-a',
   index: 3,
   title: 'Pinned bookmark',
   url: 'https://example.com/pinned',
 });
 assert.equal(restored.restoredToFallback, false);
-assert.deepEqual([...restored.metadata.tags], ['work']);
+assert.deepEqual(plain(restored.metadata.tags), ['work']);
 assert.equal(restored.metadata.pinned, true);
 
 const fallbackRestore = buildRestoredBookmark({ title: 'Lost folder', url: 'https://example.com/lost', parentId: 'missing' }, new Set());

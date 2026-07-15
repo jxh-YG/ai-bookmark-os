@@ -17,6 +17,7 @@ const checkerTimeRow = document.getElementById('checkerTimeRow');
 const checkerTimeInput = document.getElementById('checkerTimeInput');
 const checkerAutoDeleteRow = document.getElementById('checkerAutoDeleteRow');
 const checkerAutoDeleteToggle = document.getElementById('checkerAutoDeleteToggle');
+checkerAutoDeleteToggle.disabled = true;
 const checkerTimeoutSelect = document.getElementById('checkerTimeoutSelect');
 const checkerConcurrencySelect = document.getElementById('checkerConcurrencySelect');
 const checkerRetriesSelect = document.getElementById('checkerRetriesSelect');
@@ -240,7 +241,7 @@ async function loadCheckerSettings() {
   checkerDayOfWeekSelect.value = String(result.checkerDayOfWeek ?? 1);
   populateCheckerDayOfMonthOptions(result.checkerDayOfMonth ?? 1);
   checkerTimeInput.value = result.checkerTime || '03:00';
-  checkerAutoDeleteToggle.checked = !!result.checkerAutoDelete;
+  checkerAutoDeleteToggle.checked = false;
   checkerTimeoutSelect.value = result.checkerTimeout || '10000';
   checkerConcurrencySelect.value = result.checkerConcurrency || '5';
   // 新增 3 项：未保存时显示默认值（与 HTML selected 保持一致）
@@ -280,7 +281,7 @@ function toggleCheckerScheduleRows(frequency) {
     checkerTimeRow.classList.toggle('hidden-row', !show);
   }
   if (checkerAutoDeleteRow) {
-    checkerAutoDeleteRow.classList.toggle('hidden-row', !show);
+    checkerAutoDeleteRow.classList.add('hidden-row');
   }
 }
 
@@ -1035,7 +1036,8 @@ checkerDayOfMonthSelect.addEventListener('change', async (e) => {
 });
 
 checkerAutoDeleteToggle.addEventListener('change', async (e) => {
-  await saveCheckerSetting('checkerAutoDelete', e.target.checked);
+  e.target.checked = false;
+  await saveCheckerSetting('checkerAutoDelete', false);
   showToast(i18n('settingsSaved'), 'success');
 });
 

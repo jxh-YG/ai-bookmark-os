@@ -924,7 +924,6 @@ html body .state-view {
 }
 
 html body input,
-html body select,
 html body textarea,
 html body .search-input,
 html body .edit-input {
@@ -1078,4 +1077,260 @@ body[data-page="popup"] {
   width: 420px !important;
   min-width: 420px !important;
   max-width: 420px !important;
+}
+
+
+/* Customizable native selects: keep form semantics while styling Chromium's picker. */
+@supports (appearance: base-select) and selector(::picker(select)) {
+  select:not([multiple]):not([size]),
+  ::picker(select) {
+    appearance: base-select;
+  }
+
+  select:not([multiple]):not([size]) {
+    appearance: base-select !important;
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+    min-height: var(--control-height-md, 32px);
+    padding: 6px 10px 6px 12px;
+    border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-medium));
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--bg-glass-strong) 82%, var(--bg-secondary));
+    background-image: none !important;
+    box-shadow: var(--shadow-xs);
+    color: var(--text-primary);
+    line-height: 1.35;
+    letter-spacing: 0;
+    cursor: pointer;
+    transition:
+      background var(--transition-fast),
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast),
+      color var(--transition-fast),
+      transform var(--transition-fast);
+  }
+
+  select:not([multiple]):not([size]):not([hidden]) {
+    display: inline-grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    contain: paint;
+  }
+
+  body[data-page='settings'] .select-control:not(.compact):not([hidden]) {
+    width: clamp(140px, 42vw, 220px);
+  }
+
+  body[data-page='graph'] .toolbar-select {
+    min-height: 28px;
+    padding-block: 0;
+  }
+
+  select:not([multiple]):not([size]):hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--border-medium));
+    background: var(--bg-glass-strong);
+    box-shadow: var(--shadow-sm);
+  }
+
+  select:not([multiple]):not([size]):open {
+    border-color: color-mix(in srgb, var(--accent) 58%, var(--border-medium));
+    background: var(--bg-glass-strong);
+    box-shadow: var(--focus-ring);
+  }
+
+  select:not([multiple]):not([size])::picker-icon {
+    position: relative;
+    z-index: 1;
+    justify-self: end;
+    flex: 0 0 auto;
+    margin-inline-start: 0;
+    padding-inline-start: 8px;
+    /* The grid reserves an icon track, so the arrow should not paint its own tile. */
+    background: transparent;
+    color: var(--text-tertiary);
+    transition: color var(--transition-fast), transform var(--transition-fast);
+  }
+
+  select:not([multiple]):not([size]):open::picker-icon {
+    color: var(--accent);
+    transform: rotate(180deg);
+  }
+
+  ::picker(select) {
+    inline-size: max-content;
+    min-inline-size: anchor-size(width);
+    max-inline-size: min(32rem, calc(100vw - 24px));
+    max-block-size: min(24rem, calc(100vh - 24px));
+    margin-block: 6px;
+    padding: 6px;
+    overflow: auto;
+    border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border-medium));
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--bg-primary) 92%, var(--bg-elevated));
+    box-shadow: var(--shadow-lg);
+    color: var(--text-primary);
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+    transform-origin: top center;
+    transition:
+      opacity 160ms var(--ease-standard),
+      transform 160ms var(--ease-standard),
+      display 160ms allow-discrete,
+      overlay 160ms allow-discrete;
+  }
+
+  ::picker(select):popover-open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  @starting-style {
+    ::picker(select):popover-open {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.985);
+    }
+  }
+
+  select:not([multiple]):not([size]) optgroup {
+    margin-block: 2px;
+    padding: 6px 4px 2px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+
+  select:not([multiple]):not([size]) optgroup + optgroup {
+    margin-block-start: 6px;
+    padding-block-start: 8px;
+    border-block-start: 1px solid var(--separator);
+  }
+
+  select:not([multiple]):not([size]) option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-block-size: 36px;
+    margin-block: 2px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.35;
+    letter-spacing: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast),
+      transform var(--transition-fast);
+  }
+
+  select:not([multiple]):not([size]) option:hover:not(:disabled),
+  select:not([multiple]):not([size]) option:focus-visible {
+    outline: none;
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  select:not([multiple]):not([size]) option:active:not(:disabled) {
+    transform: scale(0.99);
+  }
+
+  select:not([multiple]):not([size]) option:checked {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  select:not([multiple]):not([size]) option:disabled {
+    background: transparent;
+    color: var(--text-disabled);
+    cursor: not-allowed;
+    opacity: 0.72;
+  }
+
+  select:not([multiple]):not([size]) option::checkmark {
+    order: 1;
+    margin-inline-start: auto;
+    color: var(--accent);
+  }
+
+  :root[data-theme='light'] select:not([multiple]):not([size]),
+  body.theme-light select:not([multiple]):not([size]) {
+    color-scheme: light;
+  }
+
+  :root[data-theme='dark'] select:not([multiple]):not([size]),
+  body.theme-dark select:not([multiple]):not([size]) {
+    color-scheme: dark;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @supports (appearance: base-select) and selector(::picker(select)) {
+    ::picker(select) {
+      transition: none;
+      transform: none;
+    }
+
+    select::picker-icon {
+      transition: none;
+    }
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  @supports (appearance: base-select) and selector(::picker(select)) {
+    select:not([multiple]):not([size]),
+    ::picker(select) {
+      background: var(--bg-primary);
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+  }
+}
+
+@media (prefers-contrast: more) {
+  @supports (appearance: base-select) and selector(::picker(select)) {
+    select:not([multiple]):not([size]),
+    ::picker(select) {
+      border-color: var(--text-primary);
+      background: var(--bg-primary);
+    }
+
+    select:not([multiple]):not([size]) option:checked {
+      outline: 2px solid currentColor;
+      outline-offset: -2px;
+    }
+  }
+}
+
+@media (forced-colors: active) {
+  @supports (appearance: base-select) and selector(::picker(select)) {
+    select:not([multiple]):not([size]),
+    ::picker(select) {
+      border-color: ButtonText;
+      background: Field;
+      box-shadow: none;
+      color: FieldText;
+      forced-color-adjust: auto;
+    }
+
+    select:not([multiple]):not([size]) option:checked {
+      background: Highlight;
+      color: HighlightText;
+    }
+  }
 }

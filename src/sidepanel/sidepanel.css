@@ -278,6 +278,8 @@ button, input, select, textarea {
   align-items: center;
   gap: var(--space-xs);
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .search-actions .btn {
@@ -788,6 +790,468 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item):not
   color: var(--text-tertiary);
 }
 
+.reuse-no-ai {
+  display: block;
+  margin: 8px 0;
+  color: var(--accent);
+}
+
+.scope-field {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.scope-select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-glass-soft);
+  color: var(--text-primary);
+  padding: 0 10px;
+  font: inherit;
+}
+
+.scope-selection,
+.scope-banner {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.scope-selection {
+  margin: 8px 0;
+}
+
+.scope-banner {
+  margin: var(--space-sm) var(--space-lg) 0;
+}
+
+.workspace-tabs {
+  display: flex;
+  gap: 6px;
+  padding: var(--space-sm) var(--space-lg) 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.workspace-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.workspace-tabs button.is-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+
+.draft-selector,
+.draft-status,
+.comparison-history,
+.excluded-bookmarks {
+  margin: var(--space-sm) var(--space-lg) 0;
+}
+
+.draft-apply-action,
+.pending-apply-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin: var(--space-sm) var(--space-lg) 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border-medium));
+  border-radius: var(--radius-md);
+  background: var(--accent-light);
+}
+
+.draft-apply-action > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.draft-apply-action span,
+.pending-apply-banner span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.draft-apply-action .btn,
+.pending-apply-banner .btn {
+  flex: 0 0 auto;
+}
+
+.draft-selector {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.draft-selector label {
+  color: var(--text-secondary);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+.draft-select-control {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.draft-selector .draft-select-control select {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: 40px;
+  min-width: 0;
+  padding: 0 40px 0 12px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-medium));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-glass-strong) 82%, var(--bg-secondary));
+  box-shadow: var(--shadow-xs);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.draft-selector .draft-select-control select:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-medium));
+  background: var(--bg-glass-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.draft-selector .draft-select-control select:active:not(:disabled) {
+  transform: scale(0.995);
+  transition-duration: 100ms;
+}
+
+.draft-selector .draft-select-control select:focus,
+.draft-selector .draft-select-control select:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border-medium));
+  background: var(--bg-glass-strong);
+  box-shadow: var(--focus-ring);
+}
+
+.draft-selector .draft-select-control select:disabled {
+  color: var(--text-disabled);
+}
+
+.draft-select-chevron {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: 12px;
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: color var(--transition-fast), transform var(--transition-fast), opacity var(--transition-fast);
+}
+
+.draft-select-control:hover .draft-select-chevron,
+.draft-select-control:focus-within .draft-select-chevron {
+  color: var(--accent);
+}
+
+.draft-select-control select:active:not(:disabled) + .draft-select-chevron {
+  transform: translateY(-50%) scale(0.92);
+}
+
+.draft-select-control select:disabled + .draft-select-chevron {
+  opacity: 0.48;
+}
+
+.draft-selector optgroup,
+.draft-selector option {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--app-font);
+  letter-spacing: 0;
+}
+
+.draft-selector optgroup {
+  font-weight: 600;
+}
+
+.draft-selector option {
+  padding: 8px 12px;
+  font-weight: 400;
+}
+
+:root[data-theme='light'] .draft-selector select {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] .draft-selector select {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .draft-selector .draft-select-control select {
+    background: var(--bg-primary);
+    box-shadow: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .draft-selector label {
+    color: var(--text-primary);
+  }
+
+  .draft-selector .draft-select-control select {
+    border-color: var(--text-primary);
+    border-width: 2px;
+    background: var(--bg-primary);
+    box-shadow: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .draft-selector label {
+    color: CanvasText;
+  }
+
+  .draft-selector .draft-select-control select {
+    border-color: ButtonText;
+    background: Field;
+    box-shadow: none;
+    color: FieldText;
+  }
+
+  .draft-select-chevron {
+    color: ButtonText;
+  }
+}
+
+@supports (appearance: base-select) and selector(::picker(select)) {
+  .draft-selector .draft-select-control select {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0;
+    padding-right: 12px;
+  }
+
+  .draft-select-chevron {
+    display: none;
+  }
+}
+
+.draft-status,
+.folder-delete-warning,
+.tree-batch-actions,
+.excluded-bookmarks {
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  padding: 9px 10px;
+  font-size: 12px;
+  background: var(--bg-secondary);
+}
+
+.draft-status--stale,
+.draft-status--legacy,
+.draft-status--unavailable,
+.draft-status--incompatible,
+.folder-delete-warning {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-medium));
+  color: var(--danger);
+}
+
+.draft-status--incompatible {
+  display: grid;
+  gap: 8px;
+}
+
+.draft-status--incompatible ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.draft-status--incompatible .btn {
+  justify-self: start;
+}
+
+.draft-status--ready,
+.draft-status--applied {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-medium));
+}
+
+.excluded-bookmarks {
+  display: grid;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+
+.excluded-bookmarks small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-tree-list,
+.comparison-history {
+  padding: var(--space-md) var(--space-lg);
+}
+
+.live-tree-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-lg) 0;
+}
+
+.live-folder-block,
+.live-bookmark-row {
+  margin: 2px 0;
+}
+
+.live-folder-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.live-folder-toggle {
+  display: grid;
+  place-items: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.live-folder-toggle .chevron {
+  width: 20px;
+}
+
+.live-folder-header .live-folder-row {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+.live-folder-row,
+.live-bookmark-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font: inherit;
+}
+
+.live-folder-row {
+  cursor: pointer;
+}
+
+.live-folder-row:hover,
+.live-folder-toggle:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.live-folder-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-folder-row .count {
+  flex: 0 0 auto;
+}
+
+.live-bookmark-row img {
+  width: 16px;
+  height: 16px;
+}
+
+.tree-batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.tree-batch-actions select {
+  max-width: 180px;
+}
+
+.tree-batch-actions input {
+  width: 132px;
+  min-width: 96px;
+}
+
+.folder-delete-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 4px 24px;
+}
+
+.folder-delete-warning button {
+  flex: 0 0 auto;
+}
+
+.comparison-record {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: 9px 10px;
+  margin-bottom: 8px;
+}
+
+.comparison-record summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.comparison-summary {
+  margin: 8px 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.comparison-record ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.modal-error {
+  margin: 10px 0 0;
+  color: var(--danger);
+}
+
 .modal .actions {
   display: flex;
   justify-content: flex-end;
@@ -877,6 +1341,15 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item):not
   .pending-banner, .status-bar, .edit-hint, .error-msg {
     margin-left: var(--space-md);
     margin-right: var(--space-md);
+  }
+
+  .draft-apply-action {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .draft-apply-action .btn {
+    width: 100%;
   }
 }
 
@@ -1226,6 +1699,23 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item):not
 
 .btn-ghost {
   background: transparent;
+}
+
+/* Keep real bookmark-tree controls above the generic button skin. */
+.live-tree .live-folder-toggle {
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.live-tree .live-folder-toggle:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+}
+
+.live-tree .live-folder-row.is-selected {
+  background: var(--accent-light) !important;
+  color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 600;
 }
 
 .btn-danger,

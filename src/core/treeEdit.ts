@@ -1,7 +1,11 @@
 // 分类树编辑操作（纯函数，返回新树）
 import type { CategoryNode } from '../types';
 
-const FALLBACK = '其他';
+export interface FolderDeletionCheck {
+  canDelete: boolean;
+  bookmarkCount: number;
+  folderName: string;
+}
 
 /** 深拷贝树 */
 function cloneTree(tree: CategoryNode[]): CategoryNode[] {
@@ -20,6 +24,28 @@ function nodeAt(tree: CategoryNode[], path: number[]): CategoryNode | null {
   return node;
 }
 
+function countNodeBookmarks(node: CategoryNode): number {
+  let count = node.bookmarkIds?.length ?? 0;
+  for (const child of node.children ?? []) count += countNodeBookmarks(child);
+  return count;
+}
+
+/** 检查目录及其子目录是否可安全从分类方案中删除。 */
+export function checkFolderDeletion(
+  tree: CategoryNode[],
+  path: number[],
+): FolderDeletionCheck {
+  const node = nodeAt(tree, path);
+  if (!node) return { canDelete: false, bookmarkCount: 0, folderName: '' };
+
+  const bookmarkCount = countNodeBookmarks(node);
+  return {
+    canDelete: bookmarkCount === 0,
+    bookmarkCount,
+    folderName: node.name,
+  };
+}
+
 /** 重命名节点 */
 export function renameNode(tree: CategoryNode[], path: number[], newName: string): CategoryNode[] {
   const next = cloneTree(tree);
@@ -28,80 +54,138 @@ export function renameNode(tree: CategoryNode[], path: number[], newName: string
   return next;
 }
 
-/** 删除节点：其中的书签（含子层）移入顶层「其他」 */
-export function deleteNode(tree: CategoryNode[], path: number[]): CategoryNode[] {
+/**
+ * 仅删除完全为空的分类目录。
+ * 书签（包括子目录中的书签）必须先由用户移动到其他分类，不能被自动归入“其他”。
+ */
+export function deleteEmptyFolder(tree: CategoryNode[], path: number[]): CategoryNode[] {
+  if (!path.length || !checkFolderDeletion(tree, path).canDelete) return tree;
+
   const next = cloneTree(tree);
-  const node = nodeAt(next, path);
-  if (!node) return next;
-
-  // 收集被删节点下全部书签
-  const ids: string[] = [];
-  const collect = (n: CategoryNode) => {
-    ids.push(...(n.bookmarkIds ?? []));
-    n.children?.forEach(collect);
-  };
-  collect(node);
-
-  // 从父级移除
   const parentPath = path.slice(0, -1);
-  const idx = path[path.length - 1];
-  const siblings = parentPath.length ? (nodeAt(next, parentPath)?.children ?? []) : next;
-  siblings.splice(idx, 1);
-
-  // 书签归入顶层「其他」
-  if (ids.length) {
-    let fallback = next.find((n) => n.name === FALLBACK);
-    if (!fallback) {
-      fallback = { name: FALLBACK, bookmarkIds: [] };
-      next.push(fallback);
-    }
-    (fallback.bookmarkIds ??= []).push(...ids);
-  }
+  const index = path[path.length - 1];
+  const siblings = parentPath.length ? nodeAt(next, parentPath)?.children : next;
+  if (!siblings?.[index]) return tree;
+  siblings.splice(index, 1);
   return next;
 }
 
-/** 把一条书签从一个节点移到另一个节点 */
+/**
+ * 兼容旧调用入口：现在同样只允许删除空目录。
+ * @deprecated 请改用 deleteEmptyFolder，并先调用 checkFolderDeletion 展示提示。
+ */
+export function deleteNode(tree: CategoryNode[], path: number[]): CategoryNode[] {
+  return deleteEmptyFolder(tree, path);
+}
+
+/**
+ * 把多条书签移到目标分类。移动后保持书签在原方案树中的相对顺序。
+ */
+export function moveBookmarks(
+  tree: CategoryNode[],
+  bookmarkIds: string[],
+  toPath: number[],
+  toIndex?: number,
+): CategoryNode[] {
+  const selected = new Set(bookmarkIds);
+  if (!selected.size) return tree;
+
+  const next = cloneTree(tree);
+  const target = nodeAt(next, toPath);
+  if (!target) return tree;
+
+  const originalTargetIds = [...(target.bookmarkIds ?? [])];
+  const requestedIndex = toIndex ?? originalTargetIds.length;
+  if (!Number.isInteger(requestedIndex) || requestedIndex < 0 || requestedIndex > originalTargetIds.length) {
+    return tree;
+  }
+
+  const movedIds: string[] = [];
+  const seen = new Set<string>();
+  const removeSelected = (nodes: CategoryNode[]) => {
+    for (const node of nodes) {
+      const ids = node.bookmarkIds;
+      if (ids?.length) {
+        const remaining: string[] = [];
+        for (const id of ids) {
+          if (!selected.has(id)) {
+            remaining.push(id);
+          } else if (!seen.has(id)) {
+            movedIds.push(id);
+            seen.add(id);
+          }
+        }
+        if (remaining.length !== ids.length) node.bookmarkIds = remaining;
+      }
+      if (node.children) removeSelected(node.children);
+    }
+  };
+  removeSelected(next);
+
+  if (!movedIds.length) return tree;
+
+  const targetIds = target.bookmarkIds ??= [];
+  const removedBeforeTargetIndex = originalTargetIds
+    .slice(0, requestedIndex)
+    .filter((id) => selected.has(id)).length;
+  const insertionIndex = toIndex === undefined
+    ? targetIds.length
+    : Math.min(Math.max(requestedIndex - removedBeforeTargetIndex, 0), targetIds.length);
+  targetIds.splice(insertionIndex, 0, ...movedIds);
+  return next;
+}
+
+/** 把一条书签从一个节点移到另一个节点。 */
 export function moveBookmark(
   tree: CategoryNode[],
   bookmarkId: string,
   toPath: number[],
   toIndex?: number,
 ): CategoryNode[] {
+  return moveBookmarks(tree, [bookmarkId], toPath, toIndex);
+}
+
+/** Create a top-level AI category and move the selected plan bookmarks into it atomically. */
+export function createCategoryWithBookmarks(
+  tree: CategoryNode[],
+  name: string,
+  bookmarkIds: string[],
+): CategoryNode[] {
+  const trimmedName = name.trim();
+  if (!trimmedName) return tree;
   const next = cloneTree(tree);
-  let sourceIds: string[] | undefined;
-  let sourceIndex = -1;
-  let removed = false;
-  // 从原位置移除
-  const removeFrom = (nodes: CategoryNode[]): boolean => {
-    for (const n of nodes) {
-      const i = n.bookmarkIds?.indexOf(bookmarkId) ?? -1;
-      if (i >= 0) {
-        sourceIds = n.bookmarkIds;
-        sourceIndex = i;
-        n.bookmarkIds!.splice(i, 1);
-        removed = true;
-        return true;
+  next.push({ name: trimmedName, bookmarkIds: [] });
+  return moveBookmarks(next, bookmarkIds, [next.length - 1]);
+}
+
+/**
+ * 从当前 AI 分类方案移除指定书签。
+ * 此函数只修改方案树；真实 Chrome 书签保留在原位置，由上层应用逻辑决定如何处理。
+ */
+export function removeBookmarksFromPlan(
+  tree: CategoryNode[],
+  bookmarkIds: string[],
+): CategoryNode[] {
+  const selected = new Set(bookmarkIds);
+  if (!selected.size) return tree;
+
+  const next = cloneTree(tree);
+  const removeSelected = (nodes: CategoryNode[]) => {
+    for (const node of nodes) {
+      if (node.bookmarkIds?.length) {
+        node.bookmarkIds = node.bookmarkIds.filter((id) => !selected.has(id));
       }
-      if (n.children && removeFrom(n.children)) return true;
+      if (node.children) removeSelected(node.children);
     }
-    return false;
   };
-  const target = nodeAt(next, toPath);
-  if (!target) return tree;
-  removeFrom(next);
-  if (!removed) return tree;
-  const targetIds = target.bookmarkIds ??= [];
-  const requestedIndex = toIndex ?? targetIds.length;
-  if (requestedIndex < 0 || requestedIndex > targetIds.length + (sourceIds === targetIds ? 1 : 0)) return tree;
-  const adjustedIndex = sourceIds === targetIds && sourceIndex < requestedIndex
-    ? requestedIndex - 1
-    : requestedIndex;
-  targetIds.splice(Math.min(adjustedIndex, targetIds.length), 0, bookmarkId);
+  removeSelected(next);
   return next;
 }
 
-/** 鎶婁竴涓垎绫昏妭鐐硅繛鍚屽叾鎵€鏈夊瓙鍒嗙被鍜屼功绛剧Щ鍏ュ彟涓€涓垎绫昏妭鐐广€?*/
-// Moves the folder as one unit, preserving its complete subtree.
+/**
+ * 把一个分类节点连同其所有子分类和书签移入另一个分类节点。
+ * Moves the folder as one unit, preserving its complete subtree.
+ */
 export function moveNode(
   tree: CategoryNode[],
   fromPath: number[],
@@ -144,9 +228,9 @@ export function moveNode(
 export function pruneEmpty(tree: CategoryNode[]): CategoryNode[] {
   const next = cloneTree(tree);
   const prune = (nodes: CategoryNode[]): CategoryNode[] =>
-    nodes.filter((n) => {
-      if (n.children) n.children = prune(n.children);
-      return (n.bookmarkIds?.length ?? 0) > 0 || (n.children?.length ?? 0) > 0;
+    nodes.filter((node) => {
+      if (node.children) node.children = prune(node.children);
+      return (node.bookmarkIds?.length ?? 0) > 0 || (node.children?.length ?? 0) > 0;
     });
   return prune(next);
 }

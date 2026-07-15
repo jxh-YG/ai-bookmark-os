@@ -2,6 +2,7 @@
 import type {
   BookmarkLabel,
   CategoryNode,
+  ClassificationScope,
   ClassifyProgress,
   ClassifyResult,
   FlatBookmark,
@@ -52,6 +53,50 @@ const BATCH_SIZE = 40;
 const CONCURRENCY = 2;
 const ASSIGN_BATCH_SIZE = 60;
 type ProgressFn = (p: ClassifyProgress) => void;
+
+/** Callers that need to archive the old draft first can defer the legacy storage write. */
+export interface ClassifyRunOptions {
+  persist?: boolean;
+}
+
+const FULL_RESULT_STORAGE_KEY = 'classifyResult';
+const PARTIAL_RESULT_STORAGE_PREFIX = 'partialClassifyResult:';
+const MAX_PARTIAL_SAVED_RESULTS = 5;
+
+function resultStorageKey(scope?: ClassificationScope): string {
+  if (scope?.mode !== 'partial') return FULL_RESULT_STORAGE_KEY;
+  const targetDirectoryId = scope.targetDirectoryId.trim();
+  if (!targetDirectoryId) throw new Error('局部分类必须指定目标目录。');
+  return `${PARTIAL_RESULT_STORAGE_PREFIX}${targetDirectoryId}`;
+}
+
+function resultCreatedAt(value: unknown): number {
+  if (!value || typeof value !== 'object' || !('createdAt' in value)) return 0;
+  const createdAt = (value as { createdAt?: unknown }).createdAt;
+  return typeof createdAt === 'number' ? createdAt : 0;
+}
+
+async function prunePartialResults(currentKey: string): Promise<void> {
+  const data = await chrome.storage.local.get(null);
+  const partialEntries = Object.entries(data)
+    .filter(([key]) => key.startsWith(PARTIAL_RESULT_STORAGE_PREFIX));
+  const removableCount = Math.max(
+    0,
+    partialEntries.length + (data[currentKey] === undefined ? 1 : 0) - MAX_PARTIAL_SAVED_RESULTS,
+  );
+  const staleKeys = partialEntries
+    .filter(([key]) => key !== currentKey)
+    .sort(([, left], [, right]) => resultCreatedAt(left) - resultCreatedAt(right))
+    .slice(0, removableCount)
+    .map(([key]) => key);
+  if (staleKeys.length) await chrome.storage.local.remove(staleKeys);
+}
+
+export async function saveClassifyResult(result: ClassifyResult): Promise<void> {
+  const key = resultStorageKey(result.scope);
+  if (result.scope?.mode === 'partial') await prunePartialResults(key);
+  await chrome.storage.local.set({ [key]: result });
+}
 
 function retryMessage(attempt: number, maxRetries: number, delayMs: number): string {
   return `AI 连接失败，${Math.ceil(delayMs / 1000)} 秒后重连（${attempt}/${maxRetries}）`;
@@ -228,11 +273,6 @@ type PageContext = CachedPageContext;
 
 const META_CONCURRENCY = 4;
 
-function classificationCacheKey(url: string): string {
-  // Version the key so prior title/domain-only labels are refreshed once.
-  return hashUrl(`content-context-v1:${url}`);
-}
-
 function normalizedUrl(url: string): string {
   try {
     const parsed = new URL(url);
@@ -242,6 +282,21 @@ function normalizedUrl(url: string): string {
   } catch {
     return url.slice(0, 500);
   }
+}
+
+function normalizeCacheText(value: string): string {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function classificationCacheKey(bookmark: FlatBookmark, settings?: Settings): string {
+  const includeFolderPath = settings ? respectFolders(settings) : true;
+  const signature = [
+    'content-context-v2',
+    normalizedUrl(bookmark.url),
+    normalizeCacheText(bookmark.title),
+    includeFolderPath ? normalizeCacheText(bookmark.folderPath) : '',
+  ];
+  return hashUrl(JSON.stringify(signature));
 }
 
 function bookmarkSignalLine(
@@ -315,7 +370,7 @@ async function labelBookmarks(
   const contextPending: FlatBookmark[] = [];
 
   for (const b of bookmarks) {
-    const cached = cache[classificationCacheKey(b.url)];
+    const cached = cache[classificationCacheKey(b, settings)];
     if (cacheEnabled && cached) {
       labels[b.id] = { id: b.id, summary: cached.summary, tags: cached.tags };
       if (cached.pageContext) contexts.set(b.id, cached.pageContext);
@@ -338,7 +393,7 @@ async function labelBookmarks(
     if (cacheEnabled) {
       for (const bookmark of contextPending) {
         const context = fetchedContexts.get(bookmark.id);
-        const cached = cache[classificationCacheKey(bookmark.url)];
+        const cached = cache[classificationCacheKey(bookmark, settings)];
         if (context && cached) {
           cached.pageContext = context;
           cacheChanged = true;
@@ -403,7 +458,7 @@ async function labelBookmarks(
       };
       labels[bm.id] = label;
       if (cacheEnabled) {
-        cache[classificationCacheKey(bm.url)] = {
+        cache[classificationCacheKey(bm, settings)] = {
           summary: label.summary,
           tags: label.tags,
           ...(contexts.get(bm.id) ? { pageContext: contexts.get(bm.id) } : {}),
@@ -657,7 +712,12 @@ export async function classify(
   bookmarks: FlatBookmark[],
   onProgress: ProgressFn,
   signal: AbortSignal,
+  scope: ClassificationScope = { mode: 'full' },
+  options: ClassifyRunOptions = {},
 ): Promise<ClassifyResult> {
+  if (scope.mode === 'partial' && !scope.targetDirectoryId.trim()) {
+    throw new Error('局部分类必须指定目标目录。');
+  }
   const preservedPaths = preservedFolderSet(settings);
   const preservedTree = buildPreservedTree(bookmarks, preservedPaths);
   const flexibleBookmarks = bookmarks.filter((bookmark) => !isInPreservedFolder(bookmark, preservedPaths));
@@ -665,7 +725,7 @@ export async function classify(
   const labels = labeled.labels;
 
   onProgress({ phase: 'building', done: 0, total: 1 });
-  const saved = await loadSavedResult();
+  const saved = await loadSavedResult(scope);
   const previousTree = reusePreviousTree(settings) ? saved?.tree : undefined;
   const built = flexibleBookmarks.length
     ? await buildTree(settings, flexibleBookmarks, labels, labeled.contexts, signal, onProgress, previousTree)
@@ -680,9 +740,10 @@ export async function classify(
     tree,
     labels,
     createdAt: Date.now(),
+    ...(scope.mode === 'partial' ? { scope } : {}),
     aiResponses: { labels: labeled.responses, ...(built?.response ? { tree: built.response } : {}), assignments },
   };
-  await chrome.storage.local.set({ classifyResult: result });
+  if (options.persist !== false) await saveClassifyResult(result);
   onProgress({ phase: 'done', done: bookmarks.length, total: bookmarks.length });
   return result;
 }
@@ -729,9 +790,41 @@ export function expandDuplicateBookmarks(
   return { ...result, tree, labels };
 }
 
-export async function loadSavedResult(): Promise<ClassifyResult | null> {
-  const data = await chrome.storage.local.get('classifyResult');
-  return data.classifyResult ?? null;
+export async function loadSavedResult(scope: ClassificationScope = { mode: 'full' }): Promise<ClassifyResult | null> {
+  const key = resultStorageKey(scope);
+  const data = await chrome.storage.local.get(key);
+  return data[key] ?? null;
+}
+
+export interface SavedClassifyResult {
+  storageKey: string;
+  result: ClassifyResult;
+}
+
+function isSavedClassifyResult(value: unknown): value is ClassifyResult {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<ClassifyResult>;
+  return Array.isArray(candidate.tree)
+    && !!candidate.labels
+    && typeof candidate.labels === 'object'
+    && typeof candidate.createdAt === 'number';
+}
+
+/** 列出全量草稿与仍在存储上限内的局部草稿，供工作区切换。 */
+export async function listSavedClassifyResults(): Promise<SavedClassifyResult[]> {
+  const data = await chrome.storage.local.get(null);
+  const full = data[FULL_RESULT_STORAGE_KEY];
+  const results: SavedClassifyResult[] = [];
+  if (isSavedClassifyResult(full)) {
+    results.push({ storageKey: FULL_RESULT_STORAGE_KEY, result: full });
+  }
+  const partialResults = Object.entries(data)
+    .filter(([key, value]) => key.startsWith(PARTIAL_RESULT_STORAGE_PREFIX)
+      && isSavedClassifyResult(value)
+      && value.scope?.mode === 'partial')
+    .map(([storageKey, result]) => ({ storageKey, result: result as ClassifyResult }))
+    .sort((left, right) => right.result.createdAt - left.result.createdAt);
+  return [...results, ...partialResults];
 }
 
 export interface ClassifyEstimate {
@@ -750,7 +843,7 @@ export async function estimateClassify(
 ): Promise<ClassifyEstimate> {
   const cacheEnabled = settings ? useClassificationCache(settings) : true;
   const cache = cacheEnabled ? await loadCache() : {};
-  const cached = cacheEnabled ? bookmarks.filter((b) => cache[classificationCacheKey(b.url)]).length : 0;
+  const cached = cacheEnabled ? bookmarks.filter((b) => cache[classificationCacheKey(b, settings)]).length : 0;
   const pending = bookmarks.length - cached;
   const requests =
     Math.ceil(pending / BATCH_SIZE) + 1 + Math.ceil(bookmarks.length / ASSIGN_BATCH_SIZE);
@@ -786,8 +879,9 @@ export async function classifyIncremental(
     tree,
     labels: { ...existing.labels, ...labels },
     createdAt: Date.now(),
+    ...(existing.scope?.mode === 'partial' ? { scope: existing.scope } : {}),
   };
-  await chrome.storage.local.set({ classifyResult: result });
+  await saveClassifyResult(result);
   onProgress({ phase: 'done', done: newBookmarks.length, total: newBookmarks.length });
   return result;
 }

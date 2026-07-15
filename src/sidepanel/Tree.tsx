@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { BookmarkLabel, CategoryNode, FlatBookmark } from '../types';
+import { checkFolderDeletion, type FolderDeletionCheck } from '../core/treeEdit';
 
 function faviconUrl(pageUrl: string): string {
   const url = new URL(chrome.runtime.getURL('/_favicon/'));
@@ -9,40 +10,126 @@ function faviconUrl(pageUrl: string): string {
 }
 
 function countBookmarks(node: CategoryNode, exists: Map<string, FlatBookmark>): number {
-  let n = node.bookmarkIds?.filter((id) => exists.has(id)).length ?? 0;
-  for (const c of node.children ?? []) n += countBookmarks(c, exists);
-  return n;
+  let count = node.bookmarkIds?.filter((id) => exists.has(id)).length ?? 0;
+  for (const child of node.children ?? []) count += countBookmarks(child, exists);
+  return count;
+}
+
+function collectNodeBookmarkIds(node: CategoryNode): string[] {
+  const ids = [...(node.bookmarkIds ?? [])];
+  for (const child of node.children ?? []) ids.push(...collectNodeBookmarkIds(child));
+  return ids;
+}
+
+interface FolderOption {
+  path: number[];
+  label: string;
+}
+
+function getFolderOptions(nodes: CategoryNode[], parentPath: number[] = [], parentLabel = ''): FolderOption[] {
+  return nodes.flatMap((node, index) => {
+    const path = [...parentPath, index];
+    const label = parentLabel ? `${parentLabel} / ${node.name}` : node.name;
+    return [
+      { path, label },
+      ...getFolderOptions(node.children ?? [], path, label),
+    ];
+  });
 }
 
 export interface TreeEditHandlers {
   onRename: (path: number[], newName: string) => void;
+  /** 仅在 Tree 已确认目录为空时调用。 */
   onDelete: (path: number[]) => void;
   onMoveBookmark: (bookmarkId: string, toPath: number[], toIndex?: number) => void;
+  /** 批量移动由上层一次性持久化，避免逐条更新时覆盖方案状态。 */
+  onMoveBookmarks?: (bookmarkIds: string[], toPath: number[], toIndex?: number) => void;
+  /** 仅从 AI 分类方案移除，真实 Chrome 书签由上层保留在原位置。 */
+  onRemoveBookmarksFromPlan?: (bookmarkIds: string[]) => void;
+  onCreateCategory?: (name: string, bookmarkIds: string[]) => void;
   onMoveFolder: (fromPath: number[], toParentPath: number[], toIndex: number) => void;
   deleteConfirmText: (name: string) => string;
+  deleteEmptyConfirmText?: (name: string) => string;
+  deleteBlockedText?: (name: string, bookmarkCount: number) => string;
   renameLabel?: string;
   deleteLabel?: string;
   moveToRootLabel?: string;
+  selectedCountText?: (count: number) => string;
+  batchTargetPlaceholder?: string;
+  moveSelectedLabel?: string;
+  newCategoryPlaceholder?: string;
+  createCategoryLabel?: string;
+  removeSelectedLabel?: string;
+  clearSelectionLabel?: string;
+  moveBookmarksNeededLabel?: string;
 }
 
 const FOLDER_DRAG_TYPE = 'application/x-ai-bookmark-folder-path';
 const BOOKMARK_DRAG_TYPE = 'text/bookmark-id';
+const BOOKMARK_IDS_DRAG_TYPE = 'application/x-ai-bookmark-ids';
 type FolderDropIntent = 'before' | 'inside' | 'after';
 
 function isSameOrDescendantPath(fromPath: number[], targetPath: number[]): boolean {
   return targetPath.length >= fromPath.length && fromPath.every((part, index) => targetPath[index] === part);
 }
 
+function readBookmarkIds(event: React.DragEvent<HTMLDivElement>): string[] {
+  const rawIds = event.dataTransfer.getData(BOOKMARK_IDS_DRAG_TYPE);
+  if (rawIds) {
+    try {
+      const ids = JSON.parse(rawIds);
+      if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) {
+        return [...new Set(ids)];
+      }
+    } catch {
+      // Fall through to the legacy single-bookmark drag payload.
+    }
+  }
+
+  const id = event.dataTransfer.getData(BOOKMARK_DRAG_TYPE);
+  return id ? [id] : [];
+}
+
 interface TreeProps {
   nodes: CategoryNode[];
   bookmarkById: Map<string, FlatBookmark>;
   labels: Record<string, BookmarkLabel>;
-  /** 提供则启用编辑模式（重命名/删除/拖拽） */
+  /** 提供则启用编辑模式（重命名、删除、拖拽）。 */
   edit?: TreeEditHandlers;
 }
 
 export function Tree({ nodes, bookmarkById, labels, edit }: TreeProps) {
   const [rootDragOver, setRootDragOver] = useState(false);
+  const [selectedBookmarkIds, setSelectedBookmarkIds] = useState<Set<string>>(() => new Set());
+  const [batchTargetPath, setBatchTargetPath] = useState('');
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const folderOptions = getFolderOptions(nodes);
+  const selectedIds = [...selectedBookmarkIds];
+  const selectionEnabled = Boolean(edit?.onMoveBookmarks || edit?.onRemoveBookmarksFromPlan || edit?.onCreateCategory);
+
+  const toggleBookmarkSelection = (bookmarkId: string) => {
+    setSelectedBookmarkIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(bookmarkId)) next.delete(bookmarkId);
+      else next.add(bookmarkId);
+      return next;
+    });
+    setBatchTargetPath('');
+  };
+
+  const moveBookmarks = (bookmarkIds: string[], toPath: number[], toIndex?: number) => {
+    if (!bookmarkIds.length || !edit) return;
+    if (bookmarkIds.length > 1 && edit.onMoveBookmarks) {
+      edit.onMoveBookmarks(bookmarkIds, toPath, toIndex);
+    } else {
+      bookmarkIds.forEach((bookmarkId) => edit.onMoveBookmark(bookmarkId, toPath, toIndex));
+    }
+    setSelectedBookmarkIds((previous) => {
+      const next = new Set(previous);
+      bookmarkIds.forEach((bookmarkId) => next.delete(bookmarkId));
+      return next;
+    });
+  };
 
   const readFolderPath = (event: React.DragEvent<HTMLDivElement>): number[] | null => {
     const rawPath = event.dataTransfer.getData(FOLDER_DRAG_TYPE);
@@ -55,16 +142,98 @@ export function Tree({ nodes, bookmarkById, labels, edit }: TreeProps) {
     }
   };
 
+  const moveSelectedToBatchTarget = () => {
+    if (!batchTargetPath || !selectedIds.length) return;
+    try {
+      const path = JSON.parse(batchTargetPath);
+      if (Array.isArray(path) && path.every(Number.isInteger)) moveBookmarks(selectedIds, path);
+    } catch {
+      // A stale select value is ignored; the next render rebuilds paths from the current tree.
+    }
+  };
+
   return (
     <div className="tree-list">
-      {nodes.map((n, i) => (
+      {edit && selectionEnabled && selectedIds.length > 0 && (
+        <div className="tree-batch-actions" role="group" aria-label="Bookmark batch actions">
+          <span>{edit.selectedCountText?.(selectedIds.length) ?? `已选择 ${selectedIds.length} 条书签`}</span>
+          {edit.onMoveBookmarks && (
+            <>
+              <select
+                value={batchTargetPath}
+                aria-label={edit.batchTargetPlaceholder ?? '选择目标分类'}
+                onChange={(event) => setBatchTargetPath(event.target.value)}
+              >
+                <option value="">{edit.batchTargetPlaceholder ?? '选择目标分类'}</option>
+                {folderOptions.map((option) => (
+                  <option key={JSON.stringify(option.path)} value={JSON.stringify(option.path)}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!batchTargetPath}
+                onClick={moveSelectedToBatchTarget}
+              >
+                {edit.moveSelectedLabel ?? '移动所选书签'}
+              </button>
+            </>
+          )}
+          {edit.onCreateCategory && (
+            <>
+              <input
+                value={newCategoryName}
+                aria-label={edit.newCategoryPlaceholder ?? '新分类名称'}
+                placeholder={edit.newCategoryPlaceholder ?? '新分类名称'}
+                onChange={(event) => setNewCategoryName(event.target.value)}
+              />
+              <button
+                type="button"
+                disabled={!newCategoryName.trim()}
+                onClick={() => {
+                  const name = newCategoryName.trim();
+                  if (!name) return;
+                  edit.onCreateCategory?.(name, selectedIds);
+                  setNewCategoryName('');
+                  setSelectedBookmarkIds(new Set());
+                  setBatchTargetPath('');
+                }}
+              >
+                {edit.createCategoryLabel ?? '新建分类并移动'}
+              </button>
+            </>
+          )}
+          {edit.onRemoveBookmarksFromPlan && (
+            <button
+              type="button"
+              onClick={() => {
+                edit.onRemoveBookmarksFromPlan?.(selectedIds);
+                setSelectedBookmarkIds(new Set());
+              }}
+            >
+              {edit.removeSelectedLabel ?? '从方案移除'}
+            </button>
+          )}
+          <button type="button" onClick={() => setSelectedBookmarkIds(new Set())}>
+            {edit.clearSelectionLabel ?? '取消选择'}
+          </button>
+        </div>
+      )}
+      {nodes.map((node, index) => (
         <Folder
-          key={`${n.name}-${i}`}
-          node={n}
-          path={[i]}
+          key={`${node.name}-${index}`}
+          tree={nodes}
+          node={node}
+          path={[index]}
           bookmarkById={bookmarkById}
           labels={labels}
           edit={edit}
+          selectionEnabled={selectionEnabled}
+          selectedBookmarkIds={selectedBookmarkIds}
+          onToggleBookmarkSelection={toggleBookmarkSelection}
+          onMoveBookmarks={moveBookmarks}
+          onSelectBookmarks={(bookmarkIds) => setSelectedBookmarkIds(new Set(bookmarkIds))}
         />
       ))}
       {edit && (
@@ -92,22 +261,35 @@ export function Tree({ nodes, bookmarkById, labels, edit }: TreeProps) {
 }
 
 function Folder({
+  tree,
   node,
   path,
   bookmarkById,
   labels,
   edit,
+  selectionEnabled,
+  selectedBookmarkIds,
+  onToggleBookmarkSelection,
+  onMoveBookmarks,
+  onSelectBookmarks,
 }: {
+  tree: CategoryNode[];
   node: CategoryNode;
   path: number[];
   bookmarkById: Map<string, FlatBookmark>;
   labels: Record<string, BookmarkLabel>;
   edit?: TreeEditHandlers;
+  selectionEnabled: boolean;
+  selectedBookmarkIds: ReadonlySet<string>;
+  onToggleBookmarkSelection: (bookmarkId: string) => void;
+  onMoveBookmarks: (bookmarkIds: string[], toPath: number[], toIndex?: number) => void;
+  onSelectBookmarks: (bookmarkIds: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(node.name);
   const [folderDropIntent, setFolderDropIntent] = useState<FolderDropIntent | null>(null);
+  const [deleteWarning, setDeleteWarning] = useState<FolderDeletionCheck | null>(null);
 
   const commitRename = () => {
     setRenaming(false);
@@ -145,39 +327,50 @@ function Folder({
     return { parentPath: path, index: node.children?.length ?? 0 };
   };
 
+  const requestDelete = () => {
+    if (!edit) return;
+    const check = checkFolderDeletion(tree, path);
+    if (!check.canDelete) {
+      setDeleteWarning(check);
+      return;
+    }
+    const confirmText = edit.deleteEmptyConfirmText?.(node.name) ?? edit.deleteConfirmText(node.name);
+    if (confirm(confirmText)) edit.onDelete(path);
+  };
+
   return (
     <div className="folder-block">
       <div
         className={`folder-row ${folderDropIntent ? `drag-${folderDropIntent}` : ''}`}
         draggable={!!edit && !renaming}
         onClick={() => !renaming && setOpen(!open)}
-        onDragStart={(e) => {
+        onDragStart={(event) => {
           if (!edit || renaming) return;
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify(path));
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify(path));
         }}
         onDragEnd={() => setFolderDropIntent(null)}
-        onDragOver={(e) => {
+        onDragOver={(event) => {
           if (!edit) return;
-          const folderDrag = e.dataTransfer.types.includes(FOLDER_DRAG_TYPE);
-          const bookmarkDrag = e.dataTransfer.types.includes(BOOKMARK_DRAG_TYPE);
+          const folderDrag = event.dataTransfer.types.includes(FOLDER_DRAG_TYPE);
+          const bookmarkDrag = event.dataTransfer.types.includes(BOOKMARK_DRAG_TYPE);
           if (!folderDrag && !bookmarkDrag) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          setFolderDropIntent(folderDrag ? getDropIntent(e) : 'inside');
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          setFolderDropIntent(folderDrag ? getDropIntent(event) : 'inside');
         }}
         onDragLeave={() => setFolderDropIntent(null)}
-        onDrop={(e) => {
+        onDrop={(event) => {
           if (!edit) return;
-          e.preventDefault();
-          const intent = getDropIntent(e);
+          event.preventDefault();
+          const intent = getDropIntent(event);
           setFolderDropIntent(null);
-          const id = e.dataTransfer.getData(BOOKMARK_DRAG_TYPE);
-          if (id) {
-            edit.onMoveBookmark(id, path, node.bookmarkIds?.length ?? 0);
+          const bookmarkIds = readBookmarkIds(event);
+          if (bookmarkIds.length) {
+            onMoveBookmarks(bookmarkIds, path, node.bookmarkIds?.length ?? 0);
             return;
           }
-          const fromPath = readFolderPath(e);
+          const fromPath = readFolderPath(event);
           if (!fromPath || isSameOrDescendantPath(fromPath, path)) return;
           const destination = folderDropDestination(intent);
           if (intent === 'inside') setOpen(true);
@@ -199,12 +392,12 @@ function Folder({
             className="rename-input"
             value={nameDraft}
             autoFocus
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => setNameDraft(e.target.value)}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => setNameDraft(event.target.value)}
             onBlur={commitRename}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitRename();
-              if (e.key === 'Escape') {
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitRename();
+              if (event.key === 'Escape') {
                 setNameDraft(node.name);
                 setRenaming(false);
               }
@@ -213,9 +406,9 @@ function Folder({
         ) : (
           <span
             className="name"
-            onDoubleClick={(e) => {
+            onDoubleClick={(event) => {
               if (!edit) return;
-              e.stopPropagation();
+              event.stopPropagation();
               setNameDraft(node.name);
               setRenaming(true);
             }}
@@ -225,7 +418,7 @@ function Folder({
         )}
         <span className="count">{countBookmarks(node, bookmarkById)}</span>
         {edit && !renaming && (
-          <span className="folder-actions" onClick={(e) => e.stopPropagation()}>
+          <span className="folder-actions" onClick={(event) => event.stopPropagation()}>
             <button
               type="button"
               className="icon-btn"
@@ -246,9 +439,7 @@ function Folder({
               className="icon-btn icon-btn--subtle"
               title={edit.deleteLabel || 'Delete'}
               aria-label={edit.deleteLabel || 'Delete'}
-              onClick={() => {
-                if (confirm(edit.deleteConfirmText(node.name))) edit.onDelete(path);
-              }}
+              onClick={requestDelete}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <polyline points="3 6 5 6 21 6" />
@@ -258,29 +449,58 @@ function Folder({
           </span>
         )}
       </div>
+      {deleteWarning && (
+        <div className="folder-delete-warning" role="alert">
+          <span>
+            {edit?.deleteBlockedText?.(deleteWarning.folderName, deleteWarning.bookmarkCount)
+              ?? `「${deleteWarning.folderName}」及其子目录包含 ${deleteWarning.bookmarkCount} 条书签。请先将书签移动到其他书签夹后再删除该目录。`}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(true);
+              if (selectionEnabled) onSelectBookmarks(collectNodeBookmarkIds(node));
+              setDeleteWarning(null);
+            }}
+          >
+            {edit?.moveBookmarksNeededLabel ?? '去移动书签'}
+          </button>
+        </div>
+      )}
       {open && (
         <div className="folder-children">
-          {node.children?.map((c, i) => (
+          {node.children?.map((child, index) => (
             <Folder
-              key={`${c.name}-${i}`}
-              node={c}
-              path={[...path, i]}
+              key={`${child.name}-${index}`}
+              tree={tree}
+              node={child}
+              path={[...path, index]}
               bookmarkById={bookmarkById}
               labels={labels}
               edit={edit}
+              selectionEnabled={selectionEnabled}
+              selectedBookmarkIds={selectedBookmarkIds}
+              onToggleBookmarkSelection={onToggleBookmarkSelection}
+              onMoveBookmarks={onMoveBookmarks}
+              onSelectBookmarks={onSelectBookmarks}
             />
           ))}
-          {node.bookmarkIds?.map((id) => {
-            const b = bookmarkById.get(id);
-            if (!b) return null;
+          {node.bookmarkIds?.map((id, index) => {
+            const bookmark = bookmarkById.get(id);
+            if (!bookmark) return null;
             return (
               <BookmarkItem
                 key={id}
-                bookmark={b}
+                bookmark={bookmark}
                 summary={labels[id]?.summary}
                 parentPath={path}
-                index={node.bookmarkIds?.indexOf(id) ?? 0}
+                index={index}
                 edit={edit}
+                selectionEnabled={selectionEnabled}
+                selected={selectedBookmarkIds.has(id)}
+                selectedBookmarkIds={selectedBookmarkIds}
+                onToggleSelection={onToggleBookmarkSelection}
+                onMoveBookmarks={onMoveBookmarks}
               />
             );
           })}
@@ -296,12 +516,22 @@ function BookmarkItem({
   parentPath,
   index,
   edit,
+  selectionEnabled,
+  selected,
+  selectedBookmarkIds,
+  onToggleSelection,
+  onMoveBookmarks,
 }: {
   bookmark: FlatBookmark;
   summary?: string;
   parentPath: number[];
   index: number;
   edit?: TreeEditHandlers;
+  selectionEnabled: boolean;
+  selected: boolean;
+  selectedBookmarkIds: ReadonlySet<string>;
+  onToggleSelection: (bookmarkId: string) => void;
+  onMoveBookmarks: (bookmarkIds: string[], toPath: number[], toIndex?: number) => void;
 }) {
   const [dropIntent, setDropIntent] = useState<'before' | 'after' | null>(null);
 
@@ -317,8 +547,10 @@ function BookmarkItem({
       draggable={!!edit}
       onDragStart={(event) => {
         if (!edit) return;
+        const draggedIds = selectionEnabled && selected ? [...selectedBookmarkIds] : [bookmark.id];
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData(BOOKMARK_DRAG_TYPE, bookmark.id);
+        event.dataTransfer.setData(BOOKMARK_IDS_DRAG_TYPE, JSON.stringify(draggedIds));
       }}
       onDragOver={(event) => {
         if (!edit || !event.dataTransfer.types.includes(BOOKMARK_DRAG_TYPE)) return;
@@ -332,13 +564,22 @@ function BookmarkItem({
         if (!edit) return;
         event.preventDefault();
         event.stopPropagation();
-        const id = event.dataTransfer.getData(BOOKMARK_DRAG_TYPE);
         const intent = getDropIntent(event);
         setDropIntent(null);
-        if (id && id !== bookmark.id) edit.onMoveBookmark(id, parentPath, intent === 'before' ? index : index + 1);
+        const bookmarkIds = readBookmarkIds(event).filter((id) => id !== bookmark.id);
+        if (bookmarkIds.length) onMoveBookmarks(bookmarkIds, parentPath, intent === 'before' ? index : index + 1);
       }}
       onClick={() => chrome.tabs.create({ url: bookmark.url })}
     >
+      {selectionEnabled && (
+        <input
+          type="checkbox"
+          checked={selected}
+          aria-label={`选择书签：${bookmark.title}`}
+          onClick={(event) => event.stopPropagation()}
+          onChange={() => onToggleSelection(bookmark.id)}
+        />
+      )}
       <img src={faviconUrl(bookmark.url)} alt="" />
       <span className="bm-title">{bookmark.title}</span>
     </div>

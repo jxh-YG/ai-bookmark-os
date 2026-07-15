@@ -9,6 +9,101 @@ export interface FlatBookmark {
   folderPath: string;
 }
 
+/** 分类运行范围；full 保持向后兼容的默认行为。 */
+export type ClassificationScope =
+  | { mode: 'full' }
+  | {
+      mode: 'partial';
+      targetDirectoryId: string;
+      targetDirectoryTitle: string;
+      bookmarkCount: number;
+    };
+
+/** A normalized node captured from the live Chrome bookmark tree. */
+export interface BookmarkSnapshotNode {
+  id: string;
+  kind: 'folder' | 'bookmark';
+  parentId?: string;
+  index: number;
+  title: string;
+  url?: string;
+}
+
+/** Immutable live-tree baseline used to prevent stale drafts from being applied. */
+export interface BookmarkTreeSnapshot {
+  version: 1;
+  scope: ClassificationScope;
+  rootId: string;
+  capturedAt: number;
+  fingerprint: string;
+  nodes: Record<string, BookmarkSnapshotNode>;
+}
+
+export type BookmarkTreeChangeKind =
+  | 'added'
+  | 'removed'
+  | 'moved'
+  | 'renamed'
+  | 'reordered'
+  | 'urlChanged';
+
+/** A single live-tree change, with paths resolved against the relevant snapshot. */
+export interface BookmarkTreeChange {
+  kind: BookmarkTreeChangeKind;
+  id: string;
+  nodeKind: BookmarkSnapshotNode['kind'];
+  before?: BookmarkSnapshotNode;
+  after?: BookmarkSnapshotNode;
+  beforePath?: string;
+  afterPath?: string;
+}
+
+export type ClassificationChangeSummary = Record<BookmarkTreeChangeKind, number>;
+
+/** Persisted before/after comparison for one successful classification application. */
+export interface ClassificationChangeSet {
+  id: string;
+  scope: ClassificationScope;
+  createdAt: number;
+  /** Stable plan version used for this application when available. */
+  planVersionId?: string;
+  beforeFingerprint: string;
+  afterFingerprint: string;
+  summary: ClassificationChangeSummary;
+  changes: BookmarkTreeChange[];
+  /** Detail is clipped for storage quota safety; summary remains complete. */
+  truncated?: boolean;
+}
+
+/** Baseline information captured before an AI classification draft is generated. */
+export interface ClassificationSource {
+  version: 1;
+  fingerprint: string;
+  capturedAt: number;
+  bookmarkCount: number;
+  nodeCount: number;
+}
+
+/** Metadata written after a draft is successfully applied to Chrome bookmarks. */
+export interface ClassificationApplication {
+  appliedAt: number;
+  fingerprint: string;
+  rootFolderId?: string;
+  changeSetId?: string;
+}
+
+/** Small workspace index; detailed drafts keep using their existing storage keys. */
+export interface ClassificationWorkspaceState {
+  version: 1;
+  activeFull?: {
+    rootFolderId: string;
+    draftId: string;
+    appliedAt: number;
+    fingerprint: string;
+  };
+  comparisons: ClassificationChangeSet[];
+}
+
 /** LLM label result (Map stage) */
 export interface BookmarkLabel {
   id: string;
@@ -28,13 +123,67 @@ export interface CategoryNode {
 export interface ClassifyResult {
   tree: CategoryNode[];
   labels: Record<string, BookmarkLabel>;
+  /** Bookmarks deliberately left out of this draft; applying the draft must not move them. */
+  excludedBookmarkIds?: string[];
   createdAt: number;
+  /** Stable identifier for workspace selection; absent on legacy saved results. */
+  draftId?: string;
+  /** Last local edit time; absent on legacy saved results. */
+  updatedAt?: number;
+  /** Live bookmark baseline used to determine whether this draft is stale. */
+  source?: ClassificationSource;
+  /** Last successful application metadata. */
+  application?: ClassificationApplication;
+  /** 旧结果没有该字段时按全量分类处理。 */
+  scope?: ClassificationScope;
   /** 本次分类中通过校验的 AI 原始响应，供排查与审计。 */
   aiResponses?: {
     labels: string[];
     tree?: string;
     assignments: string[];
   };
+}
+
+/** Why an immutable AI plan version was added to the local archive. */
+export type ClassificationPlanVersionOrigin = 'replaced' | 'legacy';
+
+/** Compact, reusable snapshot of an AI classification plan. It intentionally excludes labels and raw AI responses. */
+export interface ClassificationPlanVersion {
+  version: 1;
+  /** Stable archive key. Uses the draft id when available and a deterministic legacy id otherwise. */
+  versionId: string;
+  /** The original draft id, when the source draft was created by the current workspace. */
+  draftId?: string;
+  origin: ClassificationPlanVersionOrigin;
+  tree: CategoryNode[];
+  /** Legacy results without a scope are normalized to the full scope before they are archived. */
+  scope: ClassificationScope;
+  /** Bookmarks intentionally excluded from this plan must remain untouched when it is reused. */
+  excludedBookmarkIds: string[];
+  createdAt: number;
+  updatedAt?: number;
+  /** Time this version was preserved, used to retain the ten most recently replaced plans. */
+  archivedAt: number;
+  source?: ClassificationSource;
+  application?: ClassificationApplication;
+}
+
+/** Bounded local history of reusable AI classification plans. */
+export interface ClassificationPlanArchive {
+  version: 1;
+  versions: ClassificationPlanVersion[];
+}
+
+/** Live-bookmark compatibility result for applying a current or archived classification plan. */
+export interface PlanCompatibilityReport {
+  scope: ClassificationScope;
+  fingerprint: string;
+  plannedBookmarkIds: string[];
+  duplicateBookmarkIds: string[];
+  missingBookmarkIds: string[];
+  outsideScopeBookmarkIds: string[];
+  unplannedBookmarkIds: string[];
+  canApply: boolean;
 }
 
 /** Classify progress */
@@ -361,10 +510,30 @@ export interface BookmarkBackup {
 }
 
 /** Apply record for undo */
+export interface RemovedSourceFolder {
+  /** 删除前的目录 ID；撤销时映射到新建目录 ID。 */
+  sourceFolderId: string;
+  title: string;
+  oldParentId: string;
+  oldIndex: number;
+  depth: number;
+  /** pending 覆盖“已记录、尚未确认删除”的恢复窗口。 */
+  removalStatus: 'pending' | 'removed';
+  /** 撤销时重建出的目录 ID，供失败重试复用。 */
+  restoredFolderId?: string;
+}
+
 export interface ApplyRecord {
   createdAt: number;
   rootFolderId: string;
   moves: { id: string; oldParentId: string; oldIndex: number }[];
+  /** 仅局部应用设置；撤销时删除这些新建目录。 */
+  createdFolderIds?: string[];
+  targetDirectoryId?: string;
+  /** 仅局部应用设置；用于阻止未完成回滚后的后续覆盖。 */
+  status?: 'applying' | 'complete' | 'rollback-pending';
+  /** 本次应用后被安全清理的原始空目录，供撤销时重建。 */
+  removedSourceFolders?: RemovedSourceFolder[];
 }
 
 /** Health issue */

@@ -17,11 +17,30 @@
     notifyNew: true,            // 新文章桌面通知
     maxItemsPerFeed: 100,       // 单 feed 最多保留条数
     defaultFolderId: null,      // 新订阅默认挂载的书签文件夹
-    proxyFallback: true,        // 直连失败时回退到公共代理（解决部分源国内不可达）
+    proxyFallback: false,       // 仅在用户明确同意后才将订阅 URL 发送给公共代理
     // 代理 URL 模板，{url} 为源 URL 占位符（经 encodeURIComponent 编码）
     // rss2json 类型（返回 JSON）与 raw 类型（返回原始 XML）均可，自动识别
     proxyUrl: 'https://api.rss2json.com/v1/api.json?rss_url={url}'
   };
+
+  // chrome.storage 不提供 compare-and-swap；同一 key 的读改写必须顺序执行。
+  const mutationQueues = new Map();
+  function mutateStorage(key, updater) {
+    const previous = mutationQueues.get(key) || Promise.resolve();
+    const mutation = previous.catch(() => {}).then(async () => {
+      const stored = await chrome.storage.local.get(key);
+      const next = await updater(stored[key]);
+      if (next !== undefined) await chrome.storage.local.set({ [key]: next });
+      return next;
+    });
+    mutationQueues.set(key, mutation);
+    mutation.finally(() => { if (mutationQueues.get(key) === mutation) mutationQueues.delete(key); }).catch(() => {});
+    return mutation;
+  }
+  function isValidProxyTemplate(template) {
+    if (typeof template !== 'string' || template.length > 2048 || (template.match(/\{url\}/g) || []).length !== 1) return false;
+    try { const url = new URL(template.replace('{url}', 'https%3A%2F%2Fexample.invalid%2Ffeed.xml')); return url.protocol === 'https:' && !!url.hostname; } catch { return false; }
+  }
 
   // ===== Settings =====
   async function getSettings() {
@@ -30,10 +49,11 @@
   }
 
   async function setSettings(patch) {
-    const cur = await getSettings();
-    const next = { ...cur, ...patch };
-    await chrome.storage.local.set({ [SETTINGS_KEY]: next });
-    return next;
+    return mutateStorage(SETTINGS_KEY, (stored) => {
+      const next = { ...DEFAULT_SETTINGS, ...(stored || {}), ...patch };
+      if (next.proxyFallback && !isValidProxyTemplate(next.proxyUrl)) throw new Error('proxy_template_invalid');
+      return next;
+    });
   }
 
   // ===== Feeds =====
@@ -54,58 +74,42 @@
   }
 
   async function addFeed(data) {
-    const feeds = await getAllFeeds();
-    if (feeds.some(f => f.url === data.url)) {
-      return { success: false, error: 'duplicate' };
-    }
-    const feed = {
-      id: 'feed_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-      url: data.url,
-      title: data.title || data.url,
-      siteUrl: data.siteUrl || '',
-      favicon: data.favicon || '',
-      folderId: data.folderId || null,
-      autoBookmark: !!data.autoBookmark,
-      notify: data.notify !== false,
-      lastFetched: 0,
-      etag: null,
-      lastModified: null,
-      failCount: 0,
-      createdAt: Date.now()
-    };
-    feeds.push(feed);
-    await chrome.storage.local.set({ [FEEDS_KEY]: feeds });
-    return { success: true, feed };
+    let outcome;
+    await mutateStorage(FEEDS_KEY, (stored) => {
+      const feeds = stored || [];
+      if (feeds.some(f => f.url === data.url)) { outcome = { success: false, error: 'duplicate' }; return feeds; }
+      const feed = { id: 'feed_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8), url: data.url, title: data.title || data.url, siteUrl: data.siteUrl || '', favicon: data.favicon || '', folderId: data.folderId || null, autoBookmark: !!data.autoBookmark, notify: data.notify !== false, lastFetched: 0, etag: null, lastModified: null, failCount: 0, createdAt: Date.now() };
+      outcome = { success: true, feed };
+      return [...feeds, feed];
+    });
+    return outcome;
   }
 
   async function updateFeed(id, patch) {
-    const feeds = await getAllFeeds();
-    const idx = feeds.findIndex(f => f.id === id);
-    if (idx < 0) return { success: false, error: 'not_found' };
-    feeds[idx] = { ...feeds[idx], ...patch };
-    await chrome.storage.local.set({ [FEEDS_KEY]: feeds });
-    return { success: true, feed: feeds[idx] };
+    let outcome;
+    await mutateStorage(FEEDS_KEY, (stored) => {
+      const feeds = stored || []; const index = feeds.findIndex(f => f.id === id);
+      if (index < 0) { outcome = { success: false, error: 'not_found' }; return feeds; }
+      const next = feeds.slice(); next[index] = { ...next[index], ...patch }; outcome = { success: true, feed: next[index] }; return next;
+    });
+    return outcome;
   }
 
   async function removeFeed(id) {
-    const feeds = await getAllFeeds();
-    const next = feeds.filter(f => f.id !== id);
-    await chrome.storage.local.set({ [FEEDS_KEY]: next });
-    await chrome.storage.local.remove(ITEMS_KEY_PREFIX + id);
+    await mutateStorage(FEEDS_KEY, (stored) => (stored || []).filter(f => f.id !== id));
+    await mutateStorage(ITEMS_KEY_PREFIX + id, () => []);
     return { success: true };
   }
 
   // 按给定 id 序列重排订阅源顺序（数组顺序即持久化顺序）
   // 未出现在 orderedIds 中的 feed 追加到末尾，保持原有相对顺序
   async function reorderFeeds(orderedIds) {
-    const feeds = await getAllFeeds();
-    const idSet = new Set(orderedIds || []);
-    const idxMap = new Map((orderedIds || []).map((id, i) => [id, i]));
-    const present = feeds.filter(f => idSet.has(f.id));
-    const rest = feeds.filter(f => !idSet.has(f.id));
-    present.sort((a, b) => (idxMap.get(a.id) ?? 0) - (idxMap.get(b.id) ?? 0));
-    const next = [...present, ...rest];
-    await chrome.storage.local.set({ [FEEDS_KEY]: next });
+    let next;
+    await mutateStorage(FEEDS_KEY, (stored) => {
+      const feeds = stored || []; const idSet = new Set(orderedIds || []); const idxMap = new Map((orderedIds || []).map((id, i) => [id, i]));
+      const present = feeds.filter(f => idSet.has(f.id)); const rest = feeds.filter(f => !idSet.has(f.id));
+      present.sort((a, b) => (idxMap.get(a.id) ?? 0) - (idxMap.get(b.id) ?? 0)); next = [...present, ...rest]; return next;
+    });
     return { success: true, feeds: next };
   }
 
@@ -132,51 +136,29 @@
 
   // 增量写入：按 guid 去重，返回新增的条目数组
   async function upsertItems(feedId, newItems, maxItems) {
-    const existing = await getItems(feedId);
-    const guidSet = new Set(existing.map(i => i.guid));
-    const added = [];
-    for (const it of newItems) {
-      if (!it.guid) continue;
-      if (guidSet.has(it.guid)) continue;
-      const item = {
-        id: 'item_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-        feedId,
-        guid: it.guid,
-        title: it.title || '',
-        link: it.link || '',
-        author: it.author || '',
-        publishedAt: it.publishedAt || 0,
-        summary: it.summary || '',
-        contentSnippet: it.contentSnippet || '',
-        imageUrl: it.imageUrl || '',
-        read: false,
-        starred: false,
-        bookmarkId: null,
-        savedAt: null,
-        fetchedAt: Date.now()
-      };
-      existing.push(item);
-      guidSet.add(it.guid);
-      added.push(item);
-    }
-    // 排序：按 publishedAt 倒序（无日期的排到后面）
-    existing.sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
-    // LRU 清理
-    const limit = maxItems || 100;
-    if (existing.length > limit) {
-      existing.length = limit;
-    }
-    await chrome.storage.local.set({ [ITEMS_KEY_PREFIX + feedId]: existing });
+    let added;
+    await mutateStorage(ITEMS_KEY_PREFIX + feedId, (stored) => {
+      const existing = (stored || []).slice(); const guidSet = new Set(existing.map(i => i.guid)); added = [];
+      for (const it of newItems) {
+        if (!it.guid || guidSet.has(it.guid)) continue;
+        const item = { id: 'item_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8), feedId, guid: it.guid, title: it.title || '', link: it.link || '', author: it.author || '', publishedAt: it.publishedAt || 0, summary: it.summary || '', contentSnippet: it.contentSnippet || '', imageUrl: it.imageUrl || '', read: false, starred: false, bookmarkId: null, savedAt: null, fetchedAt: Date.now() };
+        existing.push(item); guidSet.add(it.guid); added.push(item);
+      }
+      existing.sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
+      const limit = maxItems || 100; if (existing.length > limit) existing.length = limit;
+      return existing;
+    });
     return added;
   }
 
   async function _patchItem(feedId, itemId, patch) {
-    const items = await getItems(feedId);
-    const it = items.find(i => i.id === itemId);
-    if (!it) return { success: false, error: 'not_found' };
-    Object.assign(it, patch);
-    await chrome.storage.local.set({ [ITEMS_KEY_PREFIX + feedId]: items });
-    return { success: true, item: it };
+    let outcome;
+    await mutateStorage(ITEMS_KEY_PREFIX + feedId, (stored) => {
+      const items = (stored || []).slice(); const index = items.findIndex(i => i.id === itemId);
+      if (index < 0) { outcome = { success: false, error: 'not_found' }; return items; }
+      const item = { ...items[index], ...patch }; items[index] = item; outcome = { success: true, item }; return items;
+    });
+    return outcome;
   }
 
   async function setItemRead(itemId, feedId, read) {
@@ -184,9 +166,7 @@
   }
 
   async function markAllRead(feedId) {
-    const items = await getItems(feedId);
-    for (const it of items) it.read = true;
-    await chrome.storage.local.set({ [ITEMS_KEY_PREFIX + feedId]: items });
+    await mutateStorage(ITEMS_KEY_PREFIX + feedId, (stored) => (stored || []).map(item => ({ ...item, read: true })));
     return { success: true };
   }
 
@@ -236,7 +216,7 @@
 
   global.FeedStore = {
     KEYS: { FEEDS_KEY, SETTINGS_KEY, ITEMS_KEY_PREFIX },
-    DEFAULT_SETTINGS,
+    DEFAULT_SETTINGS, mutateStorage, isValidProxyTemplate,
     getSettings, setSettings,
     getAllFeeds, getFeed, getFeedByUrl, addFeed, updateFeed, removeFeed, reorderFeeds,
     getItems, getAllItems, upsertItems,

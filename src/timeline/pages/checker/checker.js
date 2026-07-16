@@ -21,6 +21,7 @@ const emptyState = document.getElementById('emptyState');
 const loadingState = document.getElementById('loadingState');
 const resultList = document.getElementById('resultList');
 const toastContainer = document.getElementById('toastContainer');
+const checkerLiveStatus = document.getElementById('checkerLiveStatus');
 
 // ===== 状态 =====
 let results = [];
@@ -203,6 +204,8 @@ function updateProgress() {
   const pct = Math.round((checkedCount / totalCount) * 100);
   progressFill.style.width = pct + '%';
   progressText.textContent = `${checkedCount}/${totalCount} (${pct}%)`;
+  progressBar.setAttribute('aria-valuenow', String(pct));
+  checkerLiveStatus.textContent = `已检测 ${checkedCount}/${totalCount}`;
 }
 
 // ===== 渲染单个结果项 =====
@@ -227,14 +230,14 @@ function createResultItem(item) {
       </div>
     </div>
     <div class="result-actions">
-      <button class="result-action-btn" title="${escapeHtml(i18n('openLink'))}" data-action="open">
+      <button class="result-action-btn" title="${escapeHtml(i18n('openLink'))}" aria-label="${escapeHtml(i18n('openLink'))}" data-action="open">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
           <polyline points="15 3 21 3 21 9"/>
           <line x1="10" y1="14" x2="21" y2="3"/>
         </svg>
       </button>
-      <button class="result-action-btn result-action-btn--delete" title="${escapeHtml(i18n('delete'))}" data-action="delete">
+      <button class="result-action-btn result-action-btn--delete" title="${escapeHtml(i18n('delete'))}" aria-label="${escapeHtml(i18n('delete'))}" data-action="delete">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="3 6 5 6 21 6"/>
           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -307,6 +310,17 @@ function scheduleResultsRender() {
       resultsRenderFrame = setTimeout(flush, 0);
     }
   }, 100);
+}
+
+function updateResultItem(item) {
+  if (currentFilter !== 'all' && item.checkResult.status !== currentFilter) {
+    renderResults();
+    return;
+  }
+  const existing = [...resultList.querySelectorAll('.result-item')]
+    .find((element) => element.dataset.id === item.bookmark.id);
+  if (existing) existing.replaceWith(createResultItem(item));
+  else renderResults();
 }
 
 async function requestCheckerPermission() {
@@ -418,7 +432,7 @@ async function startCheck() {
       countResultStatus(checkResult.status);
       updateProgress();
       updateSummary();
-      scheduleResultsRender();
+      updateResultItem(item);
     }
   }
 
@@ -466,6 +480,7 @@ function stopCheck() {
 
 // ===== 删除单个书签 =====
 async function deleteSingleBookmark(id, url, element) {
+  if (!confirm('确认删除此书签？删除后可在“最近删除”中恢复。')) return;
   try {
     const result = await chrome.runtime.sendMessage({ action: 'deleteBookmark', id, url });
     if (result && result.success) {
@@ -482,7 +497,7 @@ async function deleteSingleBookmark(id, url, element) {
           emptyState.style.display = 'flex';
         }
       }, 200);
-      showToast(i18n('deleted'), 'success');
+      showToast('已删除，可在“最近删除”中恢复。', 'success');
     } else {
       showToast(i18n('deleteFailed'), 'error');
     }

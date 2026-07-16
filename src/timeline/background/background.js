@@ -346,13 +346,63 @@ const STORAGE_KEY_IMPORT_OPERATIONS = 'bookmark_import_operations';
 const DEFAULT_TOMBSTONE_RETENTION_DAYS = 30;
 const TOMBSTONE_RETENTION_OPTIONS = [7, 15, 30, 60];
 
+// storage.local has no compare-and-swap. Serialize each logical resource so
+// concurrent bookmark events cannot commit stale arrays over user mutations.
+const storageMutationQueues = new Map();
+function mutateStorageResource(key, mutation) {
+  const previous = storageMutationQueues.get(key) || Promise.resolve();
+  const next = previous.catch(() => undefined).then(async () => {
+    const data = await chrome.storage.local.get(key);
+    const value = await mutation(data[key]);
+    await chrome.storage.local.set({ [key]: value });
+    return value;
+  });
+  storageMutationQueues.set(key, next);
+  return next.finally(() => {
+    if (storageMutationQueues.get(key) === next) storageMutationQueues.delete(key);
+  });
+}
+
+async function mutateStoredBookmarks(mutation) {
+  return mutateStorageResource(STORAGE_KEY, (current) => mutation(Array.isArray(current) ? current : []));
+}
+
+async function mutateTombstones(mutation) {
+  return mutateStorageResource(STORAGE_KEY_TOMBSTONES, (current) => mutation(Array.isArray(current) ? current : []));
+}
+function isSafeExternalUrl(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 4096) return false;
+  try {
+    return /^(https?|ftp):$/.test(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
+
+function hasValidStringList(value, maxItems = 50, maxLength = 120) {
+  return Array.isArray(value) && value.length <= maxItems && value.every((item) => typeof item === 'string' && item.trim().length > 0 && item.length <= maxLength);
+}
+
+function validateRuntimeMessage(message) {
+  if (message.action !== undefined && typeof message.action !== 'string') return 'invalid_action';
+  if (message.id !== undefined && (typeof message.id !== 'string' || message.id.length > 256)) return 'invalid_id';
+  if (message.feedId !== undefined && (typeof message.feedId !== 'string' || message.feedId.length > 256)) return 'invalid_feed_id';
+  if (message.title !== undefined && (typeof message.title !== 'string' || message.title.length > 512)) return 'invalid_title';
+  if (message.url !== undefined && !isSafeExternalUrl(message.url)) return 'invalid_url';
+  if (message.ids !== undefined && !hasValidStringList(message.ids, 500, 256)) return 'invalid_ids';
+  for (const key of ['tags', 'addTags', 'removeTags', 'urls', 'orderedIds']) {
+    if (message[key] !== undefined && !hasValidStringList(message[key], key === 'urls' ? 50 : 500, key === 'urls' ? 4096 : 120)) return `invalid_${key}`;
+  }
+  if (Array.isArray(message.urls) && !message.urls.every(isSafeExternalUrl)) return 'invalid_urls';
+  return null;
+}
 async function getStoredBookmarks() {
   const result = await chrome.storage.local.get(STORAGE_KEY);
   return result[STORAGE_KEY] || [];
 }
 
 async function setStoredBookmarks(bookmarks) {
-  await chrome.storage.local.set({ [STORAGE_KEY]: bookmarks });
+  await mutateStorageResource(STORAGE_KEY, () => bookmarks);
 }
 
 async function getTombstones() {
@@ -361,7 +411,7 @@ async function getTombstones() {
 }
 
 async function setTombstones(tombstones) {
-  await chrome.storage.local.set({ [STORAGE_KEY_TOMBSTONES]: tombstones });
+  await mutateStorageResource(STORAGE_KEY_TOMBSTONES, () => tombstones);
 }
 
 async function getImportOperations() {
@@ -370,9 +420,10 @@ async function getImportOperations() {
 }
 
 async function saveImportOperation(operation) {
-  const operations = await getImportOperations();
-  const next = [operation, ...operations.filter(item => item.id !== operation.id)].slice(0, 10);
-  await chrome.storage.local.set({ [STORAGE_KEY_IMPORT_OPERATIONS]: next });
+  await mutateStorageResource(STORAGE_KEY_IMPORT_OPERATIONS, (current) => {
+    const operations = Array.isArray(current) ? current : [];
+    return [operation, ...operations.filter(item => item.id !== operation.id)].slice(0, 10);
+  });
 }
 
 async function getAppSettings() {
@@ -439,13 +490,12 @@ async function getEffectiveRetentionDays() {
 async function addTombstone(item) {
   if (!item || !item.url) return;
   const retentionDays = await getEffectiveRetentionDays();
-  const tombstones = await pruneTombstones(await getTombstones(), retentionDays);
-  const key = item.url + '_' + item.dateAdded;
-  if (tombstones.some(t => (t.url + '_' + t.dateAdded) === key)) {
-    return;
-  }
-  tombstones.push({ ...item, deletedAt: Date.now(), deletedFrom: item.deletedFrom || 'manual' });
-  await setTombstones(tombstones);
+  await mutateTombstones(async (current) => {
+    const tombstones = await pruneTombstones(current, retentionDays);
+    const key = item.url + '_' + item.dateAdded;
+    if (tombstones.some(t => (t.url + '_' + t.dateAdded) === key)) return tombstones;
+    return [...tombstones, { ...item, deletedAt: Date.now(), deletedFrom: item.deletedFrom || 'manual' }];
+  });
 }
 
 // ===== 工具函数 =====
@@ -649,7 +699,14 @@ async function importBookmarksV2(message) {
   const operation = {
     id: makeImportOperationId(),
     startedAt: Date.now(),
+    version: 2,
     status: 'running',
+    request: {
+      bookmarks: incoming,
+      rootTitle: message.rootTitle || 'AI Bookmark OS 导入',
+      rootDate: message.rootDate || getImportFolderDate(),
+      duplicateStrategy: message.duplicateStrategy || 'merge',
+    },
     created: [],
     skipped: [],
     merged: [],
@@ -737,8 +794,38 @@ async function importBookmarksV2(message) {
   }
 }
 
+async function retryImportOperation(operationId) {
+  const operation = (await getImportOperations()).find((item) => item.id === operationId);
+  if (!operation?.request?.bookmarks?.length) return { success: false, error: 'import_operation_not_retryable' };
+  return importBookmarksV2({ ...operation.request, retryOf: operationId });
+}
+
+async function rollbackImportOperation(operationId) {
+  const operation = (await getImportOperations()).find((item) => item.id === operationId);
+  if (!operation) return { success: false, error: 'import_operation_not_found' };
+  const failed = [];
+  let removed = 0;
+  for (const created of operation.created || []) {
+    try {
+      const [node] = await chrome.bookmarks.get(created.id);
+      if (!node?.url || node.url !== created.url || node.title !== created.title) {
+        failed.push({ id: created.id, error: 'bookmark_changed_after_import' });
+        continue;
+      }
+      await chrome.bookmarks.remove(created.id);
+      removed++;
+    } catch {
+      // Already removed is a successful rollback outcome.
+    }
+  }
+  await mutateStoredBookmarks((bookmarks) => bookmarks.filter((item) => !(operation.created || []).some((created) => created.id === item.id)));
+  operation.rollback = { attemptedAt: Date.now(), removed, failed };
+  operation.status = failed.length ? 'rollback_partial' : 'rolled_back';
+  await saveImportOperation(operation);
+  return { success: failed.length === 0, removed, failed };
+}
 // ===== 同步操作 =====
-async function syncAllBookmarks() {
+async function syncAllBookmarksOnce() {
   try {
     const tree = await chrome.bookmarks.getTree();
     const allBookmarks = await collectAllBookmarks(tree);
@@ -829,7 +916,33 @@ async function syncAllBookmarks() {
       return b.dateAdded - a.dateAdded;
     });
 
-    await setStoredBookmarks(merged);
+    await mutateStoredBookmarks((latest) => {
+      const latestById = new Map(latest.map((item) => [item.id, item]));
+      const latestByKey = new Map(latest.map((item) => [item.url + '_' + item.dateAdded, item]));
+      return merged.map((item) => {
+        const current = latestById.get(item.id) || latestByKey.get(item.url + '_' + item.dateAdded);
+        if (!current) return item;
+        return {
+          ...item,
+          pinned: !!current.pinned,
+          pinnedAt: current.pinnedAt || null,
+          clickCount: current.clickCount || 0,
+          lastClickedAt: current.lastClickedAt || null,
+          tags: current.tags?.length ? Array.from(new Set([...(current.tags || []), ...(item.tags || [])])) : item.tags,
+          contentText: current.contentText || item.contentText,
+          contentTitle: current.contentTitle || item.contentTitle,
+          contentExcerpt: current.contentExcerpt || item.contentExcerpt,
+          contentMetaDesc: current.contentMetaDesc || item.contentMetaDesc,
+          contentMetaKeywords: current.contentMetaKeywords || item.contentMetaKeywords,
+          contentHeadings: current.contentHeadings || item.contentHeadings,
+          contentStructuredTypes: current.contentStructuredTypes || item.contentStructuredTypes,
+          contentFetchedAt: current.contentFetchedAt || item.contentFetchedAt,
+          contentStatus: current.contentStatus || item.contentStatus,
+          contentFailureReason: current.contentFailureReason || item.contentFailureReason,
+          contentSource: current.contentSource || item.contentSource,
+        };
+      });
+    });
     return { total: merged.length, added, tagged: taggedCount };
   } catch (err) {
     console.error('全量同步失败:', err);
@@ -837,6 +950,13 @@ async function syncAllBookmarks() {
   }
 }
 
+let syncAllInFlight = null;
+async function syncAllBookmarks() {
+  if (!syncAllInFlight) {
+    syncAllInFlight = syncAllBookmarksOnce().finally(() => { syncAllInFlight = null; });
+  }
+  return syncAllInFlight;
+}
 // 暂存一键收藏的标签/文件夹信息，供 onCreated → addSingleBookmark 消费
 // key: url, value: { tags, folderName, folderPath }
 const pendingQuickBookmarks = new Map();
@@ -2274,6 +2394,15 @@ self.saveRssArticleAsBookmark = saveRssArticleAsBookmark;
 
 // ===== 消息监听 =====
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || typeof message !== 'object' || (sender?.id && sender.id !== chrome.runtime.id)) {
+    sendResponse({ success: false, error: 'invalid_message_sender' });
+    return false;
+  }
+  const validationError = validateRuntimeMessage(message);
+  if (validationError) {
+    sendResponse({ success: false, error: validationError });
+    return false;
+  }
   switch (message.action) {
     case 'syncAll':
       syncAllBookmarks().then((result) => {
@@ -2421,18 +2550,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'togglePin':
       (async () => {
-        const bookmarks = await getStoredBookmarks();
-        const item = bookmarks.find((b) => b.id === message.id);
-        if (item) {
+        let pinned = null;
+        await mutateStoredBookmarks((bookmarks) => {
+          const item = bookmarks.find((candidate) => candidate.id === message.id);
+          if (!item) return bookmarks;
           item.pinned = !item.pinned;
-          if (item.pinned && !item.pinnedAt) item.pinnedAt = Date.now();
-          if (!item.pinned) item.pinnedAt = null;
-          await setStoredBookmarks(bookmarks);
-          sendResponse({ success: true, pinned: item.pinned });
-        } else {
-          sendResponse({ success: false, error: 'Bookmark not found' });
-        }
-      })();
+          item.pinnedAt = item.pinned ? (item.pinnedAt || Date.now()) : null;
+          pinned = item.pinned;
+          return bookmarks;
+        });
+        sendResponse(pinned === null
+          ? { success: false, error: 'bookmark_not_found' }
+          : { success: true, pinned });
+      })().catch((err) => sendResponse({ success: false, error: err?.message || 'toggle_pin_failed' }));
       return true;
 
     case 'bulkUpdate':
@@ -2524,6 +2654,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })();
       return true;
 
+    case 'retryImportOperation':
+      (async () => {
+        sendResponse(await retryImportOperation(message.operationId));
+      })();
+      return true;
+
+    case 'rollbackImportOperation':
+      (async () => {
+        sendResponse(await rollbackImportOperation(message.operationId));
+      })();
+      return true;
     case 'getTombstones':
       (async () => {
         const retentionDays = await getEffectiveRetentionDays();

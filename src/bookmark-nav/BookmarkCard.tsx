@@ -83,6 +83,9 @@ export function BookmarkCard({
                   event.stopPropagation();
                   onTagClick?.(tag);
                 }}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                }}
               >
                 <span className="bookmark-card__tag-dot" style={{ background: color }} aria-hidden="true" />
                 <span>{tag}</span>

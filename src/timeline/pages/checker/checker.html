@@ -83,10 +83,12 @@
       </div>
 
       <!-- 进度条 -->
-      <div class="progress-bar" id="progressBar" style="display:none;">
+      <div class="progress-bar" id="progressBar" style="display:none;" role="progressbar" aria-label="链接检测进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <div class="progress-fill" id="progressFill"></div>
         <span class="progress-text" id="progressText">0%</span>
       </div>
+
+      <p id="checkerLiveStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
 
       <!-- 空状态 -->
       <div id="emptyState" class="state-view">
@@ -108,7 +110,7 @@
       </div>
 
       <!-- 结果列表 -->
-      <div id="resultList" class="result-list" style="display:none;"></div>
+      <div id="resultList" class="result-list" style="display:none;" aria-label="检测结果"></div>
     </div>
   </div>
 

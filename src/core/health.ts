@@ -6,36 +6,23 @@ import type { ProbeResult } from './probe';
 
 const DEAD_CHECK_CONCURRENCY = 8;
 
-/** 纯跟踪参数（不影响页面内容），规范化时剔除 */
-const TRACKING_PARAMS = /^(utm_\w+|fbclid|gclid|dclid|msclkid|igshid|spm|scm|from|ref|refer|referrer|share_source|share_medium|vd_source|_ga|mc_cid|mc_eid)$/i;
-
 /**
- * URL 规范化：协议统一 https、域名小写去 www、去 #锚点、
- * 剔除跟踪参数、参数按名排序、去尾部斜杠。
+ * 默认只对完全相同的 URL 判定重复。协议、www、锚点和查询参数可能携带
+ * 真实业务语义，归一化后的近似匹配只能作为后续人工建议，不能自动清理。
  */
-function normalizeUrl(u: string): string {
+function normalizeExactUrl(value: string): string {
   try {
-    const url = new URL(u);
-    url.protocol = 'https:';
-    url.hash = '';
-    url.hostname = url.hostname.toLowerCase().replace(/^www\./, '');
-    const kept = [...url.searchParams.entries()]
-      .filter(([k]) => !TRACKING_PARAMS.test(k))
-      .sort(([a], [b]) => a.localeCompare(b));
-    url.search = kept.length ? '?' + kept.map(([k, v]) => `${k}=${v}`).join('&') : '';
-    return url.toString().replace(/\/+$/, '');
+    return new URL(value).toString();
   } catch {
-    // 解析失败退回轻量处理
-    return u.replace(/#.*$/, '').replace(/\/+$/, '').replace(/^http:/, 'https:');
+    return value;
   }
 }
-
 /** 重复检测：同一规范化 URL 出现多次，第一条视为保留项 */
 export function findDuplicates(bookmarks: FlatBookmark[]): HealthIssue[] {
   const seen = new Map<string, FlatBookmark>();
   const issues: HealthIssue[] = [];
   for (const b of bookmarks) {
-    const key = normalizeUrl(b.url);
+    const key = normalizeExactUrl(b.url);
     const first = seen.get(key);
     if (first) {
       issues.push({ bookmark: b, kind: 'duplicate', detail: first.id });

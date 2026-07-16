@@ -317,6 +317,31 @@ function isBookmarkNode(node: chrome.bookmarks.BookmarkTreeNode | undefined): bo
 
 const FULL_PLAN_CHANGED_ERROR = '分类方案中的书签已变化，请基于当前书签重新生成全量分类方案。';
 const PARTIAL_PLAN_CHANGED_ERROR = '所选目录中的书签已变化，请重新执行分类。';
+export interface ClassificationApplySource {
+  scope: ClassificationScope;
+  fingerprint: string;
+}
+
+async function assertClassificationSourceCurrent(
+  source: ClassificationApplySource | undefined,
+  expectedScope: ClassificationScope,
+  errorMessage: string,
+): Promise<void> {
+  // Legacy callers have no snapshot baseline. The current UI always supplies one;
+  // retain this compatibility path for older stored integrations while validating
+  // every versioned plan before any Chrome bookmark write.
+  if (!source) return;
+  if (source.fingerprint.length === 0 || source.scope.mode !== expectedScope.mode) {
+    throw new Error(errorMessage);
+  }
+  if (expectedScope.mode === 'partial' && (
+    source.scope.mode !== 'partial' || source.scope.targetDirectoryId !== expectedScope.targetDirectoryId
+  )) {
+    throw new Error(errorMessage);
+  }
+  const current = await captureBookmarkSnapshot(expectedScope);
+  if (current.fingerprint !== source.fingerprint) throw new Error(errorMessage);
+}
 
 async function assertFullPlannedBookmarksExist(bookmarkIds: string[]): Promise<void> {
   for (const id of bookmarkIds) {
@@ -412,8 +437,10 @@ export async function applyToBookmarks(
   tree: CategoryNode[],
   onProgress?: (done: number, total: number) => void,
   onComplete?: (result: ApplyResult) => void,
+  source?: ClassificationApplySource,
 ): Promise<void> {
   assertNoDuplicatePlannedBookmarkIds(tree, '分类方案包含重复书签 ID，请重新生成全量分类方案。');
+  await assertClassificationSourceCurrent(source, { mode: 'full' }, FULL_PLAN_CHANGED_ERROR);
   await recoverPendingFullReplacement();
   const [applyRecord, partialRecords] = await Promise.all([
     getApplyRecord(),
@@ -1462,8 +1489,12 @@ export async function applyPartialToBookmarks(
   tree: CategoryNode[],
   targetDirectoryId: string,
   onProgress?: (done: number, total: number) => void,
+  source?: ClassificationApplySource,
 ): Promise<ApplyResult & { title: string }> {
   assertNoDuplicatePlannedBookmarkIds(tree, '分类方案包含重复书签 ID，请重新执行局部分类。');
+  await assertClassificationSourceCurrent(source, {
+    mode: 'partial', targetDirectoryId, targetDirectoryTitle: '', bookmarkCount: 0,
+  }, PARTIAL_PLAN_CHANGED_ERROR);
   await recoverPendingFullReplacement();
   const [legacyRecord, partialRecords] = await Promise.all([
     getApplyRecord(),

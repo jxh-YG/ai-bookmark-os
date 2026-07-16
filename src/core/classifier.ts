@@ -62,6 +62,7 @@ export interface ClassifyRunOptions {
 const FULL_RESULT_STORAGE_KEY = 'classifyResult';
 const PARTIAL_RESULT_STORAGE_PREFIX = 'partialClassifyResult:';
 const MAX_PARTIAL_SAVED_RESULTS = 5;
+const MAX_SAVED_RESULT_BYTES = 8 * 1024 * 1024;
 
 function resultStorageKey(scope?: ClassificationScope): string {
   if (scope?.mode !== 'partial') return FULL_RESULT_STORAGE_KEY;
@@ -95,7 +96,14 @@ async function prunePartialResults(currentKey: string): Promise<void> {
 export async function saveClassifyResult(result: ClassifyResult): Promise<void> {
   const key = resultStorageKey(result.scope);
   if (result.scope?.mode === 'partial') await prunePartialResults(key);
-  await chrome.storage.local.set({ [key]: result });
+  // Persist the usable plan, not unbounded raw model transcripts.
+  const persisted: ClassifyResult = { ...result };
+  delete persisted.aiResponses;
+  const bytes = new TextEncoder().encode(JSON.stringify(persisted)).length;
+  if (bytes > MAX_SAVED_RESULT_BYTES) {
+    throw new Error('分类草稿过大，无法安全保存；请缩小分类范围后重试。');
+  }
+  await chrome.storage.local.set({ [key]: persisted });
 }
 
 function retryMessage(attempt: number, maxRetries: number, delayMs: number): string {
@@ -383,7 +391,7 @@ async function labelBookmarks(
 
   for (const b of bookmarks) {
     const cached = cache[classificationCacheKey(b, settings)];
-    if (cacheEnabled && cached) {
+    if (cacheEnabled && cached && cached.sourceUrl === normalizedUrl(b.url)) {
       labels[b.id] = { id: b.id, summary: cached.summary, tags: cached.tags };
       if (cached.pageContext) contexts.set(b.id, cached.pageContext);
       else contextPending.push(b);
@@ -471,6 +479,7 @@ async function labelBookmarks(
       labels[bm.id] = label;
       if (cacheEnabled) {
         cache[classificationCacheKey(bm, settings)] = {
+          sourceUrl: normalizedUrl(bm.url),
           summary: label.summary,
           tags: label.tags,
           cachedAt: Date.now(),

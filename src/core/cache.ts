@@ -23,6 +23,8 @@ export interface CachedPageContext {
 }
 
 export interface CachedLabel extends Omit<BookmarkLabel, 'id'> {
+  /** Canonical URL retained to reject compact hash collisions. */
+  sourceUrl?: string;
   /** Context used for this label, retained so a cache hit skips page fetching too. */
   pageContext?: CachedPageContext;
   /** Written at classification time; legacy entries are timestamped on first read. */

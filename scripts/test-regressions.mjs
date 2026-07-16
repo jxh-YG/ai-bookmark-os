@@ -1270,7 +1270,7 @@ function testUiContracts() {
   assert.match(sidepanel, /expandDuplicateBookmarks\(r, sourceBookmarks\)/, 'duplicate expansion must stay inside the source scope');
   assert.match(
     sidepanel,
-    /applyPartialToBookmarks\(plan\.tree, scope\.targetDirectoryId\)/,
+    /applyPartialToBookmarks\(plan\.tree, scope\.targetDirectoryId, undefined, \{ scope, fingerprint: plan\.source\.fingerprint \}\)/,
     'partial results must use the scoped bookmark writer',
   );
   assert.match(

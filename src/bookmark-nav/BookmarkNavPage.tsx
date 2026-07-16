@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
   AlertCircle,
@@ -30,6 +30,10 @@ type LabelCache = Record<string, LabelLike>;
 type BookmarkMeta = { title: string; description: string };
 type BookmarkMetaMap = Record<string, BookmarkMeta>;
 type BookmarkEnrichment = { summary: string; tags: string[] };
+
+const META_FAILURE_TTL_MS = 5 * 60 * 1000;
+const META_REQUESTS = new Map<string, Promise<BookmarkMeta | null>>();
+const META_FAILURE_UNTIL = new Map<string, number>();
 
 interface BookmarkFolderNode {
   id: string;
@@ -74,6 +78,29 @@ function getFaviconUrl(url: string) {
     return chrome.runtime.getURL(`_favicon/?pageUrl=${encodeURIComponent(url)}&size=32`);
   }
   return '';
+}
+
+async function fetchBookmarkMeta(url: string): Promise<BookmarkMeta | null> {
+  const failedUntil = META_FAILURE_UNTIL.get(url) ?? 0;
+  if (failedUntil > Date.now()) return null;
+  const existing = META_REQUESTS.get(url);
+  if (existing) return existing;
+  const request = chrome.runtime.sendMessage({ action: 'fetchMeta', url })
+    .then((meta: BookmarkMeta | null) => {
+      if (!meta?.title && !meta?.description) {
+        META_FAILURE_UNTIL.set(url, Date.now() + META_FAILURE_TTL_MS);
+        return null;
+      }
+      META_FAILURE_UNTIL.delete(url);
+      return meta;
+    })
+    .catch(() => {
+      META_FAILURE_UNTIL.set(url, Date.now() + META_FAILURE_TTL_MS);
+      return null;
+    })
+    .finally(() => META_REQUESTS.delete(url));
+  META_REQUESTS.set(url, request);
+  return request;
 }
 
 function cleanMetaText(value = '') {
@@ -314,6 +341,10 @@ export function BookmarkNavPage() {
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(() => new Set());
+  const [metaUnavailable, setMetaUnavailable] = useState(false);
+  const tagTriggerRef = useRef<HTMLButtonElement>(null);
+  const metaRequestId = useRef(0);
+  const bookmarkRefreshTimer = useRef<number | null>(null);
 
   const loadBookmarks = useCallback(async () => {
     setStatus('loading');
@@ -367,7 +398,13 @@ export function BookmarkNavPage() {
 
   useEffect(() => {
     if (!canUseBookmarksApi()) return;
-    const refresh = () => loadBookmarks();
+    const refresh = () => {
+      if (bookmarkRefreshTimer.current !== null) window.clearTimeout(bookmarkRefreshTimer.current);
+      bookmarkRefreshTimer.current = window.setTimeout(() => {
+        bookmarkRefreshTimer.current = null;
+        void loadBookmarks();
+      }, 120);
+    };
     chrome.bookmarks.onCreated.addListener(refresh);
     chrome.bookmarks.onRemoved.addListener(refresh);
     chrome.bookmarks.onChanged.addListener(refresh);
@@ -377,6 +414,7 @@ export function BookmarkNavPage() {
       chrome.bookmarks.onRemoved.removeListener(refresh);
       chrome.bookmarks.onChanged.removeListener(refresh);
       chrome.bookmarks.onMoved.removeListener(refresh);
+      if (bookmarkRefreshTimer.current !== null) window.clearTimeout(bookmarkRefreshTimer.current);
     };
   }, [loadBookmarks]);
 
@@ -424,23 +462,27 @@ export function BookmarkNavPage() {
     if (!targets.length) return;
 
     let cancelled = false;
+    const requestId = ++metaRequestId.current;
     let cursor = 0;
     const workers = Array.from({ length: 3 }, async () => {
       while (!cancelled && cursor < targets.length) {
         const bookmark = targets[cursor++];
         try {
-          const meta = (await chrome.runtime.sendMessage({ type: 'fetchMeta', url: bookmark.url })) as BookmarkMeta | null;
-          if (!cancelled && meta && (meta.title || meta.description)) {
+          const meta = await fetchBookmarkMeta(bookmark.url);
+          if (!cancelled && requestId === metaRequestId.current && meta) {
             setBookmarkMeta((current) => ({ ...current, [bookmark.id]: meta }));
+          } else if (!cancelled && requestId === metaRequestId.current && !meta) {
+            setMetaUnavailable(true);
           }
         } catch {
-          // Keep the card usable if the service worker cannot fetch metadata.
+          setMetaUnavailable(true);
         }
       }
     });
     void Promise.all(workers);
     return () => {
       cancelled = true;
+      metaRequestId.current += 1;
     };
   }, [bookmarkMeta, getBookmarkLabel, status, visibleBookmarks]);
 
@@ -489,7 +531,17 @@ export function BookmarkNavPage() {
       if (!target?.closest?.('.bookmark-tag-dropdown')) setTagMenuOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
-    return () => document.removeEventListener('mousedown', onPointerDown);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setTagMenuOpen(false);
+      tagTriggerRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, [tagMenuOpen]);
 
 
@@ -559,11 +611,13 @@ export function BookmarkNavPage() {
 
         <div className="bookmark-tag-dropdown" data-open={tagMenuOpen ? '1' : '0'}>
           <button
+            ref={tagTriggerRef}
             type="button"
             className={`bookmark-tag-dropdown__trigger${activeTags.length ? ' has-value' : ''}`}
             onClick={() => setTagMenuOpen((open) => !open)}
             aria-expanded={tagMenuOpen}
-            aria-haspopup="listbox"
+            aria-haspopup="menu"
+            aria-controls="bookmark-tag-menu"
           >
             <Tags size={15} strokeWidth={2} aria-hidden="true" />
             <span className="bookmark-tag-dropdown__text">
@@ -579,7 +633,7 @@ export function BookmarkNavPage() {
             <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
           </button>
           {tagMenuOpen ? (
-            <div className="bookmark-tag-dropdown__menu" role="listbox" aria-label="选择标签">
+            <div id="bookmark-tag-menu" className="bookmark-tag-dropdown__menu" role="menu" aria-label="选择标签">
               <div className="bookmark-tag-dropdown__head">
                 <strong>按标签筛选</strong>
                 {activeTags.length > 0 ? (
@@ -590,6 +644,8 @@ export function BookmarkNavPage() {
                 type="button"
                 className={`bookmark-tag-dropdown__item bookmark-tag-dropdown__item--all${activeTags.length === 0 ? ' is-active' : ''}`}
                 onClick={() => { clearTags(); setTagMenuOpen(false); }}
+                role="menuitemcheckbox"
+                aria-checked={activeTags.length === 0}
               >
                 <span className="bookmark-tag-dropdown__dot bookmark-tag-dropdown__dot--all" aria-hidden="true" />
                 <span className="bookmark-tag-dropdown__item-main">全部标签</span>
@@ -604,6 +660,8 @@ export function BookmarkNavPage() {
                       key={tag}
                       className={`bookmark-tag-dropdown__item${active ? ' is-active' : ''}`}
                       onClick={() => toggleTag(tag)}
+                      role="menuitemcheckbox"
+                      aria-checked={active}
                     >
                       <span className="bookmark-tag-dropdown__dot" style={{ background: color }} aria-hidden="true" />
                       <span className="bookmark-tag-dropdown__item-main">{tag}</span>
@@ -675,6 +733,10 @@ export function BookmarkNavPage() {
             </p>
           </div>
 
+
+          {metaUnavailable ? (
+            <p className="bookmark-nav-meta-notice" role="status">部分页面摘要暂不可用，已使用书签信息生成导航内容。</p>
+          ) : null}
 
           {status === 'loading' ? (
             <section className="bookmark-grid" aria-label="正在加载书签">

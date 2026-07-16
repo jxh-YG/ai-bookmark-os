@@ -116,6 +116,22 @@
     return null;
   }
 
+  function _isPrivateOrLocalHost(hostname) {
+    const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+    if (!host || host === 'localhost' || host.endsWith('.localhost') || host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) return true;
+    const parts = host.split('.');
+    if (parts.length !== 4 || parts.some(part => !/^\d+$/.test(part))) return false;
+    const nums = parts.map(Number);
+    return nums.some(n => n > 255) || nums[0] === 10 || nums[0] === 127 || (nums[0] === 169 && nums[1] === 254) || (nums[0] === 172 && nums[1] >= 16 && nums[1] <= 31) || (nums[0] === 192 && nums[1] === 168) || nums[0] === 0;
+  }
+
+  function _canUseProxy(feedUrl, proxyTemplate) {
+    if (!FeedStore.isValidProxyTemplate || !FeedStore.isValidProxyTemplate(proxyTemplate)) return false;
+    try {
+      const url = new URL(feedUrl);
+      return url.protocol === 'https:' && !_isPrivateOrLocalHost(url.hostname);
+    } catch { return false; }
+  }
   // ===== 公共代理回退（直连失败时使用）=====
   // 代理服务器代抓源站，不受扩展 host 权限/CORS/混合内容限制
   // 适用于国内直连超时的源（如 Cloudflare 托管站点）
@@ -231,7 +247,7 @@
   // 流程：直连（含 HTTPS 升级/GitHub 镜像回退）→ 直连失败且开启代理时走 rss2json 代理
   async function fetchOne(feed) {
     const settings = await FeedStore.getSettings();
-    const allowProxy = settings.proxyFallback !== false; // 默认开启
+    const allowProxy = settings.proxyFallback === true && _canUseProxy(feed.url, settings.proxyUrl);
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
@@ -399,7 +415,7 @@
   // 流程：直连 → 直连失败且开启代理时走 rss2json 代理
   async function fetchAndInit(feedUrl) {
     const settings = await FeedStore.getSettings();
-    const allowProxy = settings.proxyFallback !== false; // 默认开启
+    const allowProxy = settings.proxyFallback === true && _canUseProxy(feedUrl, settings.proxyUrl);
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     let directErr = null;

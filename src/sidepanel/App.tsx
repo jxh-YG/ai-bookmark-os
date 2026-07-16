@@ -1038,7 +1038,7 @@ export function App() {
         throw new Error('分类方案生成后书签已变化，请基于最新书签重新生成方案。');
       }
       if (scope.mode === 'partial') {
-        const applied = await applyPartialToBookmarks(plan.tree, scope.targetDirectoryId);
+        const applied = await applyPartialToBookmarks(plan.tree, scope.targetDirectoryId, undefined, { scope, fingerprint: plan.source.fingerprint });
         chromeApplyCommitted = true;
         const scopeLabel = scope.targetDirectoryTitle || applied.title;
         setNotice(partialText.applied(scopeLabel, applied.moveCount, applied.cleanedFolderCount));
@@ -1048,7 +1048,7 @@ export function App() {
         let applied: ApplyResult = { moveCount: 0, cleanedFolderCount: 0 };
         await applyToBookmarks(plan.tree, undefined, (nextApplied) => {
           applied = nextApplied;
-        });
+        }, { scope, fingerprint: plan.source.fingerprint });
         chromeApplyCommitted = true;
         const preservedNotice = applied.preservedPreviousRoot
           ? (resolveLang(uiSettings.language) === 'zh'

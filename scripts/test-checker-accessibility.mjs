@@ -9,6 +9,20 @@ assert.match(checker, /function stopCheck\(\)[\s\S]{0,350}activeRunId \+= 1/);
 assert.match(checker, /status:\s*['"]cancelled['"]/);
 assert.match(checker, /checkerLastResult[\s\S]{0,900}results:/);
 
+const checkerHtml = readFileSync('src/timeline/pages/checker/checker.html', 'utf8');
+assert.match(checker, /function updateResultItem\(item\)/);
+assert.match(checker, /确认删除此书签/);
+assert.match(checker, /checkerLiveStatus\.textContent/);
+assert.match(checkerHtml, /role="progressbar"/);
+assert.match(checkerHtml, /aria-live="polite"/);
+
+const navPage = readFileSync('src/bookmark-nav/BookmarkNavPage.tsx', 'utf8');
+const bookmarkCard = readFileSync('src/bookmark-nav/BookmarkCard.tsx', 'utf8');
+assert.match(navPage, /const META_REQUESTS = new Map/);
+assert.match(navPage, /META_FAILURE_TTL_MS/);
+assert.match(navPage, /event\.key !== 'Escape'/);
+assert.match(navPage, /role="menuitemcheckbox"/);
+assert.match(bookmarkCard, /onKeyDown=\{\(event\) => \{\s*event\.stopPropagation\(\);/);
 const app = readFileSync('src/sidepanel/App.tsx', 'utf8');
 assert.match(app, /function useDialogAccessibility\(/);
 assert.match(app, /const applyDialogRef = useDialogAccessibility/);

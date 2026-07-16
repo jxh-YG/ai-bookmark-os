@@ -203,7 +203,7 @@
       probeUrl(msg.url).then(sendResponse);
       return true;
     }
-    if (msg.type === 'fetchMeta' && typeof msg.url === 'string') {
+    if ((msg.type === 'fetchMeta' || msg.action === 'fetchMeta') && typeof msg.url === 'string') {
       fetchPageMeta(msg.url).then(sendResponse);
       return true;
     }

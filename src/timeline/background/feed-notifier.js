@@ -1,8 +1,7 @@
 // background/feed-notifier.js
 // 新文章桌面通知 + popup badge 未读数
-// 同时承担"新文章自动写入挂载书签文件夹"的副作用
 //
-// 依赖：FeedStore, chrome.notifications, chrome.action, chrome.bookmarks
+// 依赖：FeedStore, chrome.notifications, chrome.action
 // 由 feed-fetcher 在 pollAll 完成后调用 global.onFeedPollComplete(results)
 
 (function (global) {
@@ -20,7 +19,7 @@
     } catch { /* 静默 */ }
   }
 
-  // 拉取完成后：发通知 + 自动存书签 + 更新 badge
+  // 拉取完成后：发通知 + 更新 badge
   async function onFeedPollComplete(results) {
     if (!Array.isArray(results)) return;
     const settings = await FeedStore.getSettings();
@@ -35,11 +34,6 @@
       // 通知：全局开关 + 该 feed 通知开关
       if (settings.notifyNew && feed.notify) {
         _notifyNewArticles(feed, r.added);
-      }
-
-      // 自动存为书签：feed 挂载了文件夹且开启 autoBookmark
-      if (feed.autoBookmark && feed.folderId) {
-        _autoBookmarkItems(feed, r.added).catch(() => {});
       }
     }
 
@@ -66,30 +60,6 @@
         });
       }
     } catch { /* 静默 */ }
-  }
-
-  // 把新文章写入 feed 挂载的书签文件夹（按 URL 查重）
-  async function _autoBookmarkItems(feed, items) {
-    if (!feed.folderId) return;
-    for (const it of items) {
-      if (!it.link) continue;
-      try {
-        const existing = await chrome.bookmarks.search({ url: it.link });
-        if (existing.length > 0) {
-          // 已存在书签，仅记录关联
-          await FeedStore.setItemBookmark(it.id, feed.id, existing[0].id);
-          continue;
-        }
-        const created = await chrome.bookmarks.create({
-          parentId: feed.folderId,
-          title: it.title || it.link,
-          url: it.link
-        });
-        await FeedStore.setItemBookmark(it.id, feed.id, created.id);
-      } catch (e) {
-        console.warn('[RSS] auto bookmark failed:', e.message);
-      }
-    }
   }
 
   // 通知点击：打开 standalone 订阅视图

@@ -112,18 +112,27 @@ writeFileSync(
   'utf8',
 );
 
-// 3) SW bridge
+// 3) SW bridge — probe-core 必须先于 ai-sw-bridge 加载
 ensureDir(path.join(dist, 'background'));
+copyFileSync(
+  path.join(root, 'src', 'bridge', 'probe-core.js'),
+  path.join(dist, 'background', 'probe-core.js'),
+);
 copyFileSync(
   path.join(root, 'src', 'bridge', 'ai-sw-bridge.js'),
   path.join(dist, 'background', 'ai-sw-bridge.js'),
 );
 
-// 4) Inject bridge into SW
+// 4) Inject bridge into SW (probe-core must load first)
 const bgPath = path.join(dist, 'background', 'background.js');
 let bg = readFileSync(bgPath, 'utf8');
-if (!bg.includes("importScripts('ai-sw-bridge.js')") && !bg.includes('importScripts("ai-sw-bridge.js")')) {
-  writeFileSync(bgPath, "importScripts('ai-sw-bridge.js');\n" + bg, 'utf8');
+const alreadyHasBridge = bg.includes("importScripts('ai-sw-bridge.js')") || bg.includes('importScripts("ai-sw-bridge.js")');
+if (!alreadyHasBridge) {
+  writeFileSync(
+    bgPath,
+    "importScripts('probe-core.js');\nimportScripts('ai-sw-bridge.js');\n" + bg,
+    'utf8',
+  );
 }
 
 // 5) Locales branded as AI Bookmark OS

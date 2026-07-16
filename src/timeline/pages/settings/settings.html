@@ -1049,6 +1049,27 @@
             </div>
           </div>
 
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label">批次大小与并发数</div>
+              <div class="setting-desc">打标批次默认 40 条/批；并发数默认 2；分配批次默认 60 条/批。按 API 速率限制调整，超出范围将自动夹拢。</div>
+            </div>
+            <div class="setting-control tree-stability-controls">
+              <label class="tree-number-field">
+                <span>打标批次（10–80）</span>
+                <input type="number" id="treeLabelBatchSizeInput" class="tagrule-input" min="10" max="80" step="5" value="40">
+              </label>
+              <label class="tree-number-field">
+                <span>并发数（1–5）</span>
+                <input type="number" id="treeLabelConcurrencyInput" class="tagrule-input" min="1" max="5" step="1" value="2">
+              </label>
+              <label class="tree-number-field">
+                <span>分配批次（10–100）</span>
+                <input type="number" id="treeAssignBatchSizeInput" class="tagrule-input" min="10" max="100" step="5" value="60">
+              </label>
+            </div>
+          </div>
+
           <div class="setting-row tree-prompt-row">
             <div class="setting-main" style="flex: 1; min-width: 0;">
               <div class="setting-label">分类提示词</div>

@@ -145,17 +145,33 @@ export function moveBookmark(
   return moveBookmarks(tree, [bookmarkId], toPath, toIndex);
 }
 
-/** Create a top-level AI category and move the selected plan bookmarks into it atomically. */
+/** Create a new AI category with optional parent path, and move selected bookmarks into it atomically.
+ *  - If `parentPath` is omitted, the category is created at the root level (original behavior).
+ *  - If `parentPath` is provided, the category is created as a child of that node.
+ */
 export function createCategoryWithBookmarks(
   tree: CategoryNode[],
   name: string,
   bookmarkIds: string[],
+  parentPath?: number[],
 ): CategoryNode[] {
   const trimmedName = name.trim();
   if (!trimmedName) return tree;
   const next = cloneTree(tree);
-  next.push({ name: trimmedName, bookmarkIds: [] });
-  return moveBookmarks(next, bookmarkIds, [next.length - 1]);
+
+  if (!parentPath || parentPath.length === 0) {
+    // Root-level creation (existing behavior)
+    next.push({ name: trimmedName, bookmarkIds: [] });
+    return moveBookmarks(next, bookmarkIds, [next.length - 1]);
+  }
+
+  // Nested creation under an existing node
+  const parent = nodeAt(next, parentPath);
+  if (!parent) return tree;
+  parent.children ??= [];
+  parent.children.push({ name: trimmedName, bookmarkIds: [] });
+  const childPath = [...parentPath, parent.children.length - 1];
+  return moveBookmarks(next, bookmarkIds, childPath);
 }
 
 /**

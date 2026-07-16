@@ -52,6 +52,20 @@ async function chatJson<T>(
 const BATCH_SIZE = 40;
 const CONCURRENCY = 2;
 const ASSIGN_BATCH_SIZE = 60;
+
+/** 从 settings 读取批次大小和并发数（带安全范围夹拢） */
+function batchSize(settings: Settings): number {
+  const v = Number((settings as any).labelBatchSize ?? BATCH_SIZE);
+  return Number.isFinite(v) ? Math.min(80, Math.max(10, Math.floor(v))) : BATCH_SIZE;
+}
+function concurrency(settings: Settings): number {
+  const v = Number((settings as any).labelConcurrency ?? CONCURRENCY);
+  return Number.isFinite(v) ? Math.min(5, Math.max(1, Math.floor(v))) : CONCURRENCY;
+}
+function assignBatchSize(settings: Settings): number {
+  const v = Number((settings as any).assignBatchSize ?? ASSIGN_BATCH_SIZE);
+  return Number.isFinite(v) ? Math.min(100, Math.max(10, Math.floor(v))) : ASSIGN_BATCH_SIZE;
+}
 type ProgressFn = (p: ClassifyProgress) => void;
 
 /** Callers that need to archive the old draft first can defer the legacy storage write. */
@@ -179,6 +193,12 @@ function preservedFolderSet(settings: Settings): Set<string> {
   return new Set((settings.preservedFolderPaths ?? []).map((p) => fullFolderKey(p)).filter(Boolean));
 }
 
+/** 保留文件夹的 Chrome ID 集合（当路径匹配失效时的备用） */
+function preservedFolderIdSet(settings: Settings): Set<string> {
+  if (!respectFolders(settings)) return new Set();
+  return new Set((settings.preservedFolderIds ?? []).filter(Boolean));
+}
+
 function preservedFolderPathFor(bookmark: FlatBookmark, paths: Set<string>): string | null {
   const key = fullFolderKey(bookmark.folderPath);
   if (!key) return null;
@@ -187,7 +207,19 @@ function preservedFolderPathFor(bookmark: FlatBookmark, paths: Set<string>): str
     .sort((a, b) => a.split('/').length - b.split('/').length)[0] ?? null;
 }
 
-function isInPreservedFolder(bookmark: FlatBookmark, paths: Set<string>): boolean {
+/**
+ * 判断书签是否位于保留文件夹中。
+ * 优先通过路径字符串匹配；若路径集合为空（用户重命名了保留文件夹等），
+ * 则尝试通过 Chrome folderPath 中各级目录 ID 反查保留 ID 集合。
+ * 注意：此处的 ID 反查依赖 folderPath 中存储了目录 ID 的扩展方案，
+ * 但标准 FlatBookmark 只有字符串 folderPath，因此 ID 匹配需要在
+ * 调用层（classify 入口）将 preservedFolderIds 转换为对应的路径后传入。
+ */
+function isInPreservedFolder(
+  bookmark: FlatBookmark,
+  paths: Set<string>,
+  _preservedIds?: Set<string>,
+): boolean {
   return preservedFolderPathFor(bookmark, paths) !== null;
 }
 
@@ -308,11 +340,12 @@ function classificationCacheKey(bookmark: FlatBookmark, settings?: Settings): st
     customApiStyle: settings?.customApiStyle ?? '',
     customFullUrl: !!settings?.customFullUrl,
   }));
+  // v4: folderPath 不再作为缓存键的一部分——书签移动后应复用已有标签结果，
+  //     folderPath 仅作为 LLM 的参考信号，不影响缓存命中。
   const signature = [
-    'content-context-v3',
+    'content-context-v4',
     normalizedUrl(bookmark.url),
     normalizeCacheText(bookmark.title),
-    includeFolderPath ? normalizeCacheText(bookmark.folderPath) : '',
     folderRulesVersion,
     promptVersion,
   ];
@@ -424,50 +457,79 @@ async function labelBookmarks(
   }
 
   const batches: FlatBookmark[][] = [];
-  for (let i = 0; i < pending.length; i += BATCH_SIZE) {
-    batches.push(pending.slice(i, i + BATCH_SIZE));
+  const bs = batchSize(settings);
+  for (let i = 0; i < pending.length; i += bs) {
+    batches.push(pending.slice(i, i + bs));
   }
 
-  const runBatch = async (batch: FlatBookmark[]) => {
+  /** 对单个批次调用 LLM 并解析标签结果；返回解析后的标签数组 */
+  const labelOneBatch = async (batch: FlatBookmark[]): Promise<BookmarkLabel[]> => {
     const list = batch
       .map((b) => bookmarkSignalLine(b, { settings, context: contexts.get(b.id) }))
       .join('\n');
-
     const response = await chatJson<BookmarkLabel[]>(
-          settings,
-          [
-            {
-              role: 'system',
-              content:
-                resolveClassifyPrompts(settings).label +
-                originalFolderInstruction(settings) +
-                builtInRuleInstruction(settings) +
-                '\n\n重要：你的整段回复必须是一个 JSON 数组，不要输出任何解释、标题或 markdown 代码围栏。',
-            },
-            {
-              role: 'user',
-              content: `分析以下书签，并只返回 JSON 数组：\n${list}`,
-            },
-          ],
-          {
-            signal,
-            maxTokens: 8192,
-            onRetry: (info) =>
-              onProgress({
-                phase: 'labeling',
-                done,
-                total,
-                message: retryMessage(info.attempt, info.maxRetries, info.delayMs),
-              }),
-          },
-        );
-    const parsed = response.data;
+      settings,
+      [
+        {
+          role: 'system',
+          content:
+            resolveClassifyPrompts(settings).label +
+            originalFolderInstruction(settings) +
+            builtInRuleInstruction(settings) +
+            '\n\n重要：你的整段回复必须是一个 JSON 数组，不要输出任何解释、标题或 markdown 代码围栏。',
+        },
+        {
+          role: 'user',
+          content: `分析以下书签，并只返回 JSON 数组：\n${list}`,
+        },
+      ],
+      {
+        signal,
+        maxTokens: 8192,
+        onRetry: (info) =>
+          onProgress({
+            phase: 'labeling',
+            done,
+            total,
+            message: retryMessage(info.attempt, info.maxRetries, info.delayMs),
+          }),
+      },
+    );
     responses.push(response.content);
+    return response.data;
+  };
+
+  /**
+   * 批次运行：若 LLM 返回结果不完整，自动拆成两个半批次重试（最多拆分一次）。
+   * 这样避免因单次 token 截断直接 fatal，同时保持大批次的效率优势。
+   */
+  const runBatch = async (batch: FlatBookmark[]) => {
     const byId = new Map(batch.map((b) => [b.id, b]));
+    let parsed: BookmarkLabel[];
+    try {
+      parsed = await labelOneBatch(batch);
+    } catch (err) {
+      // 非不完整结果的错误直接上浮
+      if (!(err instanceof Error) || !err.message.includes('不完整')) throw err;
+      parsed = [];
+    }
+
     const returnedIds = new Set(parsed.map((item) => String(item.id)));
-    if (returnedIds.size !== batch.length || batch.some((b) => !returnedIds.has(b.id))) {
+    const isComplete = returnedIds.size === batch.length && batch.every((b) => returnedIds.has(b.id));
+
+    if (!isComplete && batch.length > 10) {
+      // 降级：拆成两半分别重试
+      const half = Math.ceil(batch.length / 2);
+      const [firstHalf, secondHalf] = [batch.slice(0, half), batch.slice(half)];
+      const [parsedA, parsedB] = await Promise.all([
+        labelOneBatch(firstHalf),
+        labelOneBatch(secondHalf),
+      ]);
+      parsed = [...parsedA, ...parsedB];
+    } else if (!isComplete) {
       throw new Error('AI 标签结果不完整，已取消本次分类，未写入书签分类结果。');
     }
+
     for (const item of parsed) {
       const bm = byId.get(String(item.id));
       if (!bm) continue;
@@ -492,9 +554,9 @@ async function labelBookmarks(
     onProgress({ phase: 'labeling', done, total, message: undefined });
   };
 
-  // 简单并发池
+  // 并发池（从 settings 读取并发数）
   let idx = 0;
-  const workers = Array.from({ length: CONCURRENCY }, async () => {
+  const workers = Array.from({ length: concurrency(settings) }, async () => {
     while (idx < batches.length) {
       if (signal.aborted) throw new DOMException('已取消', 'AbortError');
       const batch = batches[idx++];
@@ -649,59 +711,86 @@ async function assignBookmarks(
   const total = bookmarks.length;
   let done = 0;
   const responses: string[] = [];
-  onProgress({ phase: 'assigning', done, total });
 
-  for (let i = 0; i < bookmarks.length; i += ASSIGN_BATCH_SIZE) {
+  /** 对单个批次调用 LLM 并返回分配结果 */
+  const assignOneBatch = async (
+    batch: FlatBookmark[],
+  ): Promise<{ id: string; cat: number }[]> => {
+    const aiList = batch
+      .map((b) => bookmarkSignalLine(b, { settings, context: contexts.get(b.id), label: labels[b.id] }))
+      .join('\n');
+    const response = await chatJson<{ id: string; cat: number }[]>(
+      settings,
+      [
+        {
+          role: 'system',
+          content:
+            `以下是分类目录（编号. 路径）：\n${pathList}\n\n` +
+            resolveClassifyPrompts(settings).assign +
+            originalFolderInstruction(settings) +
+            builtInRuleInstruction(settings) +
+            '\n\n重要：整段回复必须是 JSON 数组，例如 [{"id":"1","cat":0}]，不要其他文字。',
+        },
+        { role: 'user', content: `分配以下书签，只返回 JSON 数组：\n${aiList}` },
+      ],
+      {
+        signal,
+        maxTokens: 8192,
+        onRetry: (info) =>
+          onProgress({
+            phase: 'assigning',
+            done,
+            total,
+            message: retryMessage(info.attempt, info.maxRetries, info.delayMs),
+          }),
+      },
+    );
+    responses.push(response.content);
+    return response.data;
+  };
+
+  for (let i = 0; i < bookmarks.length; i += assignBatchSize(settings)) {
     if (signal.aborted) throw new DOMException('已取消', 'AbortError');
-    const batch = bookmarks.slice(i, i + ASSIGN_BATCH_SIZE);
-    const needAi = batch;
+    const batch = bookmarks.slice(i, i + assignBatchSize(settings));
     const assignments: { id: string; cat: number }[] = [];
 
-    if (needAi.length) {
-      const aiList = needAi
-        .map((b) => bookmarkSignalLine(b, { settings, context: contexts.get(b.id), label: labels[b.id] }))
-        .join('\n');
-      const response = await chatJson<{ id: string; cat: number }[]>(
-            settings,
-            [
-              {
-                role: 'system',
-                content:
-                  `以下是分类目录（编号. 路径）：\n${pathList}\n\n` +
-                  resolveClassifyPrompts(settings).assign +
-                  originalFolderInstruction(settings) +
-                  builtInRuleInstruction(settings) +
-                  '\n\n重要：整段回复必须是 JSON 数组，例如 [{"id":"1","cat":0}]，不要其他文字。',
-              },
-              { role: 'user', content: `分配以下书签，只返回 JSON 数组：\n${aiList}` },
-            ],
-            {
-              signal,
-              maxTokens: 8192,
-              onRetry: (info) =>
-                onProgress({
-                  phase: 'assigning',
-                  done,
-                  total,
-                  message: retryMessage(info.attempt, info.maxRetries, info.delayMs),
-                }),
-            },
-          );
-      responses.push(response.content);
-      const aiAssignments = response.data;
-      const assignmentById = new Map<string, number>();
-      for (const a of aiAssignments) {
-        const idStr = String(a.id);
-        if (assignmentById.has(idStr) || !Number.isInteger(a.cat) || !paths[a.cat]) {
-          throw new Error('AI 分配结果包含重复或无效分类编号，已取消本次分类，未写入书签分类结果。');
-        }
+    let aiAssignments: { id: string; cat: number }[];
+    try {
+      aiAssignments = await assignOneBatch(batch);
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.includes('不完整')) throw err;
+      aiAssignments = [];
+    }
+
+    // 如果结果不完整且批次足够大，降级到半批次重试
+    const assignmentById = new Map<string, number>();
+    for (const a of aiAssignments) {
+      const idStr = String(a.id);
+      if (!assignmentById.has(idStr) && Number.isInteger(a.cat) && paths[a.cat]) {
         assignmentById.set(idStr, a.cat);
       }
-      if (assignmentById.size !== needAi.length || needAi.some((b) => !assignmentById.has(b.id))) {
-        throw new Error('AI 分配结果不完整，已取消本次分类，未写入书签分类结果。');
-      }
-      for (const [id, cat] of assignmentById) assignments.push({ id, cat });
     }
+    const isComplete = assignmentById.size === batch.length && batch.every((b) => assignmentById.has(b.id));
+
+    if (!isComplete && batch.length > 10) {
+      // 降级：拆成两半分别重试
+      const half = Math.ceil(batch.length / 2);
+      const [firstHalf, secondHalf] = [batch.slice(0, half), batch.slice(half)];
+      const [assignedA, assignedB] = await Promise.all([
+        assignOneBatch(firstHalf),
+        assignOneBatch(secondHalf),
+      ]);
+      for (const a of [...assignedA, ...assignedB]) {
+        const idStr = String(a.id);
+        if (!assignmentById.has(idStr) && Number.isInteger(a.cat) && paths[a.cat]) {
+          assignmentById.set(idStr, a.cat);
+        }
+      }
+    } else if (!isComplete) {
+      throw new Error('AI 分配结果不完整，已取消本次分类，未写入书签分类结果。');
+    }
+
+    for (const [id, cat] of assignmentById) assignments.push({ id, cat });
 
     const assignedIds = new Set<string>();
     for (const a of assignments) {
@@ -740,7 +829,26 @@ export async function classify(
   if (scope.mode === 'partial' && !scope.targetDirectoryId.trim()) {
     throw new Error('局部分类必须指定目标目录。');
   }
+  // 基础路径集合（用户配置的路径字符串）
   const preservedPaths = preservedFolderSet(settings);
+
+  // 补充：通过 preservedFolderIds 将 ID 解析为路径（兼容文件夹重命名后路径失效的情况）
+  const preservedIds = preservedFolderIdSet(settings);
+  if (preservedIds.size > 0) {
+    try {
+      const { getBookmarkFolders } = await import('./bookmarks');
+      const folders = await getBookmarkFolders();
+      for (const folder of folders) {
+        if (preservedIds.has(folder.id)) {
+          const key = fullFolderKey(folder.path.replace(/ \/ /g, '/'));
+          if (key) preservedPaths.add(key);
+        }
+      }
+    } catch {
+      // 解析失败不阻断分类流程，仅依赖路径匹配
+    }
+  }
+
   const preservedTree = buildPreservedTree(bookmarks, preservedPaths);
   const flexibleBookmarks = bookmarks.filter((bookmark) => !isInPreservedFolder(bookmark, preservedPaths));
   const labeled = await labelBookmarks(settings, flexibleBookmarks, onProgress, signal);
@@ -892,7 +1000,23 @@ export async function classifyIncremental(
   signal: AbortSignal,
   options: ClassifyRunOptions = {},
 ): Promise<ClassifyResult> {
+  // 路径 + ID 双模式匹配（与 classify 保持一致）
   const preservedPaths = preservedFolderSet(settings);
+  const preservedIds = preservedFolderIdSet(settings);
+  if (preservedIds.size > 0) {
+    try {
+      const { getBookmarkFolders } = await import('./bookmarks');
+      const folders = await getBookmarkFolders();
+      for (const folder of folders) {
+        if (preservedIds.has(folder.id)) {
+          const key = fullFolderKey(folder.path.replace(/ \/ /g, '/'));
+          if (key) preservedPaths.add(key);
+        }
+      }
+    } catch {
+      // 解析失败不阻断流程
+    }
+  }
   const preservedTree = buildPreservedTree(newBookmarks, preservedPaths);
   const flexibleBookmarks = newBookmarks.filter((bookmark) => !isInPreservedFolder(bookmark, preservedPaths));
   const labeled = await labelBookmarks(settings, flexibleBookmarks, onProgress, signal);
@@ -906,12 +1030,24 @@ export async function classifyIncremental(
   } else {
     onProgress({ phase: 'assigning', done: newBookmarks.length, total: newBookmarks.length });
   }
+
+  // ── 增量树失衡检测 ──
+  // 计算全树书签总数
+  const countTreeBookmarks = (nodes: CategoryNode[]): number =>
+    nodes.reduce((sum, n) => sum + (n.bookmarkIds?.length ?? 0) + countTreeBookmarks(n.children ?? []), 0);
+  const totalInTree = countTreeBookmarks(tree);
+  // 当增量书签占比 ≥ 30%，认为树已失衡，建议全量重分类
+  const IMBALANCE_THRESHOLD = 0.3;
+  const incrementalImbalanceWarning = totalInTree > 0
+    && (flexibleBookmarks.length / totalInTree) >= IMBALANCE_THRESHOLD;
+
   const result: ClassifyResult = {
     ...existing,
     tree,
     labels: { ...existing.labels, ...labels },
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    ...(incrementalImbalanceWarning ? { incrementalImbalanceWarning: true } : {}),
   };
   if (options.persist !== false) await saveClassifyResult(result);
   onProgress({ phase: 'done', done: newBookmarks.length, total: newBookmarks.length });

@@ -1,5 +1,7 @@
 export const INCREMENTAL_QUEUE_KEY = 'incrementalClassificationQueue';
 const MAX_INCREMENTAL_QUEUE_ENTRIES = 500;
+/** 当队列条数超过此阈值时触发警告回调 */
+const INCREMENTAL_QUEUE_WARN_THRESHOLD = 450;
 
 export interface IncrementalQueueEntry {
   id: string;
@@ -31,6 +33,11 @@ export async function loadIncrementalQueue(): Promise<IncrementalQueueEntry[]> {
     await chrome.storage.local.set({ [INCREMENTAL_QUEUE_KEY]: deduped });
   }
   return deduped;
+}
+
+/** 返回队列是否接近上限（≥ INCREMENTAL_QUEUE_WARN_THRESHOLD 条） */
+export function isIncrementalQueueNearLimit(queue: IncrementalQueueEntry[]): boolean {
+  return queue.length >= INCREMENTAL_QUEUE_WARN_THRESHOLD;
 }
 
 export async function enqueueIncrementalBookmarks(entries: Array<Pick<IncrementalQueueEntry, 'id' | 'createdAt'>>): Promise<void> {

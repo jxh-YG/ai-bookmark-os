@@ -113,31 +113,46 @@ async function checkUrl(url, timeoutMs) {
 }
 
 function localizeCheckResult(result) {
-  const msg = result.message || '';
   const statusCode = Number(result.statusCode) || 0;
+  // 优先使用结构化 detail 字段（新格式），回退到英文消息字符串匹配（兼容旧格式）
+  const detail = result.detail || '';
+  const msg = result.message || '';
 
   if (result.status === 'ok') {
     return { ...result, message: i18n('checkerMsgOk') };
   }
 
   if (result.status === 'broken') {
-    if (statusCode === 404 || statusCode === 410 || msg.includes('Not Found')) {
+    if (statusCode === 404 || statusCode === 410) {
       return { ...result, message: i18n('checkerErr404') };
     }
     return { ...result, message: i18n('checkerErrNetwork') };
   }
 
   if (result.status === 'warning') {
-    if (msg.includes('Unconfirmed HTTP') || msg.includes('usable or inconclusive')) {
+    // 结构化 detail 优先
+    if (detail === 'login-wall' || msg.toLowerCase().includes('login')) {
+      return { ...result, message: i18n('checkerLoginWall') || '需要登录才能访问，请手动确认。' };
+    }
+    if (detail === 'redirect-home' || msg.toLowerCase().includes('homepage')) {
+      return { ...result, message: i18n('checkerRedirectHome') || '被重定向到首页，原页面可能已删除。' };
+    }
+    if (detail === 'soft-404' || msg.toLowerCase().includes('soft 404')) {
+      return { ...result, message: i18n('checkerSoft404') || '页面内容显示资源不存在（软404），请手动核实。' };
+    }
+    if (detail === 'empty-page') {
+      return { ...result, message: i18n('checkerEmptyPage') || '页面内容为空，请手动核实。' };
+    }
+    if (detail === 'inconclusive' || msg.includes('Unconfirmed HTTP') || msg.includes('usable or inconclusive')) {
       return { ...result, message: i18n('checkerUnconfirmed') || '页面可访问或内容无法确认，请手动核实。' };
     }
-    if (msg.includes('Timeout')) {
+    if (msg.toLowerCase().includes('timeout') || msg.toLowerCase().includes('total timeout')) {
       return { ...result, message: i18n('checkerErrTimeout') };
     }
-    if (msg.includes('Access Restricted')) {
+    if (statusCode >= 400 && statusCode < 500) {
       return { ...result, message: i18n('checkerClientError') };
     }
-    if (msg.includes('Server Error')) {
+    if (statusCode >= 500) {
       return { ...result, message: i18n('checkerServerError') };
     }
     return { ...result, message: i18n('checkerErrNetwork') };
@@ -327,10 +342,8 @@ async function requestCheckerPermission() {
   const origins = ['<all_urls>'];
   try {
     if (await chrome.permissions.contains({ origins })) return true;
-
-    const approved = confirm('链接健康检查需要按需访问您主动检查的站点（所有网址）以读取 HTTP 状态。请求默认不会携带登录态或发送页面摘要。是否授予站点访问权限？');
-    if (!approved) return false;
-
+    // 直接调用 chrome.permissions.request()，它自带 Chrome 原生授权弹窗。
+    // 注意：不能在此之前调用 confirm()/alert()，否则会消耗用户手势导致权限请求被拒绝。
     return await chrome.permissions.request({ origins });
   } catch (err) {
     return false;

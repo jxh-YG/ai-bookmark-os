@@ -9,8 +9,18 @@ import type {
   RemovedSourceFolder,
 } from '../types';
 import { captureBookmarkSnapshot } from './bookmarkSnapshot';
+import { loadSettings } from './settings';
+import { t } from './i18n';
 
-const APPLY_FOLDER_TITLE = '✨ AI 整理';
+/** 通过 i18n 获取 AI 整理文件夹名，避免硬编码中文 */
+async function getApplyFolderTitle(): Promise<string> {
+  try {
+    const settings = await loadSettings();
+    return t(settings.language).aiFolderName;
+  } catch {
+    return '✨ AI 整理';
+  }
+}
 const BACKUP_KEY = 'bookmarkBackup';
 const APPLY_RECORD_KEY = 'applyRecord';
 const PARTIAL_APPLY_RECORDS_KEY = 'partialApplyRecords';
@@ -488,6 +498,9 @@ async function applyFirstFullClassification(
   const sourceFoldersByBookmark = new Map<string, SourceFolderCandidate[]>();
   if (!bar) throw new Error('未找到书签栏');
 
+  // 通过 i18n 获取文件夹名，支持多语言
+  const APPLY_FOLDER_TITLE = await getApplyFolderTitle();
+
   // 若已存在同名整理文件夹，加时间戳避免混淆
   const existing = (await chrome.bookmarks.getChildren(bar.id)).find(
     (n) => !n.url && n.title === APPLY_FOLDER_TITLE,
@@ -606,7 +619,8 @@ async function applyFirstFullClassification(
 }
 
 async function getStagingRootTitle(parentId: string): Promise<string> {
-  const baseTitle = `${APPLY_FOLDER_TITLE}（更新中）`;
+  const folderTitle = await getApplyFolderTitle();
+  const baseTitle = `${folderTitle}（更新中）`;
   const existingTitles = new Set((await chrome.bookmarks.getChildren(parentId))
     .filter((node) => !node.url)
     .map((node) => node.title));

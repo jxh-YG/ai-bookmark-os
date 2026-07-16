@@ -129,16 +129,71 @@ export async function fetchPageMeta(
   }
 }
 
-/** 探测单条链接：协议层 + 内容层两级判定 */
+/** 探测单条链接：协议层 + 内容层两级判定
+ *  优化：先发 HEAD 请求，仅当 HEAD 返回 200 且 Content-Type 为 text/html 时才发 GET。
+ *  这样对绝大多数非 HTML 资源（图片、PDF、下载文件等）节省完整响应体下载。
+ */
 export async function probeUrl(url: string): Promise<ProbeResult> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), DEAD_CHECK_TIMEOUT);
   try {
+    // ── 第一步：HEAD 快速探测 ──
+    let headStatus = 0;
+    let headContentType = '';
+    try {
+      const headResp = await fetch(url, {
+        method: 'HEAD',
+        signal: ctrl.signal,
+        redirect: 'follow',
+        credentials: 'omit',
+      });
+      headStatus = headResp.status;
+      headContentType = headResp.headers.get('content-type') ?? '';
+    } catch {
+      // HEAD 不支持或超时，退回到 GET
+      headStatus = 0;
+    }
+
+    // HEAD 明确死亡状态，进一步通过 GET + 内容确认
+    if (headStatus === 404 || headStatus === 410) {
+      const resp = await fetch(url, {
+        method: 'GET',
+        signal: ctrl.signal,
+        redirect: 'follow',
+        credentials: 'omit',
+      });
+      const firstResult = await inspectMissingResponse(url, resp);
+      if (firstResult.kind !== 'dead') return firstResult;
+      // 双确认
+      const confirmation = await fetch(url, {
+        method: 'GET',
+        signal: ctrl.signal,
+        redirect: 'follow',
+        credentials: 'omit',
+        cache: 'no-store',
+      });
+      if (confirmation.status !== 404 && confirmation.status !== 410) {
+        return { kind: 'suspect', detail: `unconfirmed HTTP ${headStatus}` };
+      }
+      const confirmResult = await inspectMissingResponse(url, confirmation);
+      return confirmResult.kind === 'dead'
+        ? confirmResult
+        : { kind: 'suspect', detail: `unconfirmed HTTP ${headStatus}` };
+    }
+    if (headStatus === 403 || headStatus === 401) return { kind: 'suspect', detail: `HTTP ${headStatus}` };
+    if (headStatus >= 500) return { kind: 'suspect', detail: `HTTP ${headStatus}` };
+    if (headStatus >= 400) return { kind: 'suspect', detail: `HTTP ${headStatus}` };
+
+    // HEAD 返回 200，但不是 HTML：不需要下载内容，直接判定为正常
+    if (headStatus === 200 && headContentType && !headContentType.includes('text/html')) {
+      return { kind: 'ok', detail: '' };
+    }
+
+    // ── 第二步：GET 内容层检测（仅 HTML 或 HEAD 不可用时） ──
     const resp = await fetch(url, {
       method: 'GET',
       signal: ctrl.signal,
       redirect: 'follow',
-      // 默认不携带登录态，避免健康检查将本地会话发送到任意书签域名。
       credentials: 'omit',
     });
 

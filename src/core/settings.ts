@@ -1,5 +1,6 @@
 // 设置读写：storage.local 为主（含 apiKey）；非敏感字段镜像到 storage.sync 跨设备漫游
 import { DEFAULT_CLASSIFY_PROMPTS, DEFAULT_SETTINGS, type ClassifyPrompts, type Settings } from '../types';
+import { validateSettings } from './validators';
 
 const LEGACY_CLASSIFY_PROMPTS: ClassifyPrompts = {
   label:
@@ -40,10 +41,12 @@ export async function loadSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
-  await chrome.storage.local.set({ settings });
+  // 写入前校验，防止损坏配置扩散到 sync
+  const validated = validateSettings(settings);
+  await chrome.storage.local.set({ settings: validated });
   // 镜像到 sync（剔除 apiKey，安全 + 避开 sync 8KB 单项限制风险）
   try {
-    const { apiKey: _omit, ...safe } = settings;
+    const { apiKey: _omit, ...safe } = validated;
     await chrome.storage.sync.set({ settings: safe });
   } catch {
     /* 配额超限或未登录账号时忽略 */

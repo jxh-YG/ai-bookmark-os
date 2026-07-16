@@ -142,6 +142,8 @@ export interface ClassifyResult {
     tree?: string;
     assignments: string[];
   };
+  /** 增量分类后，新增书签占全树书签比例 ≥30%，建议执行全量重分类。 */
+  incrementalImbalanceWarning?: boolean;
 }
 
 /** Why an immutable AI plan version was added to the local archive. */
@@ -166,6 +168,11 @@ export interface ClassificationPlanVersion {
   archivedAt: number;
   source?: ClassificationSource;
   application?: ClassificationApplication;
+  /**
+   * 星标保护：设为 true 后该版本不参与自动轮换淘汰，只能手动删除。
+   * 普通版本最多保留 MAX_CLASSIFICATION_PLAN_VERSIONS 条；星标版本单独保留，不占此配额。
+   */
+  pinned?: boolean;
 }
 
 /** Bounded local history of reusable AI classification plans. */
@@ -396,6 +403,11 @@ export interface Settings {
   respectExistingFolders?: boolean;
   /** 选中的原书签夹路径会直接按原结构展示，不参与 AI 优化 */
   preservedFolderPaths?: string[];
+  /**
+   * 保留文件夹的 Chrome 书签 ID（与 preservedFolderPaths 互为备份）。
+   * 文件夹重命名后可通过 ID 继续识别，避免路径匹配失效。
+   */
+  preservedFolderIds?: string[];
   /** 重分类时沿用上一次 AI 分类树作为结构参考 */
   reusePreviousAiTree?: boolean;
   /** 使用 URL 标签缓存，避免重复请求 AI */
@@ -427,6 +439,7 @@ export const DEFAULT_SETTINGS: Settings = {
   classifyPrompts: { ...DEFAULT_CLASSIFY_PROMPTS },
   respectExistingFolders: true,
   preservedFolderPaths: [],
+  preservedFolderIds: [],
   reusePreviousAiTree: false,
   useClassificationCache: true,
   usePageMetadata: true,

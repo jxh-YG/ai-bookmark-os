@@ -3737,14 +3737,20 @@ async function checkUrlFromBackground(url, timeoutOrOptions) {
   // ---- 1) HEAD 探测 ----
   const head = await fetchOnce(url, 'HEAD', deadline, perAttemptMs);
   if (head.ok) {
-    // 2xx/3xx 直接成功
-    if (head.response.status < 400) return classifyByStatus(head.response.status);
-    // 4xx 业务错误：仍尝试一次 GET（HEAD 405/501 时 GET 可能正常）
-    // 5xx 也降级 GET（服务器短暂不可用，GET 或许能拿到不同结果）
+    const headStatus = head.response.status;
+    if (headStatus >= 400) {
+      // 4xx/5xx：降级到 GET 重试链做进一步判断
+    } else {
+      // 2xx/3xx HEAD 成功：检查 Content-Type。
+      // 非 HTML 资源（图片、PDF 等）直接判定正常；HTML 需走 GET 内容层检测。
+      const ct = head.response.headers.get('content-type') || '';
+      if (!ct.includes('text/html')) return classifyByStatus(headStatus);
+      // HTML 资源：落入 GET 重试链做内容层检测（登录墙、跳首页、软404）
+    }
   } else if (!isTransientError(head.error)) {
     // 非瞬时错误（如 TypeError 编程错误）：再尝试一次 GET
   }
-  // 其余情况（HEAD 瞬时错误 / HEAD 4xx-5xx）→ 走 GET 重试链
+  // 其余情况（HEAD 瞬时错误 / HEAD 4xx-5xx / HEAD 200 HTML）→ 走 GET 重试链
 
   // ---- 2) GET 重试链 ----
   let attempts = 0;
@@ -3770,14 +3776,37 @@ async function checkUrlFromBackground(url, timeoutOrOptions) {
     if (get.ok) {
       const { response } = get;
       const { status } = response;
-      // 2xx/3xx 和非 Not Found 的业务状态可立即确定为可用或需人工复查。
-      if (status < 400 || (isBusinessError(status) && status !== 404 && status !== 410)) {
+      // 2xx/3xx：需进一步检查内容层（登录墙、跳首页、软404）
+      if (status >= 200 && status < 400) {
+        const ct = (response.headers.get('content-type') || '');
+        if (ct.includes('text/html')) {
+          try {
+            const html = (await response.text()).slice(0, 65536);
+            const contentDetail = inspectContentDetail(url, response.url, html);
+            if (contentDetail === 'login-wall') {
+              return { status: 'warning', statusCode: status, message: 'Login Required', detail: 'login-wall' };
+            }
+            if (contentDetail === 'redirect-home') {
+              return { status: 'warning', statusCode: status, message: 'Redirected to homepage', detail: 'redirect-home' };
+            }
+            if (contentDetail === 'soft-404') {
+              return { status: 'warning', statusCode: status, message: 'Page not found (soft 404)', detail: 'soft-404' };
+            }
+            if (contentDetail === 'empty-page') {
+              return { status: 'warning', statusCode: status, message: 'Empty page', detail: 'empty-page' };
+            }
+          } catch (_) {}
+        }
+        return classifyByStatus(status);
+      }
+      // 非 Not Found 的业务状态：直接判定
+      if (isBusinessError(status) && status !== 404 && status !== 410) {
         return classifyByStatus(status);
       }
       if (status === 404 || status === 410) {
         const inspection = await inspectMissingResponse(response);
         if (!inspection.confirmed) {
-          return { status: 'warning', statusCode: status, message: `HTTP ${status} - ${inspection.reason}` };
+          return { status: 'warning', statusCode: status, message: `HTTP ${status} - ${inspection.reason}`, detail: inspection.detail };
         }
         confirmedMissingResponses++;
         if (confirmedMissingResponses >= 2) return classifyByStatus(status);
@@ -3824,6 +3853,9 @@ const CONFIRMED_MISSING_PATTERNS = [
   /this (page|video|post|account) (isn'?t|is not|is no longer) available/i,
 ];
 
+/** 登录页 URL 特征（与 probe.ts 保持一致） */
+const LOGIN_URL_PATTERN = /\/(login|signin|sign-in|passport|auth|account\/login)\b/i;
+
 function containsConfirmedMissingPattern(text) {
   return CONFIRMED_MISSING_PATTERNS.some((pattern) => pattern.test(text));
 }
@@ -3843,27 +3875,64 @@ function isJsRenderedShell(html) {
   );
 }
 
+/**
+ * 检查 200 响应是否为软 404 / 登录墙 / 跳首页（与 probe.ts inspectContent 对齐）。
+ * 返回 detail 字符串（'ok'|'login-wall'|'redirect-home'|'soft-404'|'empty-page'）。
+ */
+function inspectContentDetail(originalUrl, finalUrl, html) {
+  // 1) 重定向漂移检测
+  try {
+    const orig = new URL(originalUrl);
+    const final = new URL(finalUrl);
+    const origHasPath = orig.pathname.length > 1 || orig.search.length > 0;
+    if (LOGIN_URL_PATTERN.test(final.pathname)) return 'login-wall';
+    if (origHasPath && final.hostname === orig.hostname && final.pathname === '/' && !final.search) {
+      return 'redirect-home';
+    }
+  } catch (_) {}
+
+  const jsShell = isJsRenderedShell(html);
+  const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(html) || [])[1] || '';
+  const snippet = jsShell ? '' : html.slice(0, 4096);
+
+  // 2) 软 404 关键词（SPA 壳只检查标题）
+  for (const p of CONFIRMED_MISSING_PATTERNS) {
+    if (p.test(title) || (snippet && p.test(snippet))) return 'soft-404';
+  }
+
+  // 3) 空页面（仅静态页）
+  if (!jsShell) {
+    const text = plainPageText(html);
+    if (html.length > 0 && text.length < 80) return 'empty-page';
+  }
+  return 'ok';
+}
+
 async function inspectMissingResponse(response) {
   const status = response.status;
   if (!(response.headers.get('content-type') || '').includes('text/html')) {
-    return { confirmed: false, status, reason: 'non-HTML response' };
+    return { confirmed: false, status, detail: 'non-html', reason: 'non-HTML response' };
   }
   try {
     const html = (await response.text()).slice(0, 65536);
     const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(html) || [])[1] || '';
-    // SPA 初始 HTML 往往带有与当前路由无关的 meta，因此只检查标题。
     const jsShell = isJsRenderedShell(html);
     const text = jsShell ? '' : plainPageText(html);
-    const titleConfirmsMissing = containsConfirmedMissingPattern(title);
-    const bodyConfirmsMissing = !jsShell && containsConfirmedMissingPattern(text);
-    const confirmed =
-      titleConfirmsMissing &&
-      bodyConfirmsMissing &&
-      text.length > 0 &&
-      text.length <= 1200;
-    return { confirmed, status, reason: confirmed ? 'missing page content' : 'page content is usable or inconclusive' };
+
+    // 修复1&2：移除 text.length<=1200 的错误限制，改为 title OR body 任一命中即确认
+    // 旧逻辑要求 title AND body 同时命中且正文 ≤1200 字符，导致大量含完整页面的404被漏判。
+    const titleConfirms = containsConfirmedMissingPattern(title);
+    const bodyConfirms = !jsShell && containsConfirmedMissingPattern(text);
+    const confirmed = titleConfirms || bodyConfirms;
+
+    return {
+      confirmed,
+      status,
+      detail: confirmed ? 'missing-page-content' : 'inconclusive',
+      reason: confirmed ? 'missing page content' : 'page content is usable or inconclusive',
+    };
   } catch {
-    return { confirmed: false, status, reason: 'could not read page content' };
+    return { confirmed: false, status, detail: 'read-error', reason: 'could not read page content' };
   }
 }
 

@@ -18,15 +18,20 @@ export const LANGUAGE_OPTIONS: { value: ResolvedLang; label: string }[] = [
 
 export function resolveLang(language: Settings['language']): ResolvedLang {
   if (language !== 'auto') return language;
-  const tag = navigator.language.toLowerCase();
-  for (const { value } of LANGUAGE_OPTIONS) {
-    if (tag.startsWith(value)) return value;
+  // 优先使用 navigator.languages 列表（更精确），回退到 navigator.language
+  const tags = (navigator.languages?.length ? navigator.languages : [navigator.language])
+    .map((t) => t.toLowerCase());
+  for (const tag of tags) {
+    for (const { value } of LANGUAGE_OPTIONS) {
+      if (tag.startsWith(value)) return value;
+    }
   }
   return 'en';
 }
 
 const zh = {
   // sidepanel
+  aiFolderName: '✨ AI 整理',
   searchPlaceholder: '搜索标题 / 网址 / 摘要',
   classify: '开始分类',
   reclassify: '重新分类',
@@ -87,6 +92,13 @@ const zh = {
   healthPermDenied: '未授权，无法检测死链',
   deleteSelected: (n: number) => `🗑️ 删除选中 (${n})`,
   deletedOk: (n: number) => `✅ 已删除 ${n} 条书签`,
+  undoDelete: '↩ 撤销删除',
+  undoDeleteOk: (n: number) => `✅ 已恢复 ${n} 条书签`,
+  undoDeleteFail: '⚠️ 无可恢复的书签（已超时或无记录）',
+  incrementalQueueNearLimit: '⚠️ 增量分类队列即将达到上限（450+条），建议尽快触发一次增量分类或全量重新分类。',
+  pinVersion: '⭐ 星标保护',
+  unpinVersion: '☆ 取消星标',
+  pinnedVersionLabel: '⭐',
   selectAll: '全选',
   backToTree: '← 返回分类',
   // v0.3 引导
@@ -188,6 +200,7 @@ const zh = {
 };
 
 const en: typeof zh = {
+  aiFolderName: '✨ AI Organized',
   searchPlaceholder: 'Search title / URL / summary',
   classify: 'Classify',
   reclassify: 'Re-classify',
@@ -248,6 +261,13 @@ const en: typeof zh = {
   healthPermDenied: 'Permission denied; cannot check dead links',
   deleteSelected: (n: number) => `🗑️ Delete selected (${n})`,
   deletedOk: (n: number) => `✅ Deleted ${n} bookmarks`,
+  undoDelete: '↩ Undo delete',
+  undoDeleteOk: (n: number) => `✅ Restored ${n} bookmarks`,
+  undoDeleteFail: '⚠️ Nothing to restore (expired or no record)',
+  incrementalQueueNearLimit: '⚠️ Incremental classification queue is nearly full (450+ items). Consider running incremental or full classification soon.',
+  pinVersion: '⭐ Pin',
+  unpinVersion: '☆ Unpin',
+  pinnedVersionLabel: '⭐',
   selectAll: 'Select all',
   backToTree: '← Back to categories',
   // v0.3 onboarding
@@ -348,6 +368,7 @@ const en: typeof zh = {
 };
 
 const ja: typeof zh = {
+  aiFolderName: '✨ AI 整理済',
   searchPlaceholder: 'タイトル / URL / 概要を検索',
   classify: '分類を開始',
   reclassify: '再分類',
@@ -408,6 +429,13 @@ const ja: typeof zh = {
   healthPermDenied: '権限がないため、リンク切れを検出できません',
   deleteSelected: (n: number) => `🗑️ 選択項目を削除 (${n})`,
   deletedOk: (n: number) => `✅ ${n} 件のブックマークを削除しました`,
+  undoDelete: '↩ 削除を元に戻す',
+  undoDeleteOk: (n: number) => `✅ ${n} 件のブックマークを復元しました`,
+  undoDeleteFail: '⚠️ 復元できるブックマークがありません（タイムアウトまたは記録なし）',
+  incrementalQueueNearLimit: '⚠️ 増分分類キューがほぼ上限に達しています（450件以上）。増分または全量再分類を実行してください。',
+  pinVersion: '⭐ ピン留め',
+  unpinVersion: '☆ ピン解除',
+  pinnedVersionLabel: '⭐',
   selectAll: 'すべて選択',
   backToTree: '← カテゴリに戻る',
   // v0.3 オンボーディング
@@ -509,6 +537,7 @@ const ja: typeof zh = {
 };
 
 const ko: typeof zh = {
+  aiFolderName: '✨ AI 정리',
   searchPlaceholder: '제목 / URL / 요약 검색',
   classify: '분류 시작',
   reclassify: '다시 분류',
@@ -569,6 +598,13 @@ const ko: typeof zh = {
   healthPermDenied: '권한이 없어 깨진 링크를 검사할 수 없습니다',
   deleteSelected: (n: number) => `🗑️ 선택 항목 삭제 (${n})`,
   deletedOk: (n: number) => `✅ 북마크 ${n}개를 삭제했습니다`,
+  undoDelete: '↩ 삭제 취소',
+  undoDeleteOk: (n: number) => `✅ 북마크 ${n}개를 복원했습니다`,
+  undoDeleteFail: '⚠️ 복원할 북마크가 없습니다（시간 초과 또는 기록 없음）',
+  incrementalQueueNearLimit: '⚠️ 증분 분류 대기열이 거의 가득 찼습니다（450개 이상）. 증분 또는 전체 재분류를 실행하세요.',
+  pinVersion: '⭐ 고정',
+  unpinVersion: '☆ 고정 해제',
+  pinnedVersionLabel: '⭐',
   selectAll: '전체 선택',
   backToTree: '← 카테고리로 돌아가기',
   // v0.3 온보딩
@@ -670,6 +706,7 @@ const ko: typeof zh = {
 };
 
 const fr: typeof zh = {
+  aiFolderName: '✨ AI Organisé',
   searchPlaceholder: 'Rechercher titre / URL / résumé',
   classify: 'Classer',
   reclassify: 'Reclasser',
@@ -730,6 +767,13 @@ const fr: typeof zh = {
   healthPermDenied: 'Autorisation refusée : impossible de vérifier les liens morts',
   deleteSelected: (n: number) => `🗑️ Supprimer la sélection (${n})`,
   deletedOk: (n: number) => `✅ ${n} favoris supprimés`,
+  undoDelete: '↩ Annuler la suppression',
+  undoDeleteOk: (n: number) => `✅ ${n} favoris restaurés`,
+  undoDeleteFail: '⚠️ Rien à restaurer (expiré ou aucun enregistrement)',
+  incrementalQueueNearLimit: '⚠️ La file de classification incrémentielle est presque pleine (450+ éléments). Pensez à lancer une classification bientôt.',
+  pinVersion: '⭐ Épingler',
+  unpinVersion: '☆ Désépingler',
+  pinnedVersionLabel: '⭐',
   selectAll: 'Tout sélectionner',
   backToTree: '← Retour aux catégories',
   // v0.3 prise en main
@@ -831,6 +875,7 @@ const fr: typeof zh = {
 };
 
 const de: typeof zh = {
+  aiFolderName: '✨ AI Sortiert',
   searchPlaceholder: 'Titel / URL / Zusammenfassung suchen',
   classify: 'Sortieren starten',
   reclassify: 'Neu sortieren',
@@ -891,6 +936,13 @@ const de: typeof zh = {
   healthPermDenied: 'Berechtigung verweigert – tote Links können nicht geprüft werden',
   deleteSelected: (n: number) => `🗑️ Auswahl löschen (${n})`,
   deletedOk: (n: number) => `✅ ${n} Lesezeichen gelöscht`,
+  undoDelete: '↩ Löschen rückgängig',
+  undoDeleteOk: (n: number) => `✅ ${n} Lesezeichen wiederhergestellt`,
+  undoDeleteFail: '⚠️ Nichts wiederherzustellen (abgelaufen oder kein Eintrag)',
+  incrementalQueueNearLimit: '⚠️ Die inkrementelle Klassifizierungswarteschlange ist fast voll (450+ Einträge). Bitte bald eine Klassifizierung starten.',
+  pinVersion: '⭐ Anheften',
+  unpinVersion: '☆ Loslösen',
+  pinnedVersionLabel: '⭐',
   selectAll: 'Alle auswählen',
   backToTree: '← Zurück zu den Kategorien',
   // v0.3 Einführung
@@ -992,6 +1044,7 @@ const de: typeof zh = {
 };
 
 const es: typeof zh = {
+  aiFolderName: '✨ AI Organizado',
   searchPlaceholder: 'Buscar título / URL / resumen',
   classify: 'Clasificar',
   reclassify: 'Reclasificar',
@@ -1052,6 +1105,13 @@ const es: typeof zh = {
   healthPermDenied: 'Permiso denegado: no se pueden comprobar los enlaces rotos',
   deleteSelected: (n: number) => `🗑️ Eliminar seleccionados (${n})`,
   deletedOk: (n: number) => `✅ Se eliminaron ${n} marcadores`,
+  undoDelete: '↩ Deshacer eliminación',
+  undoDeleteOk: (n: number) => `✅ Se restauraron ${n} marcadores`,
+  undoDeleteFail: '⚠️ Nada que restaurar (expirado o sin registro)',
+  incrementalQueueNearLimit: '⚠️ La cola de clasificación incremental está casi llena (450+ elementos). Considera ejecutar una clasificación pronto.',
+  pinVersion: '⭐ Fijar versión',
+  unpinVersion: '☆ Desfijar versión',
+  pinnedVersionLabel: '⭐',
   selectAll: 'Seleccionar todo',
   backToTree: '← Volver a las categorías',
   // v0.3 introducción
@@ -1153,6 +1213,7 @@ const es: typeof zh = {
 };
 
 const pt: typeof zh = {
+  aiFolderName: '✨ AI Organizado',
   searchPlaceholder: 'Buscar título / URL / resumo',
   classify: 'Classificar',
   reclassify: 'Reclassificar',
@@ -1213,6 +1274,13 @@ const pt: typeof zh = {
   healthPermDenied: 'Permissão negada; não é possível verificar links quebrados',
   deleteSelected: (n: number) => `🗑️ Excluir selecionados (${n})`,
   deletedOk: (n: number) => `✅ ${n} favoritos excluídos`,
+  undoDelete: '↩ Desfazer exclusão',
+  undoDeleteOk: (n: number) => `✅ ${n} favoritos restaurados`,
+  undoDeleteFail: '⚠️ Nada a restaurar (expirado ou sem registro)',
+  incrementalQueueNearLimit: '⚠️ A fila de classificação incremental está quase cheia (450+ itens). Considere executar uma classificação em breve.',
+  pinVersion: '⭐ Fixar versão',
+  unpinVersion: '☆ Desafixar versão',
+  pinnedVersionLabel: '⭐',
   selectAll: 'Selecionar tudo',
   backToTree: '← Voltar às categorias',
   // v0.3 introdução
@@ -1314,6 +1382,7 @@ const pt: typeof zh = {
 };
 
 const ru: typeof zh = {
+  aiFolderName: '✨ AI Организовано',
   searchPlaceholder: 'Поиск по названию / URL / описанию',
   classify: 'Классифицировать',
   reclassify: 'Переклассифицировать',
@@ -1374,6 +1443,13 @@ const ru: typeof zh = {
   healthPermDenied: 'Нет разрешения — проверка ссылок невозможна',
   deleteSelected: (n: number) => `🗑️ Удалить выбранные (${n})`,
   deletedOk: (n: number) => `✅ Удалено закладок: ${n}`,
+  undoDelete: '↩ Отменить удаление',
+  undoDeleteOk: (n: number) => `✅ Восстановлено закладок: ${n}`,
+  undoDeleteFail: '⚠️ Нечего восстанавливать (устарело или нет записи)',
+  incrementalQueueNearLimit: '⚠️ Очередь инкрементальной классификации почти заполнена (450+). Рекомендуется скоро запустить классификацию.',
+  pinVersion: '⭐ Закрепить версию',
+  unpinVersion: '☆ Открепить версию',
+  pinnedVersionLabel: '⭐',
   selectAll: 'Выбрать все',
   backToTree: '← Назад к категориям',
   // v0.3 знакомство

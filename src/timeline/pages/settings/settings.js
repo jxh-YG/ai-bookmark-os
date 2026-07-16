@@ -1867,6 +1867,9 @@ const treeMetadataToggle = document.getElementById('treeMetadataToggle');
 const treeIncrementalToggle = document.getElementById('treeIncrementalToggle');
 const treeRetryCountInput = document.getElementById('treeRetryCountInput');
 const treeRequestTimeoutInput = document.getElementById('treeRequestTimeoutInput');
+const treeLabelBatchSizeInput = document.getElementById('treeLabelBatchSizeInput');
+const treeLabelConcurrencyInput = document.getElementById('treeLabelConcurrencyInput');
+const treeAssignBatchSizeInput = document.getElementById('treeAssignBatchSizeInput');
 
 let treeFolderOptions = [];
 let treeFolderOptionsLoadFailed = false;
@@ -2107,6 +2110,9 @@ function readTreeSettingsFromUI(prev) {
     incrementalClassificationEnabled: treeIncrementalToggle ? !!treeIncrementalToggle.checked : false,
     aiRetryCount: clampTreeNumber(treeRetryCountInput && treeRetryCountInput.value, DEFAULT_TREE_SETTINGS.aiRetryCount, 0, 20),
     aiRequestTimeoutSeconds: clampTreeNumber(treeRequestTimeoutInput && treeRequestTimeoutInput.value, DEFAULT_TREE_SETTINGS.aiRequestTimeoutSeconds, 5, 600),
+    labelBatchSize: clampTreeNumber(treeLabelBatchSizeInput && treeLabelBatchSizeInput.value, 40, 10, 80),
+    labelConcurrency: clampTreeNumber(treeLabelConcurrencyInput && treeLabelConcurrencyInput.value, 2, 1, 5),
+    assignBatchSize: clampTreeNumber(treeAssignBatchSizeInput && treeAssignBatchSizeInput.value, 60, 10, 100),
   };
 }
 
@@ -2166,6 +2172,9 @@ async function loadTreeSettings() {
     if (treeIncrementalToggle) treeIncrementalToggle.checked = s.incrementalClassificationEnabled === true;
     if (treeRetryCountInput) treeRetryCountInput.value = String(clampTreeNumber(s.aiRetryCount, DEFAULT_TREE_SETTINGS.aiRetryCount, 0, 20));
     if (treeRequestTimeoutInput) treeRequestTimeoutInput.value = String(clampTreeNumber(s.aiRequestTimeoutSeconds, DEFAULT_TREE_SETTINGS.aiRequestTimeoutSeconds, 5, 600));
+    if (treeLabelBatchSizeInput) treeLabelBatchSizeInput.value = String(clampTreeNumber(s.labelBatchSize, 40, 10, 80));
+    if (treeLabelConcurrencyInput) treeLabelConcurrencyInput.value = String(clampTreeNumber(s.labelConcurrency, 2, 1, 5));
+    if (treeAssignBatchSizeInput) treeAssignBatchSizeInput.value = String(clampTreeNumber(s.assignBatchSize, 60, 10, 100));
 
     toggleTreeCustomFields();
     updateTreeEndpointHint();
@@ -2456,6 +2465,15 @@ function bindTreeSettings() {
   }
   if (treeRequestTimeoutInput) {
     treeRequestTimeoutInput.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
+  }
+  if (treeLabelBatchSizeInput) {
+    treeLabelBatchSizeInput.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
+  }
+  if (treeLabelConcurrencyInput) {
+    treeLabelConcurrencyInput.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
+  }
+  if (treeAssignBatchSizeInput) {
+    treeAssignBatchSizeInput.addEventListener('change', () => { autoSaveTreeSettings({ quiet: true }); });
   }
   if (treeResetPromptsBtn) {
     treeResetPromptsBtn.addEventListener('click', () => {

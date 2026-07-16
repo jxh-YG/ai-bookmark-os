@@ -269,6 +269,7 @@ function normalizePlanVersion(value: unknown): ClassificationPlanVersion | null 
     ...(updatedAt === undefined ? {} : { updatedAt: normalizedTimestamp(updatedAt) }),
     ...(source ? { source } : {}),
     ...(application ? { application } : {}),
+    ...(value.pinned === true ? { pinned: true } : {}),
   };
 }
 
@@ -291,10 +292,13 @@ function normalizeArchive(value: unknown): ClassificationPlanArchive {
       if (!existing || version.archivedAt >= existing.archivedAt) latestById.set(version.versionId, version);
     }
   }
-  return {
-    version: 1,
-    versions: orderVersions([...latestById.values()]).slice(0, MAX_CLASSIFICATION_PLAN_VERSIONS),
-  };
+  const all = orderVersions([...latestById.values()]);
+  // 星标版本不参与轮换，独立保留；非星标按时间取最新 MAX 条
+  const pinned = all.filter((v) => v.pinned);
+  const unpinned = all.filter((v) => !v.pinned).slice(0, MAX_CLASSIFICATION_PLAN_VERSIONS);
+  // 合并后去重（避免 pinned 中也含重复 id）
+  const combined = orderVersions([...new Map([...pinned, ...unpinned].map((v) => [v.versionId, v])).values()]);
+  return { version: 1, versions: combined };
 }
 
 /** Reads a best-effort archive. Missing, malformed, or legacy storage is safely treated as an empty archive. */
@@ -327,13 +331,46 @@ export async function archiveClassificationPlan(
 ): Promise<ClassificationPlanVersion> {
   const version = createPlanVersion(plan, options);
   const archive = await loadClassificationPlanArchive();
-  const next: ClassificationPlanArchive = {
+  // 使用 normalizeArchive 的星标保护逻辑：星标版本不受轮换影响
+  const next = normalizeArchive({
     version: 1,
-    versions: orderVersions([
-      version,
-      ...archive.versions.filter((item) => item.versionId !== version.versionId),
-    ]).slice(0, MAX_CLASSIFICATION_PLAN_VERSIONS),
-  };
+    versions: [version, ...archive.versions.filter((item) => item.versionId !== version.versionId)],
+  });
   await chrome.storage.local.set({ [CLASSIFICATION_PLAN_ARCHIVE_STORAGE_KEY]: next });
   return version;
+}
+
+/**
+ * 切换一个历史计划版本的星标状态。
+ * 星标版本不参与自动轮换淘汰，只能手动删除。
+ */
+export async function toggleClassificationPlanVersionPin(versionId: string): Promise<boolean> {
+  const normalizedId = nonEmptyString(versionId);
+  if (!normalizedId) throw new Error('版本 ID 无效');
+  const archive = await loadClassificationPlanArchive();
+  const target = archive.versions.find((v) => v.versionId === normalizedId);
+  if (!target) throw new Error(`未找到版本：${normalizedId}`);
+  const nextPinned = !target.pinned;
+  const next = normalizeArchive({
+    version: 1,
+    versions: archive.versions.map((v) =>
+      v.versionId === normalizedId ? { ...v, pinned: nextPinned } : v,
+    ),
+  });
+  await chrome.storage.local.set({ [CLASSIFICATION_PLAN_ARCHIVE_STORAGE_KEY]: next });
+  return nextPinned;
+}
+
+/**
+ * 删除一个历史计划版本（星标版本也可手动删除）。
+ */
+export async function deleteClassificationPlanVersion(versionId: string): Promise<void> {
+  const normalizedId = nonEmptyString(versionId);
+  if (!normalizedId) throw new Error('版本 ID 无效');
+  const archive = await loadClassificationPlanArchive();
+  const next: ClassificationPlanArchive = {
+    version: 1,
+    versions: archive.versions.filter((v) => v.versionId !== normalizedId),
+  };
+  await chrome.storage.local.set({ [CLASSIFICATION_PLAN_ARCHIVE_STORAGE_KEY]: next });
 }

@@ -343,7 +343,9 @@ export async function testConnection(settings: Settings): Promise<string> {
   });
 }
 
-/** 拉取供应商可用模型列表（各家均提供 /models 接口） */
+/** 拉取供应商可用模型列表（各家均提供 /models 接口）。
+ *  失败时抛出明确错误，不再静默返回空数组。
+ */
 export async function listModels(settings: Settings): Promise<string[]> {
   const style = resolveProvider(settings).apiStyle;
   let url: string;

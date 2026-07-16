@@ -7,6 +7,7 @@ import {
   recheckUrl,
   removeBookmarks,
   requestAllUrlsPermission,
+  undoRemoveBookmarks,
 } from '../core/health';
 import type { Dict } from '../core/i18n';
 
@@ -24,6 +25,7 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState('');
   const [rechecking, setRechecking] = useState<Set<string>>(new Set());
+  const [canUndo, setCanUndo] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const checking = progress.phase === 'checking';
@@ -103,10 +105,23 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
   const deleteSelected = async () => {
     const n = await removeBookmarks([...selected]);
     setMsg(d.deletedOk(n));
+    setCanUndo(n > 0);
     setDups((prev) => prev?.filter((i) => !selected.has(i.bookmark.id)) ?? null);
     setDead((prev) => prev?.filter((i) => !selected.has(i.bookmark.id)) ?? null);
     setSelected(new Set());
     onBookmarksChanged();
+  };
+
+  const handleUndoDelete = async () => {
+    const n = await undoRemoveBookmarks();
+    if (n > 0) {
+      setMsg(d.undoDeleteOk(n));
+      setCanUndo(false);
+      onBookmarksChanged();
+    } else {
+      setMsg(d.undoDeleteFail);
+      setCanUndo(false);
+    }
   };
 
   const reasonText = (i: HealthIssue): string => {
@@ -227,6 +242,9 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
           <button className="danger" disabled={selected.size === 0} onClick={deleteSelected}>
             {d.deleteSelected(selected.size)}
           </button>
+          {canUndo && (
+            <button onClick={handleUndoDelete}>{d.undoDelete}</button>
+          )}
         </div>
       )}
     </div>

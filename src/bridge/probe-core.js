@@ -1,0 +1,188 @@
+// probe-core.js — 探测逻辑共享层（供 ai-sw-bridge.js 使用）
+// 与 src/core/probe.ts 保持逻辑一致，任一侧修改后需同步另一侧。
+// 暴露全局 AiProbeCore，由 ai-sw-bridge.js 调用。
+
+(function initAiProbeCore() {
+  const SOFT_DEAD_PATTERNS = [
+    /页面不存在|页面未找到|找不到(该|此|你要的)?页面|页面已删除|内容(不存在|已删除|已下架|已失效)/,
+    /商品(不存在|已下架|已失效|已删除)|宝贝(不存在|已下架)|店铺不存在/,
+    /(文章|视频|帖子|资源)(不存在|已删除|已下架|已失效)/,
+    /(请|需要?)登录后(查看|访问|继续)|登录(后)?才能(查看|访问)/,
+    /page not found|404 not found|content (not found|unavailable|removed)/i,
+    /(item|product|listing) (no longer available|not available|removed|unavailable)/i,
+    /(sign|log) ?in (required|to (view|continue|see))/i,
+    /this (page|video|post|account) (isn'?t|is not|is no longer) available/i,
+  ];
+  const LOGIN_URL_PATTERN = /\/(login|signin|sign-in|passport|auth|account\/login)\b/i;
+  const CONFIRMED_MISSING_PATTERNS = SOFT_DEAD_PATTERNS.filter((_, i) => i !== 3 && i !== 6);
+
+  function isJsRenderedShell(html) {
+    if (!/<script[\s>]/i.test(html)) return false;
+    return (
+      /<div[^>]+id=["'](root|app|__next|__nuxt|main)["']/i.test(html) ||
+      /data-reactroot|data-v-app|ng-version|__NEXT_DATA__|window\.__INITIAL_STATE__/i.test(html) ||
+      ((html.match(/<script/gi) || []).length >= 3)
+    );
+  }
+
+  function analyzeHtml(originalUrl, finalUrl, html) {
+    try {
+      const o = new URL(originalUrl);
+      const f = new URL(finalUrl);
+      const hadPath = o.pathname.length > 1 || o.search.length > 0;
+      if (LOGIN_URL_PATTERN.test(f.pathname)) return { kind: 'suspect', detail: 'login-wall' };
+      if (hadPath && f.hostname === o.hostname && f.pathname === '/' && !f.search) {
+        return { kind: 'suspect', detail: 'redirect-home' };
+      }
+    } catch (_) {}
+    const shell = isJsRenderedShell(html);
+    const titleMatch = /<title[^>]*>([^<]*)<\/title>/i.exec(html);
+    const title = (titleMatch && titleMatch[1]) || '';
+    const sample = shell ? '' : html.slice(0, 4096);
+    for (const re of SOFT_DEAD_PATTERNS) {
+      if (re.test(title) || (sample && re.test(sample))) return { kind: 'suspect', detail: 'soft-404' };
+    }
+    if (!shell) {
+      const text = html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/g, '').trim();
+      if (html.length > 0 && text.length < 80) return { kind: 'suspect', detail: 'empty-page' };
+    }
+    return { kind: 'ok', detail: '' };
+  }
+
+  async function analyzeMissingResponse(originalUrl, res) {
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('text/html')) return { kind: 'suspect', detail: 'HTTP ' + res.status + ' non-HTML response' };
+    const html = (await res.text()).slice(0, 65536);
+    const title = ((/<title[^>]*>([^<]*)<\/title>/i.exec(html) || [])[1] || '');
+    const sample = isJsRenderedShell(html)
+      ? title
+      : html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/g, ' ').slice(0, 65536);
+    if (CONFIRMED_MISSING_PATTERNS.some((re) => re.test(sample))) {
+      return { kind: 'dead', detail: 'HTTP ' + res.status + ' missing-page-content' };
+    }
+    const contentResult = analyzeHtml(originalUrl, res.url, html);
+    return {
+      kind: 'suspect',
+      detail: contentResult.kind === 'ok'
+        ? 'HTTP ' + res.status + ' usable-or-inconclusive-page'
+        : contentResult.detail,
+    };
+  }
+
+  /**
+   * 探测单条链接：HEAD 快速探测 → 404/410 GET 双确认 → 内容层分析
+   * 与 src/core/probe.ts 的 probeUrl 保持逻辑一致。
+   */
+  async function probeUrl(url) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    try {
+      // ── 第一步：HEAD 快速探测 ──
+      let headStatus = 0;
+      let headContentType = '';
+      try {
+        const headRes = await fetch(url, { method: 'HEAD', signal: ctrl.signal, redirect: 'follow', credentials: 'omit' });
+        headStatus = headRes.status;
+        headContentType = headRes.headers.get('content-type') || '';
+      } catch (_) { headStatus = 0; }
+
+      if (headStatus === 404 || headStatus === 410) {
+        const res = await fetch(url, { method: 'GET', signal: ctrl.signal, redirect: 'follow', credentials: 'omit' });
+        const firstResult = await analyzeMissingResponse(url, res);
+        if (firstResult.kind !== 'dead') return firstResult;
+        const confirmation = await fetch(url, { method: 'GET', signal: ctrl.signal, redirect: 'follow', credentials: 'omit', cache: 'no-store' });
+        if (confirmation.status !== 404 && confirmation.status !== 410) return { kind: 'suspect', detail: 'unconfirmed HTTP ' + headStatus };
+        const confirmResult = await analyzeMissingResponse(url, confirmation);
+        return confirmResult.kind === 'dead' ? confirmResult : { kind: 'suspect', detail: 'unconfirmed HTTP ' + headStatus };
+      }
+      if (headStatus === 401 || headStatus === 403) return { kind: 'suspect', detail: 'HTTP ' + headStatus };
+      if (headStatus >= 500) return { kind: 'suspect', detail: 'HTTP ' + headStatus };
+      if (headStatus >= 400) return { kind: 'suspect', detail: 'HTTP ' + headStatus };
+      if (headStatus === 200 && headContentType && !headContentType.includes('text/html')) return { kind: 'ok', detail: '' };
+
+      // ── 第二步：GET 内容层检测 ──
+      const res = await fetch(url, { method: 'GET', signal: ctrl.signal, redirect: 'follow', credentials: 'omit' });
+      if (res.status === 404 || res.status === 410) {
+        const firstResult = await analyzeMissingResponse(url, res);
+        if (firstResult.kind !== 'dead') return firstResult;
+        const confirmation = await fetch(url, { method: 'GET', signal: ctrl.signal, redirect: 'follow', credentials: 'omit', cache: 'no-store' });
+        if (confirmation.status !== 404 && confirmation.status !== 410) return { kind: 'suspect', detail: 'unconfirmed HTTP ' + res.status };
+        const confirmationResult = await analyzeMissingResponse(url, confirmation);
+        return confirmationResult.kind === 'dead' ? confirmationResult : { kind: 'suspect', detail: 'unconfirmed HTTP ' + res.status };
+      }
+      if (res.status === 401 || res.status === 403) return { kind: 'suspect', detail: 'HTTP ' + res.status };
+      if (res.status >= 500) return { kind: 'suspect', detail: 'HTTP ' + res.status };
+      if (res.status >= 400) return { kind: 'suspect', detail: 'HTTP ' + res.status };
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('text/html')) {
+        const html = (await res.text()).slice(0, 65536);
+        return analyzeHtml(url, res.url, html);
+      }
+      return { kind: 'ok', detail: '' };
+    } catch (e) {
+      if (e && e.name === 'AbortError') return { kind: 'suspect', detail: 'timeout' };
+      return { kind: 'suspect', detail: 'unreachable' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** 抓取页面元数据（title + description），用于低信息量标题的分类增强 */
+  async function fetchPageMeta(url) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    try {
+      const res = await fetch(url, { method: 'GET', signal: ctrl.signal, redirect: 'follow', credentials: 'omit' });
+      const ct = res.headers.get('content-type') || '';
+      if (!res.ok || !ct.includes('text/html')) return null;
+      const html = (await res.text()).slice(0, 32768);
+      const readMeta = (name) => (
+        (new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]+content=["']([^"']*)["']`, 'i').exec(html) || [])[1] ||
+        (new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:name|property)=["']${name}["']`, 'i').exec(html) || [])[1] ||
+        ''
+      ).trim();
+      const title = (readMeta('og:title') || readMeta('twitter:title') || ((/<title[^>]*>([^<]*)<\/title>/i.exec(html) || [])[1] || '')).trim();
+      const desc = readMeta('description') || readMeta('og:description') || readMeta('twitter:description');
+      if (!title && !desc) return null;
+      return { title, description: desc };
+    } catch (_) {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** 抓取页面上下文（site name + title + description + excerpt），用于书签分类 */
+  async function fetchPageContext(url) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch(url, { method: 'GET', signal: ctrl.signal, redirect: 'follow', credentials: 'omit' });
+      const ct = res.headers.get('content-type') || '';
+      if (!res.ok || !ct.includes('text/html')) return null;
+      const html = (await res.text()).slice(0, 65536);
+      const readMeta = (name) => (
+        (new RegExp('<meta[^>]+(?:name|property)=["\\\']' + name + '["\\\'][^>]+content=["\\\']([^"\\\']*)["\\\']', 'i').exec(html) || [])[1] ||
+        (new RegExp('<meta[^>]+content=["\\\']([^"\\\']*)["\\\'][^>]+(?:name|property)=["\\\']' + name + '["\\\']', 'i').exec(html) || [])[1] ||
+        ''
+      ).trim();
+      const decode = (text) => String(text || '')
+        .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'");
+      const clean = (text, limit) => decode(text).replace(/\s+/g, ' ').trim().slice(0, limit);
+      const title = clean(readMeta('og:title') || readMeta('twitter:title') || ((/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html) || [])[1] || ''), 180);
+      const description = clean(readMeta('description') || readMeta('og:description') || readMeta('twitter:description'), 320);
+      const siteName = clean(readMeta('og:site_name') || '', 100);
+      const text = clean(html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ').replace(/<[^>]+>/g, ' '), 700);
+      if (!title && !description && !text) return null;
+      return { siteName, title, description, excerpt: text };
+    } catch (_) {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // 暴露到全局，供 ai-sw-bridge.js 调用
+  self.AiProbeCore = { probeUrl, fetchPageMeta, fetchPageContext };
+})();

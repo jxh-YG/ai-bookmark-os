@@ -4,8 +4,6 @@ import { loadSettings, saveSettings } from './settings';
 
 const EXPORT_VERSION = 1;
 const APP_ID = 'ai-bookmark-os';
-/** 兼容从参考实现导出的旧数据包 */
-const COMPAT_APP_IDS = new Set([APP_ID, 'bookmark-pilot', 'markline']);
 
 export interface ExportBundle {
   app: string;
@@ -85,9 +83,9 @@ export async function importBundle(json: string): Promise<ImportResult> {
   } catch {
     throw new Error('INVALID_JSON');
   }
-  if (!COMPAT_APP_IDS.has(String(bundle?.app)) || typeof bundle.version !== 'number') {
-    throw new Error('INVALID_BUNDLE');
-  }
+  // 使用 validator 做严格格式和版本校验，防止损坏数据包覆盖本地数据
+  const { validateExportBundle } = await import('./validators');
+  validateExportBundle(bundle);
 
   const existing = await chrome.storage.local.get(['labelCache']);
   const mergedCache = { ...(existing.labelCache ?? {}), ...(bundle.labelCache ?? {}) };

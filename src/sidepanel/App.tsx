@@ -74,9 +74,11 @@ import {
   archiveClassificationPlan,
   getClassificationPlanVersionId,
   listClassificationPlanVersions,
+  toggleClassificationPlanVersionPin,
 } from '../core/classificationPlanArchive';
 import {
   completeIncrementalQueue,
+  isIncrementalQueueNearLimit,
   loadIncrementalQueue,
   markIncrementalQueueFailed,
 } from '../core/incrementalQueue';
@@ -621,6 +623,10 @@ export function App() {
     const runIncremental = async () => {
       const queue = await loadIncrementalQueue();
       if (!queue.length || disposed || !acquireClassificationLock()) return;
+      // 队列近限时在 notice 中提示用户
+      if (isIncrementalQueueNearLimit(queue)) {
+        setNotice(d.incrementalQueueNearLimit);
+      }
       incrementalRunRef.current = true;
       const ids = queue.map((entry) => entry.id);
       try {
@@ -651,7 +657,10 @@ export function App() {
         await completeIncrementalQueue(pending.map((bookmark) => bookmark.id));
         resultRef.current = next;
         setResult(next);
-        setNotice(`已增量归类 ${pending.length} 条新增书签，等待你审核后应用。`);
+        const imbalanceNote = next.incrementalImbalanceWarning
+          ? ' 增量书签占比较高（≥30%），建议尽快执行全量重分类以优化分类树结构。'
+          : '';
+        setNotice(`已增量归类 ${pending.length} 条新增书签，等待你审核后应用。${imbalanceNote}`);
         const draftsAfterIncrement = await refreshDraftList();
         await refreshDraftStatuses(draftsAfterIncrement, afterSnapshot);
       } catch (error) {
@@ -1494,7 +1503,7 @@ export function App() {
                   <optgroup label="历史版本">
                     {historicalVersions.map((version) => (
                       <option key={version.versionId} value={`history:${version.versionId}`}>
-                        {classificationScopeLabel(version.scope)} · 归档时间 {new Date(version.archivedAt).toLocaleString()} · {historyVersionOriginLabel(version)} · {version.application ? '已应用' : '兼容后可应用'}
+                        {version.pinned ? `${d.pinnedVersionLabel} ` : ''}{classificationScopeLabel(version.scope)} · 归档时间 {new Date(version.archivedAt).toLocaleString()} · {historyVersionOriginLabel(version)} · {version.application ? '已应用' : '兼容后可应用'}
                       </option>
                     ))}
                   </optgroup>
@@ -1516,20 +1525,38 @@ export function App() {
                   ? '历史版本为只读；兼容性检查通过后会创建新的当前草稿副本。'
                   : draftStatus === 'ready' ? '确认后将按方案更新当前 Chrome 书签树。' : (draftStatusMessage || '正在检查该方案是否仍可应用。')}</span>
               </div>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={needsCompatibilityCheck
-                  ? () => void checkCompatibilityAndApply()
-                  : () => setShowApplyModal(true)}
-                disabled={operationBusy || (!needsCompatibilityCheck && draftStatus !== 'ready')}
-                title={needsCompatibilityCheck ? '检查方案与当前书签是否兼容' : '应用当前分类方案到书签树'}
-              >
-                {checkingCompatibility
-                  ? '正在检查兼容性…'
-                  : needsCompatibilityCheck ? '检查兼容性并应用'
-                    : draftStatus === 'applied' ? '已应用到书签' : d.applyToBookmarks}
-              </button>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                {isHistoricalVersion && selectedHistoricalVersion && (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    title={selectedHistoricalVersion.pinned ? d.unpinVersion : d.pinVersion}
+                    disabled={operationBusy}
+                    onClick={async () => {
+                      try {
+                        await toggleClassificationPlanVersionPin(selectedHistoricalVersion.versionId);
+                        await refreshHistoricalVersions();
+                      } catch { /* ignore */ }
+                    }}
+                  >
+                    {selectedHistoricalVersion.pinned ? d.unpinVersion : d.pinVersion}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={needsCompatibilityCheck
+                    ? () => void checkCompatibilityAndApply()
+                    : () => setShowApplyModal(true)}
+                  disabled={operationBusy || (!needsCompatibilityCheck && draftStatus !== 'ready')}
+                  title={needsCompatibilityCheck ? '检查方案与当前书签是否兼容' : '应用当前分类方案到书签树'}
+                >
+                  {checkingCompatibility
+                    ? '正在检查兼容性…'
+                    : needsCompatibilityCheck ? '检查兼容性并应用'
+                      : draftStatus === 'applied' ? '已应用到书签' : d.applyToBookmarks}
+                </button>
+              </div>
             </div>
           )}
           {workspaceView === 'draft' && selectedCompatibilityIssue && (

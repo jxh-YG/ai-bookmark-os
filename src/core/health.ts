@@ -11,7 +11,6 @@ import type {
 const DEAD_CHECK_CONCURRENCY = 5;
 /** 同一根域名最大并发探测数，避免触发目标站限流 */
 const PER_DOMAIN_CONCURRENCY = 2;
-const REMOVED_BOOKMARKS_UNDO_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** 提取根域名（用于限流分组） */
 function rootDomain(url: string): string {
@@ -24,25 +23,29 @@ function rootDomain(url: string): string {
   }
 }
 
-/** 已删除书签的撤销记录 key */
-const REMOVED_BOOKMARKS_UNDO_KEY = 'healthRemovedBookmarksUndo';
-
-interface RemovedBookmarkRecord {
+export interface HealthBatchItem {
   id: string;
-  title: string;
-  url: string;
-  parentId: string;
-  index: number;
-  removedAt: number;
+  restoredId?: string;
+  status: 'succeeded' | 'failed' | 'conflict';
+  reason?: string;
 }
 
-/** 保存被删书签的恢复信息到 storage（TTL 24h） */
-async function saveRemovedBookmarksForUndo(records: RemovedBookmarkRecord[]): Promise<void> {
-  try {
-    await chrome.storage.local.set({ [REMOVED_BOOKMARKS_UNDO_KEY]: records });
-  } catch {
-    /* 非阻断性 */
-  }
+export interface HealthBatchResult {
+  success: boolean;
+  operationId: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  conflicts: number;
+  items: HealthBatchItem[];
+}
+
+function healthOperationId(type: string): string {
+  return `health-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function emptyBatchResult(operationId: string): HealthBatchResult {
+  return { success: false, operationId, total: 0, succeeded: 0, failed: 0, conflicts: 0, items: [] };
 }
 
 /**
@@ -269,82 +272,38 @@ export async function findDeadLinks(
 }
 
 /**
- * 批量删除书签，删除前保存恢复信息到 storage，支持撤销。
- * 返回实际删除数量。
+ * 批量删除由后台单写者执行，只为实际删除成功的书签保存撤销记录。
  */
-export async function removeBookmarks(ids: string[]): Promise<number> {
-  // 收集恢复信息
-  const records: RemovedBookmarkRecord[] = [];
-  for (const id of ids) {
-    try {
-      const [node] = await chrome.bookmarks.get(id);
-      if (node?.url && node.parentId != null) {
-        records.push({
-          id: node.id,
-          title: node.title ?? '',
-          url: node.url,
-          parentId: node.parentId,
-          index: node.index ?? 0,
-          removedAt: Date.now(),
-        });
-      }
-    } catch {
-      // 已不存在，跳过
-    }
+export async function removeBookmarks(ids: string[]): Promise<HealthBatchResult> {
+  const operationId = healthOperationId('delete');
+  if (!ids.length) return emptyBatchResult(operationId);
+  try {
+    const result = await chrome.runtime.sendMessage({
+      action: 'healthDeleteBookmarks',
+      operationId,
+      ids,
+    }) as HealthBatchResult;
+    return result?.items ? result : emptyBatchResult(operationId);
+  } catch {
+    return {
+      ...emptyBatchResult(operationId),
+      total: ids.length,
+      failed: ids.length,
+      items: ids.map((id) => ({ id, status: 'failed', reason: 'runtime-message-failed' })),
+    };
   }
-  await saveRemovedBookmarksForUndo(records);
-
-  let removed = 0;
-  for (const id of ids) {
-    try {
-      await chrome.bookmarks.remove(id);
-      removed++;
-    } catch {
-      // 已被删除则跳过
-    }
-  }
-  return removed;
 }
 
 /**
- * 撤销最近一次 removeBookmarks 操作：
- * 从 storage 读取恢复记录，将书签重建到原位置。
- * 返回成功恢复的数量。
+ * 撤销最近一次健康删除；失败或冲突项会保留在后台供再次重试。
  */
-export async function undoRemoveBookmarks(): Promise<number> {
-  let records: RemovedBookmarkRecord[] = [];
+export async function undoRemoveBookmarks(): Promise<HealthBatchResult> {
+  const operationId = healthOperationId('undo');
   try {
-    const data = await chrome.storage.local.get(REMOVED_BOOKMARKS_UNDO_KEY);
-    const raw = data[REMOVED_BOOKMARKS_UNDO_KEY];
-    records = Array.isArray(raw) ? raw : [];
+    const result = await chrome.runtime.sendMessage({ action: 'healthUndoDelete', operationId }) as HealthBatchResult;
+    return result?.items ? result : emptyBatchResult(operationId);
   } catch {
-    return 0;
+    return emptyBatchResult(operationId);
   }
-
-  // TTL 过滤（24h）
-  const now = Date.now();
-  const valid = records.filter((r) => now - r.removedAt < REMOVED_BOOKMARKS_UNDO_TTL_MS);
-  if (!valid.length) return 0;
-
-  // 按 index 升序恢复，保持原位置顺序
-  valid.sort((a, b) => a.index - b.index);
-  let restored = 0;
-  for (const r of valid) {
-    try {
-      await chrome.bookmarks.create({
-        parentId: r.parentId,
-        title: r.title,
-        url: r.url,
-        index: r.index,
-      });
-      restored++;
-    } catch {
-      // 父文件夹已被删除等情况，跳过
-    }
-  }
-
-  // 清除已恢复的记录
-  await chrome.storage.local.remove(REMOVED_BOOKMARKS_UNDO_KEY);
-  return restored;
 }
 

@@ -7,6 +7,10 @@ export interface IncrementalQueueEntry {
   id: string;
   createdAt: number;
   attempts: number;
+  status: 'pending' | 'running' | 'retryable' | 'failed' | 'succeeded';
+  nextAttemptAt: number;
+  lastAttemptAt?: number;
+  completedAt?: number;
   lastError?: string;
 }
 
@@ -18,54 +22,55 @@ function normalizeEntry(value: unknown): IncrementalQueueEntry | null {
     id: source.id,
     createdAt: Number.isFinite(source.createdAt) ? Number(source.createdAt) : Date.now(),
     attempts: Number.isFinite(source.attempts) ? Math.max(0, Number(source.attempts)) : 0,
+    status: ['pending', 'running', 'retryable', 'failed', 'succeeded'].includes(String(source.status))
+      ? source.status as IncrementalQueueEntry['status']
+      : 'pending',
+    nextAttemptAt: Number.isFinite(source.nextAttemptAt) ? Number(source.nextAttemptAt) : 0,
+    ...(Number.isFinite(source.lastAttemptAt) ? { lastAttemptAt: Number(source.lastAttemptAt) } : {}),
+    ...(Number.isFinite(source.completedAt) ? { completedAt: Number(source.completedAt) } : {}),
     ...(typeof source.lastError === 'string' && source.lastError ? { lastError: source.lastError } : {}),
   };
 }
 
-export async function loadIncrementalQueue(): Promise<IncrementalQueueEntry[]> {
-  const data = await chrome.storage.local.get(INCREMENTAL_QUEUE_KEY);
-  const raw = Array.isArray(data[INCREMENTAL_QUEUE_KEY]) ? data[INCREMENTAL_QUEUE_KEY] : [];
+async function queueMessage(action: string, payload: Record<string, unknown> = {}): Promise<IncrementalQueueEntry[]> {
+  const response = await chrome.runtime.sendMessage({ action, ...payload }) as { success?: boolean; queue?: unknown[]; error?: string };
+  if (!response?.success || !Array.isArray(response.queue)) throw new Error(response?.error || 'incremental_queue_unavailable');
+  const raw = response.queue;
   const entries = raw.map(normalizeEntry).filter((entry): entry is IncrementalQueueEntry => !!entry);
-  const deduped = [...new Map(entries.map((entry) => [entry.id, entry])).values()]
+  return [...new Map(entries.map((entry) => [entry.id, entry])).values()]
     .sort((left, right) => left.createdAt - right.createdAt)
     .slice(-MAX_INCREMENTAL_QUEUE_ENTRIES);
-  if (JSON.stringify(raw) !== JSON.stringify(deduped)) {
-    await chrome.storage.local.set({ [INCREMENTAL_QUEUE_KEY]: deduped });
-  }
-  return deduped;
+}
+
+export async function loadIncrementalQueue(): Promise<IncrementalQueueEntry[]> {
+  return queueMessage('incrementalQueueGet');
+}
+
+export async function claimIncrementalQueue(): Promise<IncrementalQueueEntry[]> {
+  return queueMessage('incrementalQueueClaim');
 }
 
 /** 返回队列是否接近上限（≥ INCREMENTAL_QUEUE_WARN_THRESHOLD 条） */
 export function isIncrementalQueueNearLimit(queue: IncrementalQueueEntry[]): boolean {
-  return queue.length >= INCREMENTAL_QUEUE_WARN_THRESHOLD;
+  return queue.filter((entry) => entry.status !== 'succeeded').length >= INCREMENTAL_QUEUE_WARN_THRESHOLD;
 }
 
 export async function enqueueIncrementalBookmarks(entries: Array<Pick<IncrementalQueueEntry, 'id' | 'createdAt'>>): Promise<void> {
-  const current = await loadIncrementalQueue();
-  const next = new Map(current.map((entry) => [entry.id, entry]));
-  for (const entry of entries) {
-    if (!entry.id || next.has(entry.id)) continue;
-    next.set(entry.id, { id: entry.id, createdAt: entry.createdAt || Date.now(), attempts: 0 });
-  }
-  await chrome.storage.local.set({
-    [INCREMENTAL_QUEUE_KEY]: [...next.values()]
-      .sort((left, right) => left.createdAt - right.createdAt)
-      .slice(-MAX_INCREMENTAL_QUEUE_ENTRIES),
-  });
+  await chrome.runtime.sendMessage({ action: 'incrementalQueueEnqueue', entries });
 }
 
 export async function markIncrementalQueueFailed(ids: string[], error: string): Promise<void> {
-  const affected = new Set(ids);
-  const current = await loadIncrementalQueue();
-  await chrome.storage.local.set({
-    [INCREMENTAL_QUEUE_KEY]: current.map((entry) => affected.has(entry.id)
-      ? { ...entry, attempts: entry.attempts + 1, lastError: error.slice(0, 240) }
-      : entry),
-  });
+  await queueMessage('incrementalQueueFail', { ids, error: error.slice(0, 240) });
 }
 
 export async function completeIncrementalQueue(ids: string[]): Promise<void> {
-  const completed = new Set(ids);
-  const current = await loadIncrementalQueue();
-  await chrome.storage.local.set({ [INCREMENTAL_QUEUE_KEY]: current.filter((entry) => !completed.has(entry.id)) });
+  await queueMessage('incrementalQueueComplete', { ids });
+}
+
+export async function retryIncrementalQueue(ids: string[]): Promise<void> {
+  await queueMessage('incrementalQueueRetry', { ids });
+}
+
+export async function abandonIncrementalQueue(ids: string[]): Promise<void> {
+  await queueMessage('incrementalQueueAbandon', { ids });
 }

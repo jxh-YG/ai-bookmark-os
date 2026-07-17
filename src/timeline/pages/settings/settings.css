@@ -1639,6 +1639,48 @@ body.theme-dark .ai-hint-card {
   margin-top: 16px;
 }
 
+.import-operation-card {
+  margin-top: var(--space-lg);
+}
+
+.import-operation-item {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.import-operation-main {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.import-operation-title,
+.import-operation-detail {
+  overflow-wrap: anywhere;
+}
+
+.import-operation-issues {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.import-operation-issues div {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.import-operation-detail {
+  margin-top: 3px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.import-operation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 #panel-ai .tree-url-input {
   width: min(420px, 56vw);
   min-width: 240px;
@@ -1976,5 +2018,45 @@ html, body {
     width: auto;
     margin: 0;
     border-radius: var(--radius-md);
+  }
+}
+
+@media (max-width: 640px) {
+  .settings-panel {
+    padding: 12px;
+  }
+
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 14px 16px;
+  }
+
+  .setting-row .setting-control {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  #panel-ai .setting-control > .tagrule-input,
+  #panel-ai .setting-control > .select-control {
+    flex: 1 1 180px;
+    width: auto !important;
+    min-width: 0;
+  }
+
+  #panel-ai .tree-stability-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+  }
+
+  #panel-ai .tree-number-field input {
+    width: 100%;
   }
 }

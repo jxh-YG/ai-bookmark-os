@@ -604,7 +604,7 @@
     "description": "AI 设置分区标题"
   },
   "aiSectionDesc": {
-    "message": "当规则引擎不确定时，调用云端 AI 辅助分类。仅发送标题和 URL，不发送正文。",
+    "message": "当规则引擎不确定时，调用云端 AI 辅助分类。默认会发送标题、URL、页面摘要、正文片段和页面结构，可在下方关闭页面内容发送。",
     "description": "AI 设置分区说明"
   },
   "aiEnabled": {
@@ -772,8 +772,24 @@
     "description": "AI 缓存清除成功提示"
   },
   "aiPrivacyNotice": {
-    "message": "启用 AI 后，书签标题和 URL 将发送至你选择的 AI 服务商。不会发送正文内容。",
+    "message": "AI 请求会发送至当前选择的服务商。页面内容开关开启时，还会发送页面摘要、正文片段、标题结构、关键词和结构化内容类型；关闭后仅发送标题、URL、域名、候选标签和文件夹信息。",
     "description": "AI 隐私声明"
+  },
+  "aiPageContent": {
+    "message": "发送页面内容",
+    "description": "AI 页面内容发送开关"
+  },
+  "aiPageContentDesc": {
+    "message": "允许提取并向当前 AI 服务商发送页面摘要、正文片段、标题结构、关键词和结构化内容类型。默认开启。",
+    "description": "AI 页面内容发送说明"
+  },
+  "importHistory": {
+    "message": "导入操作记录",
+    "description": "导入操作历史标题"
+  },
+  "importHistoryDesc": {
+    "message": "查看最近导入的完成、部分失败、冲突和撤销状态。",
+    "description": "导入操作历史说明"
   },
   "aiLogsTitle": {
     "message": "AI 辅助分类日志",

@@ -77,10 +77,14 @@ import {
   toggleClassificationPlanVersionPin,
 } from '../core/classificationPlanArchive';
 import {
+  abandonIncrementalQueue,
+  claimIncrementalQueue,
   completeIncrementalQueue,
   isIncrementalQueueNearLimit,
   loadIncrementalQueue,
   markIncrementalQueueFailed,
+  retryIncrementalQueue,
+  type IncrementalQueueEntry,
 } from '../core/incrementalQueue';
 
 /** 应用外观设置到根元素 CSS 变量 + 颜色模式 */
@@ -308,6 +312,9 @@ export function App() {
   const [canUndo, setCanUndo] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [notice, setNotice] = useState('');
+  const [failedIncrementalQueue, setFailedIncrementalQueue] = useState<IncrementalQueueEntry[]>([]);
+  const [incrementalQueueTick, setIncrementalQueueTick] = useState(0);
+  const [incrementalQueueAction, setIncrementalQueueAction] = useState(false);
   const [estimate, setEstimate] = useState<PendingEstimate | null>(null);
   const [showPartialModal, setShowPartialModal] = useState(false);
   const [folders, setFolders] = useState<BookmarkFolderOption[]>([]);
@@ -618,18 +625,51 @@ export function App() {
   }, [activeDraftKey, result]);
 
   useEffect(() => {
-    if (!result || result.scope?.mode === 'partial' || !uiSettings.incrementalClassificationEnabled || !uiSettings.apiKey || incrementalRunRef.current) return;
     let disposed = false;
-    const runIncremental = async () => {
+    let retryTimer: number | null = null;
+    const refreshQueueState = async () => {
       const queue = await loadIncrementalQueue();
-      if (!queue.length || disposed || !acquireClassificationLock()) return;
-      // 队列近限时在 notice 中提示用户
-      if (isIncrementalQueueNearLimit(queue)) {
-        setNotice(d.incrementalQueueNearLimit);
-      }
-      incrementalRunRef.current = true;
-      const ids = queue.map((entry) => entry.id);
+      if (!disposed) setFailedIncrementalQueue(queue.filter((entry) => entry.status === 'failed'));
+      return queue;
+    };
+    const scheduleRetry = (queue: IncrementalQueueEntry[]) => {
+      if (disposed || retryTimer !== null) return;
+      const nextAttemptAt = queue
+        .filter((entry) => entry.status === 'retryable' && entry.nextAttemptAt > Date.now())
+        .reduce((earliest, entry) => Math.min(earliest, entry.nextAttemptAt), Number.POSITIVE_INFINITY);
+      if (!Number.isFinite(nextAttemptAt)) return;
+      retryTimer = window.setTimeout(
+        () => setIncrementalQueueTick((value) => value + 1),
+        Math.max(250, nextAttemptAt - Date.now()),
+      );
+    };
+    const runIncremental = async () => {
+      let lockHeld = false;
+      let ids: string[] = [];
       try {
+        const queue = await refreshQueueState();
+        if (
+          !result
+          || result.scope?.mode === 'partial'
+          || !uiSettings.incrementalClassificationEnabled
+          || !uiSettings.apiKey
+          || incrementalRunRef.current
+        ) return;
+        if (isIncrementalQueueNearLimit(queue)) setNotice(d.incrementalQueueNearLimit);
+        const hasReadyEntry = queue.some((entry) => (
+          entry.status === 'pending'
+          || (entry.status === 'retryable' && entry.nextAttemptAt <= Date.now())
+        ));
+        if (!hasReadyEntry) return;
+        if (!acquireClassificationLock()) {
+          retryTimer = window.setTimeout(() => setIncrementalQueueTick((value) => value + 1), 1000);
+          return;
+        }
+        lockHeld = true;
+        const claimed = await claimIncrementalQueue();
+        if (!claimed.length) return;
+        incrementalRunRef.current = true;
+        ids = claimed.map((entry) => entry.id);
         const beforeSnapshot = await captureBookmarkSnapshot(FULL_CLASSIFICATION_SCOPE);
         const allBookmarks = await getFlatBookmarks();
         const byId = new Map(allBookmarks.map((bookmark) => [bookmark.id, bookmark]));
@@ -644,7 +684,6 @@ export function App() {
         if (beforeSnapshot.fingerprint !== afterSnapshot.fingerprint) {
           throw new Error('bookmarks_changed_during_incremental_classification');
         }
-        if (disposed) return;
         await archiveClassificationPlan(result);
         const next: ClassifyResult = {
           ...incremental,
@@ -655,31 +694,76 @@ export function App() {
         };
         await saveClassifyResult(next);
         await completeIncrementalQueue(pending.map((bookmark) => bookmark.id));
-        resultRef.current = next;
-        setResult(next);
-        const imbalanceNote = next.incrementalImbalanceWarning
-          ? ' 增量书签占比较高（≥30%），建议尽快执行全量重分类以优化分类树结构。'
-          : '';
-        setNotice(`已增量归类 ${pending.length} 条新增书签，等待你审核后应用。${imbalanceNote}`);
-        const draftsAfterIncrement = await refreshDraftList();
-        await refreshDraftStatuses(draftsAfterIncrement, afterSnapshot);
+        if (!disposed) {
+          resultRef.current = next;
+          setResult(next);
+          const imbalanceNote = next.incrementalImbalanceWarning
+            ? ' 增量书签占比较高（≥30%），建议尽快执行全量重分类以优化分类树结构。'
+            : '';
+          setNotice(`已增量归类 ${pending.length} 条新增书签，等待你审核后应用。${imbalanceNote}`);
+          const draftsAfterIncrement = await refreshDraftList();
+          await refreshDraftStatuses(draftsAfterIncrement, afterSnapshot);
+        }
       } catch (error) {
-        await markIncrementalQueueFailed(ids, (error as Error).message || 'incremental_classification_failed');
+        if (ids.length) {
+          await markIncrementalQueueFailed(ids, (error as Error).message || 'incremental_classification_failed');
+        } else {
+          console.warn('Incremental queue unavailable:', error);
+        }
       } finally {
         incrementalRunRef.current = false;
-        releaseClassificationLock();
+        if (lockHeld) releaseClassificationLock();
+        try { scheduleRetry(await refreshQueueState()); } catch { /* background may be restarting */ }
       }
     };
     void runIncremental();
-    return () => { disposed = true; };
+    return () => {
+      disposed = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
   }, [
     acquireClassificationLock,
+    d.incrementalQueueNearLimit,
+    incrementalQueueTick,
     refreshDraftList,
     refreshDraftStatuses,
     releaseClassificationLock,
     result,
     uiSettings,
   ]);
+
+  const retryFailedIncrementalQueue = useCallback(async () => {
+    const ids = failedIncrementalQueue.map((entry) => entry.id);
+    if (!ids.length) return;
+    setIncrementalQueueAction(true);
+    try {
+      await retryIncrementalQueue(ids);
+      setFailedIncrementalQueue([]);
+      setIncrementalQueueTick((value) => value + 1);
+      setNotice(resolveLang(uiSettings.language) === 'zh' ? `已重新排队 ${ids.length} 条书签。` : `${ids.length} bookmarks queued for retry.`);
+    } catch (queueError) {
+      setError((queueError as Error).message || 'incremental_queue_retry_failed');
+    } finally {
+      setIncrementalQueueAction(false);
+    }
+  }, [failedIncrementalQueue, uiSettings.language]);
+
+  const abandonFailedIncrementalQueue = useCallback(async () => {
+    const ids = failedIncrementalQueue.map((entry) => entry.id);
+    if (!ids.length) return;
+    const isZh = resolveLang(uiSettings.language) === 'zh';
+    if (!confirm(isZh ? `放弃这 ${ids.length} 条书签的增量分类任务？` : `Abandon incremental classification for ${ids.length} bookmarks?`)) return;
+    setIncrementalQueueAction(true);
+    try {
+      await abandonIncrementalQueue(ids);
+      setFailedIncrementalQueue([]);
+      setNotice(isZh ? `已放弃 ${ids.length} 条失败任务。` : `${ids.length} failed tasks abandoned.`);
+    } catch (queueError) {
+      setError((queueError as Error).message || 'incremental_queue_abandon_failed');
+    } finally {
+      setIncrementalQueueAction(false);
+    }
+  }, [failedIncrementalQueue, uiSettings.language]);
 
   const running = progress.phase === 'labeling' || progress.phase === 'building' || progress.phase === 'assigning';
   const operationBusy = running || classificationPending || checkingCompatibility || applying || undoing || savingDraft;
@@ -1469,6 +1553,23 @@ export function App() {
 
           {error && <div className="error-msg">{error}</div>}
           {notice && <div className="status-bar">{notice}</div>}
+          {failedIncrementalQueue.length > 0 && (
+            <div className="pending-banner" role="alert">
+              <span title={failedIncrementalQueue[0].lastError || ''}>
+                {resolveLang(uiSettings.language) === 'zh'
+                  ? `${failedIncrementalQueue.length} 条增量分类任务在 3 次尝试后失败。`
+                  : `${failedIncrementalQueue.length} incremental classification tasks failed after 3 attempts.`}
+              </span>
+              <div className="pending-banner__actions">
+                <button type="button" className="btn btn-secondary btn-sm" disabled={incrementalQueueAction} onClick={retryFailedIncrementalQueue}>
+                  {resolveLang(uiSettings.language) === 'zh' ? '重试' : 'Retry'}
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={incrementalQueueAction} onClick={abandonFailedIncrementalQueue}>
+                  {resolveLang(uiSettings.language) === 'zh' ? '放弃' : 'Abandon'}
+                </button>
+              </div>
+            </div>
+          )}
           {workspaceView === 'live' && result && draftStatus === 'ready' && (
             <div className="pending-apply-banner" role="status">
               <span>AI 分类方案已生成，尚未应用到书签。</span>

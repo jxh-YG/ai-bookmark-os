@@ -30,6 +30,21 @@ export function validateSettings(raw: unknown): Settings {
       throw new Error(`fontSize 超出范围 [8, 32]，当前值：${s.fontSize}`);
     }
   }
+  const boundedBatchFields: Array<[string, number, number]> = [
+    ['labelBatchSize', 10, 80],
+    ['labelConcurrency', 1, 5],
+    ['assignBatchSize', 10, 100],
+  ];
+  for (const [field, min, max] of boundedBatchFields) {
+    if (s[field] === undefined) continue;
+    const value = Number(s[field]);
+    if (!Number.isFinite(value) || value < min || value > max) {
+      throw new Error(`${field} 超出范围 [${min}, ${max}]，当前值：${s[field]}`);
+    }
+  }
+  if (s.allowPageContentForAi !== undefined && typeof s.allowPageContentForAi !== 'boolean') {
+    throw new Error('allowPageContentForAi 必须为布尔值');
+  }
 
   // 枚举值校验
   const validProviders = new Set(['agnes', 'openrouter', 'openai', 'claude', 'gemini', 'deepseek', 'custom']);

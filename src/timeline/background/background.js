@@ -156,14 +156,15 @@ async function getCachedContent(url) {
 
 async function setCachedContent(url, data) {
   if (!url || !data) return;
-  const cache = await getPageContentCache();
-  cache[url] = makeContentResult(url, data);
-  let entries = Object.entries(cache).filter(([, value]) => Date.now() - (value.fetchedAt || 0) <= PAGE_CONTENT_CACHE_TTL);
-  if (entries.length > PAGE_CONTENT_CACHE_MAX) {
-    entries.sort((a, b) => (b[1].fetchedAt || 0) - (a[1].fetchedAt || 0));
-    entries = entries.slice(0, PAGE_CONTENT_CACHE_MAX);
-  }
-  await chrome.storage.local.set({ [PAGE_CONTENT_CACHE_KEY]: Object.fromEntries(entries) });
+  await mutateStorageResource(PAGE_CONTENT_CACHE_KEY, (current) => {
+    const cache = { ...(current && typeof current === 'object' ? current : {}), [url]: makeContentResult(url, data) };
+    let entries = Object.entries(cache).filter(([, value]) => Date.now() - (value.fetchedAt || 0) <= PAGE_CONTENT_CACHE_TTL);
+    if (entries.length > PAGE_CONTENT_CACHE_MAX) {
+      entries.sort((a, b) => (b[1].fetchedAt || 0) - (a[1].fetchedAt || 0));
+      entries = entries.slice(0, PAGE_CONTENT_CACHE_MAX);
+    }
+    return Object.fromEntries(entries);
+  });
 }
 
 async function fetchContentWithTimeout(url, timeoutMs) {
@@ -349,6 +350,12 @@ const STORAGE_KEY = 'bookmark_timeline_data';
 const STORAGE_KEY_TOMBSTONES = 'bookmark_tombstones';
 const STORAGE_KEY_SETTINGS = 'app_settings';
 const STORAGE_KEY_IMPORT_OPERATIONS = 'bookmark_import_operations';
+const STORAGE_KEY_OPERATION_RESULTS = 'destructive_operation_results';
+const STORAGE_KEY_HEALTH_UNDO = 'healthRemovedBookmarksUndo';
+const LABEL_CACHE_KEY = 'labelCache';
+const LABEL_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const LABEL_CACHE_MAX_ENTRIES = 1000;
+const LABEL_CACHE_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_TOMBSTONE_RETENTION_DAYS = 30;
 const TOMBSTONE_RETENTION_OPTIONS = [7, 15, 30, 60];
 
@@ -360,7 +367,8 @@ function mutateStorageResource(key, mutation) {
   const next = previous.catch(() => undefined).then(async () => {
     const data = await chrome.storage.local.get(key);
     const value = await mutation(data[key]);
-    await chrome.storage.local.set({ [key]: value });
+    if (value === undefined) await chrome.storage.local.remove(key);
+    else await chrome.storage.local.set({ [key]: value });
     return value;
   });
   storageMutationQueues.set(key, next);
@@ -375,6 +383,77 @@ async function mutateStoredBookmarks(mutation) {
 
 async function mutateTombstones(mutation) {
   return mutateStorageResource(STORAGE_KEY_TOMBSTONES, (current) => mutation(Array.isArray(current) ? current : []));
+}
+
+const inFlightOperations = new Map();
+const operationDomainQueues = new Map();
+function runSerializedOperationDomain(domain, operation) {
+  const previous = operationDomainQueues.get(domain) || Promise.resolve();
+  const next = previous.catch(() => undefined).then(operation);
+  operationDomainQueues.set(domain, next);
+  return next.finally(() => {
+    if (operationDomainQueues.get(domain) === next) operationDomainQueues.delete(domain);
+  });
+}
+
+async function runIdempotentOperation(type, operationId, operation) {
+  const id = String(operationId || '').trim();
+  if (!id) return operation();
+  const key = `${type}:${id}`;
+  const stored = await chrome.storage.local.get(STORAGE_KEY_OPERATION_RESULTS);
+  const previous = Array.isArray(stored[STORAGE_KEY_OPERATION_RESULTS])
+    ? stored[STORAGE_KEY_OPERATION_RESULTS].find((item) => item.key === key)
+    : null;
+  if (previous) return previous.result;
+  if (inFlightOperations.has(key)) return inFlightOperations.get(key);
+  const pending = Promise.resolve().then(operation).then(async (result) => {
+    await mutateStorageResource(STORAGE_KEY_OPERATION_RESULTS, (current) => [
+      { key, completedAt: Date.now(), result },
+      ...(Array.isArray(current) ? current.filter((item) => item.key !== key) : []),
+    ].slice(0, 50));
+    return result;
+  }).finally(() => inFlightOperations.delete(key));
+  inFlightOperations.set(key, pending);
+  return pending;
+}
+
+function makeBatchResult(items) {
+  const succeeded = items.filter((item) => item.status === 'succeeded').length;
+  const conflicts = items.filter((item) => item.status === 'conflict').length;
+  const failed = items.length - succeeded - conflicts;
+  return { total: items.length, succeeded, failed, conflicts, items };
+}
+
+function normalizeLabelCache(raw, now = Date.now()) {
+  const entries = Object.entries(raw && typeof raw === 'object' ? raw : {})
+    .filter(([, value]) => value && typeof value.summary === 'string' && Array.isArray(value.tags))
+    .map(([key, value]) => [key, {
+      ...value,
+      cachedAt: Number.isFinite(Number(value.cachedAt)) ? Number(value.cachedAt) : now,
+    }])
+    .filter(([, value]) => now - value.cachedAt <= LABEL_CACHE_TTL_MS)
+    .sort(([, left], [, right]) => right.cachedAt - left.cachedAt);
+  const cache = {};
+  let bytes = 0;
+  for (const [key, value] of entries) {
+    if (Object.keys(cache).length >= LABEL_CACHE_MAX_ENTRIES) break;
+    const entryBytes = new TextEncoder().encode(JSON.stringify({ [key]: value })).length;
+    if (bytes + entryBytes > LABEL_CACHE_MAX_BYTES) continue;
+    cache[key] = value;
+    bytes += entryBytes;
+  }
+  return cache;
+}
+
+async function getLabelCache() {
+  return mutateStorageResource(LABEL_CACHE_KEY, (current) => normalizeLabelCache(current));
+}
+
+async function mergeLabelCache(entries) {
+  return mutateStorageResource(LABEL_CACHE_KEY, (current) => normalizeLabelCache({
+    ...(current && typeof current === 'object' ? current : {}),
+    ...Object.fromEntries(entries || []),
+  }));
 }
 function isSafeExternalUrl(value) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 4096) return false;
@@ -393,10 +472,33 @@ function validateRuntimeMessage(message) {
   if (message.action !== undefined && typeof message.action !== 'string') return 'invalid_action';
   if (message.id !== undefined && (typeof message.id !== 'string' || message.id.length > 256)) return 'invalid_id';
   if (message.feedId !== undefined && (typeof message.feedId !== 'string' || message.feedId.length > 256)) return 'invalid_feed_id';
+  if (message.operationId !== undefined && (typeof message.operationId !== 'string' || message.operationId.length > 256)) return 'invalid_operation_id';
+  if (message.requestId !== undefined && (typeof message.requestId !== 'string' || message.requestId.length > 256)) return 'invalid_request_id';
   if (message.title !== undefined && (typeof message.title !== 'string' || message.title.length > 512)) return 'invalid_title';
+  if (message.error !== undefined && (typeof message.error !== 'string' || message.error.length > 512)) return 'invalid_error';
   if (message.url !== undefined && !isSafeExternalUrl(message.url)) return 'invalid_url';
   if (message.ids !== undefined && !hasValidStringList(message.ids, 500, 256)) return 'invalid_ids';
-  for (const key of ['tags', 'addTags', 'removeTags', 'urls', 'orderedIds']) {
+  if (message.entries !== undefined && (
+    !Array.isArray(message.entries)
+    || message.entries.length > 500
+    || !message.entries.every((entry) => entry
+      && typeof entry.id === 'string'
+      && entry.id.length > 0
+      && entry.id.length <= 256
+      && Number.isFinite(Number(entry.createdAt)))
+  )) return 'invalid_entries';
+  if (message.cacheEntries !== undefined) {
+    if (!Array.isArray(message.cacheEntries) || message.cacheEntries.length > LABEL_CACHE_MAX_ENTRIES) return 'invalid_cache_entries';
+    if (!message.cacheEntries.every((entry) => Array.isArray(entry)
+      && entry.length === 2
+      && typeof entry[0] === 'string'
+      && entry[0].length > 0
+      && entry[0].length <= 256
+      && entry[1]
+      && typeof entry[1] === 'object')) return 'invalid_cache_entries';
+    if (new TextEncoder().encode(JSON.stringify(message.cacheEntries)).length > LABEL_CACHE_MAX_BYTES) return 'invalid_cache_entries';
+  }
+  for (const key of ['tags', 'addTags', 'removeTags', 'urls', 'orderedIds', 'folderPaths']) {
     if (message[key] !== undefined && !hasValidStringList(message[key], key === 'urls' ? 50 : 500, key === 'urls' ? 4096 : 120)) return `invalid_${key}`;
   }
   if (Array.isArray(message.urls) && !message.urls.every(isSafeExternalUrl)) return 'invalid_urls';
@@ -407,17 +509,9 @@ async function getStoredBookmarks() {
   return result[STORAGE_KEY] || [];
 }
 
-async function setStoredBookmarks(bookmarks) {
-  await mutateStorageResource(STORAGE_KEY, () => bookmarks);
-}
-
 async function getTombstones() {
   const result = await chrome.storage.local.get(STORAGE_KEY_TOMBSTONES);
   return result[STORAGE_KEY_TOMBSTONES] || [];
-}
-
-async function setTombstones(tombstones) {
-  await mutateStorageResource(STORAGE_KEY_TOMBSTONES, () => tombstones);
 }
 
 async function getImportOperations() {
@@ -438,8 +532,11 @@ async function getAppSettings() {
 }
 
 async function setAppSettings(patch) {
-  const current = await getAppSettings();
-  await chrome.storage.local.set({ [STORAGE_KEY_SETTINGS]: { ...current, ...patch } });
+  await mutateStorageResource(STORAGE_KEY_SETTINGS, (current) => ({
+    tombstoneRetentionDays: DEFAULT_TOMBSTONE_RETENTION_DAYS,
+    ...(current || {}),
+    ...patch,
+  }));
 }
 
 async function pruneTombstones(tombstones, retentionDays) {
@@ -456,7 +553,6 @@ async function getHealthScoreFavorites() {
 }
 
 async function saveHealthScoreFavorite(record) {
-  const favorites = await getHealthScoreFavorites();
   const item = {
     id: record.id || 'hsf_' + Date.now(),
     score: record.score,
@@ -466,23 +562,24 @@ async function saveHealthScoreFavorite(record) {
     note: record.note || '',
     createdAt: record.createdAt || Date.now()
   };
-  // 去重：同一天同一分数不重复收藏
-  const sameDay = favorites.find(f => {
-    const sameDate = new Date(f.createdAt).toDateString() === new Date(item.createdAt).toDateString();
-    return sameDate && f.score === item.score;
+  let saved = false;
+  await mutateStorageResource(HEALTH_SCORE_FAVORITES_KEY, (current) => {
+    const favorites = Array.isArray(current) ? current : [];
+    const sameDay = favorites.some(f => (
+      new Date(f.createdAt).toDateString() === new Date(item.createdAt).toDateString()
+      && f.score === item.score
+    ));
+    if (sameDay) return favorites;
+    saved = true;
+    return [item, ...favorites].slice(0, 50);
   });
-  if (sameDay) return { success: false, error: 'already_exists' };
-  favorites.unshift(item);
-  // 最多保留 50 条
-  if (favorites.length > 50) favorites.length = 50;
-  await chrome.storage.local.set({ [HEALTH_SCORE_FAVORITES_KEY]: favorites });
-  return { success: true, favorite: item };
+  return saved ? { success: true, favorite: item } : { success: false, error: 'already_exists' };
 }
 
 async function deleteHealthScoreFavorite(id) {
-  const favorites = await getHealthScoreFavorites();
-  const filtered = favorites.filter(f => f.id !== id);
-  await chrome.storage.local.set({ [HEALTH_SCORE_FAVORITES_KEY]: filtered });
+  await mutateStorageResource(HEALTH_SCORE_FAVORITES_KEY, (current) => (
+    (Array.isArray(current) ? current : []).filter(f => f.id !== id)
+  ));
   return { success: true };
 }
 
@@ -502,6 +599,86 @@ async function addTombstone(item) {
     if (tombstones.some(t => (t.url + '_' + t.dateAdded) === key)) return tombstones;
     return [...tombstones, { ...item, deletedAt: Date.now(), deletedFrom: item.deletedFrom || 'manual' }];
   });
+}
+
+async function deleteHealthBookmarks(ids, operationId) {
+  return runIdempotentOperation('health-delete', operationId, () => runSerializedOperationDomain('health', async () => {
+    const requestedIds = [...new Set((ids || []).filter(Boolean))];
+    const mirror = await getStoredBookmarks();
+    const mirrorById = new Map(mirror.map((item) => [item.id, item]));
+    const records = [];
+    const items = [];
+    for (const id of requestedIds) {
+      try {
+        const [node] = await chrome.bookmarks.get(id);
+        if (!node?.url || node.parentId == null) throw new Error('bookmark_not_found');
+        const duplicates = await chrome.bookmarks.search({ url: node.url }).catch(() => []);
+        const record = {
+          ...(mirrorById.get(id) || {}),
+          id: node.id,
+          title: node.title || '',
+          url: node.url,
+          parentId: node.parentId,
+          index: Number.isInteger(node.index) ? node.index : 0,
+          removedAt: Date.now(),
+          existingDuplicateIds: duplicates.filter((item) => item.id !== id).map((item) => item.id),
+        };
+        await chrome.bookmarks.remove(id);
+        records.push(record);
+        items.push({ id, status: 'succeeded' });
+        await addTombstone({ ...record, deletedFrom: 'health-check' });
+      } catch (error) {
+        items.push({ id, status: 'failed', reason: error?.message || 'bookmark_delete_failed' });
+      }
+    }
+    if (records.length) {
+      await mutateStorageResource(STORAGE_KEY_HEALTH_UNDO, () => records);
+      const removedIds = new Set(records.map((record) => record.id));
+      await mutateStoredBookmarks((bookmarks) => bookmarks.filter((item) => !removedIds.has(item.id)));
+    }
+    return { success: items.every((item) => item.status === 'succeeded'), operationId, ...makeBatchResult(items) };
+  }));
+}
+
+async function undoHealthBookmarks(operationId) {
+  return runIdempotentOperation('health-undo', operationId, () => runSerializedOperationDomain('health', async () => {
+    const stored = await chrome.storage.local.get(STORAGE_KEY_HEALTH_UNDO);
+    const records = Array.isArray(stored[STORAGE_KEY_HEALTH_UNDO]) ? stored[STORAGE_KEY_HEALTH_UNDO] : [];
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const pending = [];
+    const items = [];
+    for (const record of records.slice().sort((left, right) => (left.index || 0) - (right.index || 0))) {
+      if ((record.removedAt || 0) < cutoff) {
+        items.push({ id: record.id, status: 'failed', reason: 'undo_record_expired' });
+        continue;
+      }
+      try {
+        const currentDuplicates = await chrome.bookmarks.search({ url: record.url }).catch(() => []);
+        const knownIds = new Set(record.existingDuplicateIds || []);
+        const newDuplicate = currentDuplicates.find((item) => !knownIds.has(item.id));
+        if (newDuplicate) {
+          pending.push(record);
+          items.push({ id: record.id, status: 'conflict', reason: 'bookmark_recreated_after_delete' });
+          continue;
+        }
+        const [parent] = await chrome.bookmarks.get(record.parentId);
+        if (!parent || parent.url) throw new Error('original_parent_unavailable');
+        const created = await chrome.bookmarks.create({
+          parentId: record.parentId,
+          title: record.title,
+          url: record.url,
+          index: Number.isInteger(record.index) ? record.index : undefined,
+        });
+        await upsertImportedBookmark(created, record);
+        items.push({ id: record.id, restoredId: created.id, status: 'succeeded' });
+      } catch (error) {
+        pending.push(record);
+        items.push({ id: record.id, status: 'failed', reason: error?.message || 'bookmark_restore_failed' });
+      }
+    }
+    await mutateStorageResource(STORAGE_KEY_HEALTH_UNDO, () => pending.length ? pending : undefined);
+    return { success: pending.length === 0, operationId, ...makeBatchResult(items) };
+  }));
 }
 
 // ===== 工具函数 =====
@@ -601,6 +778,47 @@ async function collectAllBookmarks(nodes, folderPath = '', folderName = '') {
   return results;
 }
 
+async function buildBookmarkExportTree() {
+  const [tree, stored] = await Promise.all([chrome.bookmarks.getTree(), getStoredBookmarks()]);
+  const metadataById = new Map(stored.map((item) => [item.id, item]));
+  const mapNode = (node, folderPath = '') => {
+    if (node.url) {
+      const metadata = metadataById.get(node.id) || {};
+      return {
+        type: 'bookmark',
+        title: node.title || node.url,
+        url: node.url,
+        dateAdded: metadata.dateAdded || node.dateAdded || Date.now(),
+        folderPath: metadata.folderPath || normalizeBookmarkFolderPath(folderPath),
+        metadata: {
+          tags: BookmarkData.normalizeTags(metadata.tags),
+          pinned: !!metadata.pinned,
+          pinnedAt: metadata.pinnedAt || null,
+          contentText: metadata.contentText || '',
+          contentTitle: metadata.contentTitle || '',
+          contentExcerpt: metadata.contentExcerpt || '',
+          contentMetaDesc: metadata.contentMetaDesc || '',
+          contentMetaKeywords: Array.isArray(metadata.contentMetaKeywords) ? metadata.contentMetaKeywords : [],
+          contentHeadings: Array.isArray(metadata.contentHeadings) ? metadata.contentHeadings : [],
+          contentStructuredTypes: Array.isArray(metadata.contentStructuredTypes) ? metadata.contentStructuredTypes : [],
+          contentFetchedAt: metadata.contentFetchedAt || null,
+          contentStatus: metadata.contentStatus || 'pending',
+          contentFailureReason: metadata.contentFailureReason || '',
+          contentSource: metadata.contentSource || '',
+        },
+      };
+    }
+    const nextPath = joinBookmarkFolderPath(folderPath, node.title);
+    return {
+      type: 'folder',
+      title: node.title || '',
+      dateAdded: node.dateAdded || null,
+      children: (node.children || []).map((child) => mapNode(child, nextPath)),
+    };
+  };
+  return (tree[0]?.children || []).map((node) => mapNode(node, ''));
+}
+
 // 增量合并（去重，保留已有标签）
 function mergeBookmarks(existing, incoming) {
   const urlMap = new Map();
@@ -640,6 +858,8 @@ async function getNativeBookmarksForImport() {
 
 async function upsertImportedBookmark(createdBookmark, metadata) {
   const imported = bookmarkToItem(createdBookmark, metadata.folderName, metadata.folderPath);
+  const importedDateAdded = Number(metadata.dateAdded);
+  if (Number.isFinite(importedDateAdded) && importedDateAdded > 0) imported.dateAdded = importedDateAdded;
   imported.tags = BookmarkData.normalizeTags(metadata.tags);
   imported.tagsAuto = [...imported.tags];
   imported.pinned = !!metadata.pinned;
@@ -657,25 +877,31 @@ async function upsertImportedBookmark(createdBookmark, metadata) {
   imported.contentSource = metadata.contentSource || '';
   imported.importedAt = Date.now();
 
-  const stored = await getStoredBookmarks();
-  const position = stored.findIndex(item => item.id === imported.id);
-  if (position >= 0) {
-    const previous = stored[position];
-    imported.tags = BookmarkData.normalizeTags([...(previous.tags || []), ...imported.tags]);
-    imported.tagsAuto = BookmarkData.normalizeTags([...(previous.tagsAuto || []), ...imported.tagsAuto]);
-    imported.pinned = previous.pinned || imported.pinned;
-    imported.pinnedAt = imported.pinned ? (previous.pinnedAt || imported.pinnedAt || Date.now()) : null;
-    stored[position] = { ...previous, ...imported };
-  } else {
-    stored.unshift(imported);
-  }
-  await setStoredBookmarks(stored);
-  return imported;
+  let saved = imported;
+  await mutateStoredBookmarks((stored) => {
+    const position = stored.findIndex(item => item.id === imported.id);
+    const next = stored.slice();
+    if (position >= 0) {
+      const previous = stored[position];
+      saved = {
+        ...previous,
+        ...imported,
+        tags: BookmarkData.normalizeTags([...(previous.tags || []), ...imported.tags]),
+        tagsAuto: BookmarkData.normalizeTags([...(previous.tagsAuto || []), ...imported.tagsAuto]),
+        pinned: previous.pinned || imported.pinned,
+      };
+      saved.pinnedAt = saved.pinned ? (previous.pinnedAt || imported.pinnedAt || Date.now()) : null;
+      next[position] = saved;
+    } else {
+      next.unshift(imported);
+    }
+    return next;
+  });
+  return saved;
 }
 
 async function mergeImportedMetadata(existingId, metadata) {
-  let stored = await getStoredBookmarks();
-  let target = stored.find(item => item.id === existingId);
+  let target = (await getStoredBookmarks()).find(item => item.id === existingId);
   if (!target) {
     const nodes = await chrome.bookmarks.get(existingId);
     const node = nodes && nodes[0];
@@ -683,52 +909,103 @@ async function mergeImportedMetadata(existingId, metadata) {
     const folder = await getBookmarkFolderInfo(node);
     target = await upsertImportedBookmark(node, {
       ...metadata,
+      tags: [],
+      pinned: false,
+      contentText: '',
+      contentTitle: '',
+      contentExcerpt: '',
+      contentMetaDesc: '',
+      contentMetaKeywords: [],
+      contentHeadings: [],
+      contentStructuredTypes: [],
       folderName: folder.title || metadata.folderName,
       folderPath: folder.path || metadata.folderPath,
     });
-    stored = await getStoredBookmarks();
   }
-  const position = stored.findIndex(item => item.id === existingId);
-  if (position < 0) return false;
-  stored[position].tags = BookmarkData.normalizeTags([...(stored[position].tags || []), ...(metadata.tags || [])]);
-  stored[position].tagsAuto = BookmarkData.normalizeTags([...(stored[position].tagsAuto || []), ...(metadata.tags || [])]);
-  stored[position].pinned = stored[position].pinned || !!metadata.pinned;
-  if (stored[position].pinned && !stored[position].pinnedAt) stored[position].pinnedAt = Date.now();
-  await setStoredBookmarks(stored);
-  return true;
+  let journal = null;
+  await mutateStoredBookmarks((stored) => {
+    const position = stored.findIndex(item => item.id === existingId);
+    if (position < 0) return stored;
+    const next = stored.slice();
+    const current = stored[position];
+    const before = {
+      tags: [...(current.tags || [])],
+      tagsAuto: [...(current.tagsAuto || [])],
+      pinned: !!current.pinned,
+      pinnedAt: current.pinnedAt || null,
+    };
+    const updated = {
+      ...current,
+      tags: BookmarkData.normalizeTags([...(current.tags || []), ...(metadata.tags || [])]),
+      tagsAuto: BookmarkData.normalizeTags([...(current.tagsAuto || []), ...(metadata.tags || [])]),
+      pinned: current.pinned || !!metadata.pinned,
+    };
+    updated.pinnedAt = updated.pinned ? (current.pinnedAt || Date.now()) : null;
+    const after = {
+      tags: [...updated.tags],
+      tagsAuto: [...updated.tagsAuto],
+      pinned: updated.pinned,
+      pinnedAt: updated.pinnedAt,
+    };
+    next[position] = updated;
+    journal = { id: existingId, url: metadata.url, before, after };
+    return next;
+  });
+  return journal || false;
 }
 
 async function importBookmarksV2(message) {
-  const incoming = Array.isArray(message.bookmarks) ? message.bookmarks : [];
-  if (incoming.length === 0) return { success: false, error: 'no_bookmarks_to_import' };
+  const operationId = message.operationId || makeImportOperationId();
+  const interrupted = (await getImportOperations()).find((item) => item.id === operationId && item.status === 'running');
+  const incoming = Array.isArray(message.bookmarks)
+    ? message.bookmarks
+    : (Array.isArray(interrupted?.request?.bookmarks) ? interrupted.request.bookmarks : []);
+  const folderPaths = Array.isArray(message.folderPaths)
+    ? message.folderPaths
+    : (Array.isArray(interrupted?.request?.folderPaths) ? interrupted.request.folderPaths : []);
+  if (incoming.length === 0 && folderPaths.length === 0) return { success: false, error: 'no_bookmarks_to_import' };
 
-  const operation = {
-    id: makeImportOperationId(),
+  const operation = interrupted || {
+    id: operationId,
     startedAt: Date.now(),
     version: 2,
     status: 'running',
     request: {
       bookmarks: incoming,
+      folderPaths,
       rootTitle: message.rootTitle || 'AI Bookmark OS 导入',
       rootDate: message.rootDate || getImportFolderDate(),
       duplicateStrategy: message.duplicateStrategy || 'merge',
     },
     created: [],
+    createdFolders: [],
     skipped: [],
     merged: [],
     invalid: [],
     failed: [],
   };
+  operation.request = {
+    bookmarks: incoming,
+    folderPaths,
+    rootTitle: operation.request?.rootTitle || message.rootTitle || 'AI Bookmark OS 导入',
+    rootDate: operation.request?.rootDate || message.rootDate || getImportFolderDate(),
+    duplicateStrategy: operation.request?.duplicateStrategy || message.duplicateStrategy || 'merge',
+  };
+  for (const key of ['created', 'createdFolders', 'skipped', 'merged', 'invalid', 'failed']) {
+    if (!Array.isArray(operation[key])) operation[key] = [];
+  }
+  operation.status = 'running';
   await saveImportOperation(operation);
 
   try {
     const nativeBookmarks = await getNativeBookmarksForImport();
     const plan = BookmarkData.buildImportPlan({
-      incoming,
+      incoming: operation.request.bookmarks,
       existing: nativeBookmarks,
-      rootTitle: message.rootTitle || 'AI Bookmark OS 导入',
-      rootDate: message.rootDate || getImportFolderDate(),
-      duplicateStrategy: message.duplicateStrategy || 'merge',
+      folders: operation.request.folderPaths,
+      rootTitle: operation.request.rootTitle,
+      rootDate: operation.request.rootDate,
+      duplicateStrategy: operation.request.duplicateStrategy,
     });
     operation.skipped = plan.skipped;
     operation.invalid = plan.invalid;
@@ -736,7 +1013,7 @@ async function importBookmarksV2(message) {
     const folders = new Map();
     for (const folder of plan.folders) {
       try {
-        const createdFolder = await findOrCreateFolderPath(folder.key);
+        const createdFolder = await findOrCreateFolderPath(folder.key, operation.createdFolders);
         if (!createdFolder || !createdFolder.id) throw new Error('folder_create_failed');
         folders.set(folder.key, createdFolder);
       } catch (error) {
@@ -758,17 +1035,26 @@ async function importBookmarksV2(message) {
         });
         const metadata = { ...entry.metadata, folderName: folder.title || entry.metadata.folderName, folderPath: entry.folderKey };
         await upsertImportedBookmark(created, metadata);
-        operation.created.push({ id: created.id, title: created.title || metadata.title, url: created.url || metadata.url });
+        operation.created.push({
+          id: created.id,
+          parentId: created.parentId,
+          title: created.title || metadata.title,
+          url: created.url || metadata.url,
+        });
       } catch (error) {
         operation.failed.push({ title: entry.metadata.title, url: entry.metadata.url, error: error.message || 'bookmark_create_failed' });
       }
       await saveImportOperation(operation);
     }
 
+    const alreadyCreatedIds = new Set(operation.created.map((item) => item.id));
+    const alreadyMergedIds = new Set(operation.merged.map((item) => item.id));
     for (const entry of plan.merge) {
+      if (alreadyCreatedIds.has(entry.existingId) || alreadyMergedIds.has(entry.existingId)) continue;
       try {
-        if (await mergeImportedMetadata(entry.existingId, entry.metadata)) {
-          operation.merged.push({ id: entry.existingId, url: entry.metadata.url });
+        const merged = await mergeImportedMetadata(entry.existingId, entry.metadata);
+        if (merged) {
+          operation.merged.push(merged);
         } else {
           operation.failed.push({ url: entry.metadata.url, error: 'duplicate_target_not_found' });
         }
@@ -777,58 +1063,156 @@ async function importBookmarksV2(message) {
       }
     }
 
-    operation.status = operation.failed.length ? 'partial' : 'completed';
+    operation.status = operation.failed.length || operation.invalid.length ? 'partial' : 'completed';
     operation.completedAt = Date.now();
     await saveImportOperation(operation);
+    const items = [
+      ...(operation.created || []).map((item) => ({ id: item.id, status: 'succeeded', reason: 'bookmark_created' })),
+      ...(operation.createdFolders || []).map((item) => ({ id: item.id, status: 'succeeded', reason: 'folder_created' })),
+      ...(operation.merged || []).map((item) => ({ id: item.id, status: 'succeeded', reason: 'metadata_merged' })),
+      ...(operation.skipped || []).map((item) => ({ id: item.existingId || item.item?.url || '', status: 'skipped', reason: item.reason || 'duplicate' })),
+      ...(operation.invalid || []).map((item) => ({ id: item.item?.url || '', status: 'failed', reason: item.reason || 'invalid_record' })),
+      ...(operation.failed || []).map((item) => ({ id: item.id || item.url || item.folderKey || '', status: 'failed', reason: item.error || 'import_failed' })),
+    ];
+    const failedCount = (operation.invalid || []).length + (operation.failed || []).length;
+    const succeededCount = (operation.created || []).length + (operation.createdFolders || []).length + (operation.merged || []).length;
     return {
-      success: operation.failed.length === 0,
+      success: operation.failed.length === 0 && operation.invalid.length === 0,
+      status: operation.status,
       operationId: operation.id,
       created: operation.created,
+      createdFolders: operation.createdFolders,
       skipped: operation.skipped,
       merged: operation.merged,
       invalid: operation.invalid,
-      failed: operation.failed,
-      total: operation.created.length,
+      failures: operation.failed,
+      total: items.length,
+      succeeded: succeededCount,
+      failed: failedCount,
+      conflicts: 0,
+      items,
       added: operation.created.length,
     };
   } catch (error) {
-    operation.status = 'partial';
+    operation.status = operation.created.length || operation.merged.length ? 'partial' : 'failed';
     operation.completedAt = Date.now();
     operation.failed.push({ error: error.message || 'import_failed' });
     await saveImportOperation(operation);
-    return { success: false, operationId: operation.id, error: error.message || 'import_failed', failed: operation.failed };
+    const items = operation.failed.map((item) => ({ id: item.id || item.url || item.folderKey || '', status: 'failed', reason: item.error || 'import_failed' }));
+    return {
+      success: false,
+      status: operation.status,
+      operationId: operation.id,
+      error: error.message || 'import_failed',
+      total: items.length,
+      succeeded: 0,
+      failed: items.length,
+      conflicts: 0,
+      items,
+      failures: operation.failed,
+    };
   }
 }
 
 async function retryImportOperation(operationId) {
   const operation = (await getImportOperations()).find((item) => item.id === operationId);
-  if (!operation?.request?.bookmarks?.length) return { success: false, error: 'import_operation_not_retryable' };
-  return importBookmarksV2({ ...operation.request, retryOf: operationId });
+  const hasBookmarks = Array.isArray(operation?.request?.bookmarks) && operation.request.bookmarks.length > 0;
+  const hasFolders = Array.isArray(operation?.request?.folderPaths) && operation.request.folderPaths.length > 0;
+  if (!hasBookmarks && !hasFolders) return { success: false, error: 'import_operation_not_retryable' };
+  return importBookmarksV2({
+    ...operation.request,
+    ...(operation.status === 'running' ? { operationId } : { retryOf: operationId }),
+  });
 }
 
 async function rollbackImportOperation(operationId) {
   const operation = (await getImportOperations()).find((item) => item.id === operationId);
   if (!operation) return { success: false, error: 'import_operation_not_found' };
-  const failed = [];
-  let removed = 0;
+  operation.status = 'undoing';
+  await saveImportOperation(operation);
+  const items = [];
+  const revertedIds = new Set();
+  const previouslySucceeded = new Map((operation.rollback?.items || [])
+    .filter((item) => item.status === 'succeeded')
+    .map((item) => [item.id, item]));
   for (const created of operation.created || []) {
+    if (previouslySucceeded.has(created.id)) {
+      items.push(previouslySucceeded.get(created.id));
+      continue;
+    }
     try {
       const [node] = await chrome.bookmarks.get(created.id);
       if (!node?.url || node.url !== created.url || node.title !== created.title) {
-        failed.push({ id: created.id, error: 'bookmark_changed_after_import' });
+        items.push({ id: created.id, status: 'conflict', reason: 'bookmark_changed_after_import' });
         continue;
       }
       await chrome.bookmarks.remove(created.id);
-      removed++;
+      revertedIds.add(created.id);
+      items.push({ id: created.id, status: 'succeeded' });
     } catch {
-      // Already removed is a successful rollback outcome.
+      revertedIds.add(created.id);
+      items.push({ id: created.id, status: 'succeeded', reason: 'already_missing' });
     }
   }
-  await mutateStoredBookmarks((bookmarks) => bookmarks.filter((item) => !(operation.created || []).some((created) => created.id === item.id)));
-  operation.rollback = { attemptedAt: Date.now(), removed, failed };
-  operation.status = failed.length ? 'rollback_partial' : 'rolled_back';
+  if (revertedIds.size) {
+    await mutateStoredBookmarks((bookmarks) => bookmarks.filter((item) => !revertedIds.has(item.id)));
+  }
+
+  for (const merged of operation.merged || []) {
+    if (previouslySucceeded.has(merged.id)) {
+      items.push(previouslySucceeded.get(merged.id));
+      continue;
+    }
+    if (!merged.before || !merged.after) {
+      items.push({ id: merged.id, status: 'conflict', reason: 'legacy_metadata_journal_unavailable' });
+      continue;
+    }
+    let outcome = { id: merged.id, status: 'failed', reason: 'metadata_target_not_found' };
+    await mutateStoredBookmarks((bookmarks) => {
+      const index = bookmarks.findIndex((item) => item.id === merged.id);
+      if (index < 0) return bookmarks;
+      const current = bookmarks[index];
+      const snapshot = {
+        tags: [...(current.tags || [])],
+        tagsAuto: [...(current.tagsAuto || [])],
+        pinned: !!current.pinned,
+        pinnedAt: current.pinnedAt || null,
+      };
+      if (JSON.stringify(snapshot) !== JSON.stringify(merged.after)) {
+        outcome = { id: merged.id, status: 'conflict', reason: 'metadata_changed_after_import' };
+        return bookmarks;
+      }
+      const next = bookmarks.slice();
+      next[index] = { ...current, ...merged.before };
+      outcome = { id: merged.id, status: 'succeeded' };
+      return next;
+    });
+    items.push(outcome);
+  }
+
+  for (const folder of [...(operation.createdFolders || [])].reverse()) {
+    if (previouslySucceeded.has(folder.id)) {
+      items.push(previouslySucceeded.get(folder.id));
+      continue;
+    }
+    try {
+      const children = await chrome.bookmarks.getChildren(folder.id);
+      if (children.length) {
+        items.push({ id: folder.id, status: 'conflict', reason: 'import_folder_not_empty' });
+        continue;
+      }
+      await chrome.bookmarks.remove(folder.id);
+      items.push({ id: folder.id, status: 'succeeded' });
+    } catch {
+      items.push({ id: folder.id, status: 'succeeded', reason: 'already_missing' });
+    }
+  }
+
+  const result = makeBatchResult(items);
+  operation.rollback = { attemptedAt: Date.now(), ...result };
+  operation.status = result.failed || result.conflicts ? 'undo_partial' : 'undone';
   await saveImportOperation(operation);
-  return { success: failed.length === 0, removed, failed };
+  return { success: operation.status === 'undone', operationId, status: operation.status, ...result };
 }
 // ===== 同步操作 =====
 async function syncAllBookmarksOnce() {
@@ -889,18 +1273,19 @@ async function syncAllBookmarksOnce() {
     const retentionDays = TOMBSTONE_RETENTION_OPTIONS.includes(settings.tombstoneRetentionDays)
       ? settings.tombstoneRetentionDays
       : DEFAULT_TOMBSTONE_RETENTION_DAYS;
-    const prevTombstones = await pruneTombstones(await getTombstones(), retentionDays);
-    const existingTombstoneKeys = new Set(prevTombstones.map(t => t.url + '_' + t.dateAdded));
-    const newTombstones = [...prevTombstones];
-    for (const item of existing) {
-      const key = item.url + '_' + item.dateAdded;
-      if (!currentIds.has(item.id) && !currentKeys.has(key) && !existingTombstoneKeys.has(key) && item.url) {
-        newTombstones.push({ ...item, deletedAt: Date.now() });
+    await mutateTombstones(async (current) => {
+      const tombstones = await pruneTombstones(current, retentionDays);
+      const existingTombstoneKeys = new Set(tombstones.map(t => t.url + '_' + t.dateAdded));
+      const next = [...tombstones];
+      for (const item of existing) {
+        const key = item.url + '_' + item.dateAdded;
+        if (!currentIds.has(item.id) && !currentKeys.has(key) && !existingTombstoneKeys.has(key) && item.url) {
+          next.push({ ...item, deletedAt: Date.now() });
+          existingTombstoneKeys.add(key);
+        }
       }
-    }
-    if (newTombstones.length !== prevTombstones.length) {
-      await setTombstones(newTombstones);
-    }
+      return next;
+    });
 
     // 为没有标签的书签自动打标签（并发池，仅更新通用文档频率，避免污染标签语料）
     const needsTag = merged.filter(item => !item.tags || item.tags.length === 0);
@@ -967,20 +1352,130 @@ async function syncAllBookmarks() {
 // key: url, value: { tags, folderName, folderPath }
 const pendingQuickBookmarks = new Map();
 const INCREMENTAL_CLASSIFY_QUEUE_KEY = 'incrementalClassificationQueue';
+const INCREMENTAL_MAX_ATTEMPTS = 3;
+const INCREMENTAL_RETRY_BASE_MS = 30 * 1000;
+
+function normalizeIncrementalQueue(raw, now = Date.now()) {
+  const queue = Array.isArray(raw) ? raw : [];
+  const normalized = queue.filter((item) => item && typeof item.id === 'string' && item.id).map((item) => {
+    const attempts = Math.max(0, Number(item.attempts) || 0);
+    let status = ['pending', 'running', 'retryable', 'failed', 'succeeded'].includes(item.status)
+      ? item.status
+      : (item.lastError ? (attempts >= INCREMENTAL_MAX_ATTEMPTS ? 'failed' : 'retryable') : 'pending');
+    if (status === 'running' && now - (Number(item.lastAttemptAt) || 0) > 10 * 60 * 1000) status = 'retryable';
+    return {
+      id: item.id,
+      createdAt: Number(item.createdAt) || now,
+      attempts,
+      status,
+      nextAttemptAt: Number(item.nextAttemptAt) || 0,
+      ...(item.lastAttemptAt ? { lastAttemptAt: Number(item.lastAttemptAt) } : {}),
+      ...(item.completedAt ? { completedAt: Number(item.completedAt) } : {}),
+      ...(item.lastError ? { lastError: String(item.lastError).slice(0, 240) } : {}),
+    };
+  }).filter((item) => item.status !== 'succeeded' || now - (item.completedAt || now) < 24 * 60 * 60 * 1000);
+  return [...new Map(normalized.map((item) => [item.id, item])).values()]
+    .sort((left, right) => left.createdAt - right.createdAt)
+    .slice(-500);
+}
+
+async function getIncrementalClassificationQueue() {
+  let queue = [];
+  await mutateStorageResource(INCREMENTAL_CLASSIFY_QUEUE_KEY, (current) => {
+    queue = normalizeIncrementalQueue(current);
+    return queue;
+  });
+  return queue;
+}
+
+async function mutateIncrementalClassificationQueue(updater) {
+  return mutateStorageResource(INCREMENTAL_CLASSIFY_QUEUE_KEY, (current) => updater(normalizeIncrementalQueue(current)));
+}
+
+async function claimIncrementalClassificationQueue() {
+  const claimed = [];
+  const now = Date.now();
+  await mutateIncrementalClassificationQueue((queue) => queue.map((item) => {
+    if (!['pending', 'retryable'].includes(item.status) || item.nextAttemptAt > now) return item;
+    claimed.push({ ...item, status: 'running', lastAttemptAt: now });
+    return claimed[claimed.length - 1];
+  }));
+  return claimed;
+}
+
+async function failIncrementalClassificationQueue(ids, error) {
+  const affected = new Set(ids || []);
+  const now = Date.now();
+  return mutateIncrementalClassificationQueue((queue) => queue.map((item) => {
+    if (!affected.has(item.id)) return item;
+    const attempts = item.attempts + 1;
+    const failed = attempts >= INCREMENTAL_MAX_ATTEMPTS;
+    return {
+      ...item,
+      attempts,
+      status: failed ? 'failed' : 'retryable',
+      lastError: String(error || 'incremental_classification_failed').slice(0, 240),
+      nextAttemptAt: failed ? 0 : now + INCREMENTAL_RETRY_BASE_MS * (2 ** (attempts - 1)),
+    };
+  }));
+}
+
+async function completeIncrementalClassificationQueue(ids) {
+  const affected = new Set(ids || []);
+  return mutateIncrementalClassificationQueue((queue) => queue.map((item) => affected.has(item.id)
+    ? { ...item, status: 'succeeded', completedAt: Date.now(), nextAttemptAt: 0, lastError: '' }
+    : item));
+}
+
+async function retryIncrementalClassificationQueue(ids) {
+  const affected = new Set(ids || []);
+  return mutateIncrementalClassificationQueue((queue) => queue.map((item) => affected.has(item.id)
+    ? { ...item, status: 'pending', attempts: 0, nextAttemptAt: 0, lastError: '' }
+    : item));
+}
+
+async function abandonIncrementalClassificationQueue(ids) {
+  const affected = new Set(ids || []);
+  return mutateIncrementalClassificationQueue((queue) => queue.filter((item) => !affected.has(item.id)));
+}
 
 async function enqueueIncrementalClassification(id, bookmark) {
-  const data = await chrome.storage.local.get(['settings', INCREMENTAL_CLASSIFY_QUEUE_KEY]);
+  const data = await chrome.storage.local.get('settings');
   const settings = data.settings || {};
   if (settings.incrementalClassificationEnabled !== true || !settings.apiKey || !bookmark?.url) return;
-  const current = Array.isArray(data[INCREMENTAL_CLASSIFY_QUEUE_KEY]) ? data[INCREMENTAL_CLASSIFY_QUEUE_KEY] : [];
-  const byId = new Map(current.filter(item => item && item.id).map(item => [item.id, item]));
-  if (!byId.has(id)) {
-    byId.set(id, { id, createdAt: bookmark.dateAdded || Date.now(), attempts: 0 });
-    const queue = [...byId.values()]
+  await mutateIncrementalClassificationQueue((queue) => {
+    const byId = new Map(queue.filter(item => item && item.id).map(item => [item.id, item]));
+    if (!byId.has(id)) {
+      byId.set(id, {
+        id,
+        createdAt: bookmark.dateAdded || Date.now(),
+        attempts: 0,
+        status: 'pending',
+        nextAttemptAt: 0,
+      });
+    }
+    return [...byId.values()]
       .sort((left, right) => left.createdAt - right.createdAt)
       .slice(-500);
-    await chrome.storage.local.set({ [INCREMENTAL_CLASSIFY_QUEUE_KEY]: queue });
-  }
+  });
+}
+
+async function enqueueIncrementalClassificationEntries(entries) {
+  const incoming = Array.isArray(entries) ? entries.slice(0, 500) : [];
+  return mutateIncrementalClassificationQueue((queue) => {
+    const byId = new Map(queue.map((item) => [item.id, item]));
+    for (const entry of incoming) {
+      if (!entry || typeof entry.id !== 'string' || !entry.id || byId.has(entry.id)) continue;
+      byId.set(entry.id, {
+        id: entry.id,
+        createdAt: Number(entry.createdAt) || Date.now(),
+        attempts: 0,
+        status: 'pending',
+        nextAttemptAt: 0,
+      });
+    }
+    return [...byId.values()].sort((left, right) => left.createdAt - right.createdAt).slice(-500);
+  });
 }
 
 function normalizeTagList(tags) {
@@ -1390,7 +1885,11 @@ function buildLocalBookmarkSuggestion(tempItem, ruleTags, suggestedFolder, aiSug
 }
 
 async function prepareBookmarkSuggestion(tab) {
-  const contentData = (tab.id && tab.url) ? await extractActiveTabContent(tab.id, tab.url) : null;
+  const aiConfig = typeof getAIConfig === 'function' ? await getAIConfig().catch(() => null) : null;
+  const allowPageContent = aiConfig?.allowPageContentForAi !== false;
+  const contentData = allowPageContent && tab.id && tab.url
+    ? await extractActiveTabContent(tab.id, tab.url)
+    : null;
   const tempItem = {
     url: tab.url,
     title: tab.title || tab.url,
@@ -1563,25 +2062,23 @@ async function saveConfirmedBookmark(draft) {
     pendingQuickBookmarks.delete(draft.url);
 
     // Moving does not emit onCreated, so update the mirrored record ourselves.
-    const stored = await getStoredBookmarks();
-    const moved = stored.find(item => item.id === createdBookmark.id);
-    if (moved) {
-      moved.parentId = createdBookmark.parentId || parentId || moved.parentId;
-      moved.title = createdBookmark.title || draft.title || moved.title;
-      moved.folderName = folderName;
-      moved.folderPath = folderPath;
-      moved.tags = finalTags;
-      moved.tagsAuto = finalTags;
-      moved.contentText = draft.contentText || moved.contentText || '';
-      moved.contentExcerpt = draft.excerpt || draft.summary || moved.contentExcerpt || '';
-      moved.aiSuggestion = {
+    await mutateStoredBookmarks((stored) => stored.map((item) => item.id !== createdBookmark.id ? item : {
+      ...item,
+      parentId: createdBookmark.parentId || parentId || item.parentId,
+      title: createdBookmark.title || draft.title || item.title,
+      folderName,
+      folderPath,
+      tags: finalTags,
+      tagsAuto: finalTags,
+      contentText: draft.contentText || item.contentText || '',
+      contentExcerpt: draft.excerpt || draft.summary || item.contentExcerpt || '',
+      aiSuggestion: {
         tags: finalTags,
         summary: draft.summary || '',
         reason: draft.reason || '',
         evidence: Array.isArray(draft.evidence) ? draft.evidence : []
-      };
-      await setStoredBookmarks(stored);
-    }
+      }
+    }));
   } else {
     createdBookmark = await chrome.bookmarks.create(createOpts);
   }
@@ -2057,34 +2554,33 @@ async function addSingleBookmark(id) {
       item.contentSource = pending.contentSource || '';
     }
 
-    const existing = await getStoredBookmarks();
-
-    // 查重
-    const duplicate = existing.some(
-      (bm) => bm.url === item.url && bm.dateAdded === item.dateAdded
-    );
+    let duplicate = false;
+    await mutateStoredBookmarks((existing) => {
+      duplicate = existing.some((bm) => bm.id === item.id || (bm.url === item.url && bm.dateAdded === item.dateAdded));
+      return duplicate ? existing : [item, ...existing];
+    });
     if (duplicate) return null;
 
-    existing.unshift(item);
-    await setStoredBookmarks(existing);
-
-    if (!pending?.contentText && item.url) {
+    const aiConfig = typeof getAIConfig === 'function' ? await getAIConfig().catch(() => null) : null;
+    if (aiConfig?.allowPageContentForAi !== false && !pending?.contentText && item.url) {
       fetchBookmarkContent(item.url, { forceRefresh: false }).then(async (content) => {
-        const bookmarks = await getStoredBookmarks();
-        const stored = bookmarks.find(bm => bm.id === item.id || (bm.url === item.url && bm.dateAdded === item.dateAdded));
-        if (!stored) return;
-        stored.contentText = content.textContent || '';
-        stored.contentTitle = content.title || stored.contentTitle || '';
-        stored.contentExcerpt = content.excerpt || '';
-        stored.contentMetaDesc = content.metaDesc || '';
-        stored.contentMetaKeywords = content.metaKeywords || [];
-        stored.contentHeadings = content.headings || [];
-        stored.contentStructuredTypes = content.structuredTypes || [];
-        stored.contentFetchedAt = content.fetchedAt || Date.now();
-        stored.contentStatus = content.status || 'failed';
-        stored.contentFailureReason = content.failureReason || '';
-        stored.contentSource = content.source || '';
-        await setStoredBookmarks(bookmarks);
+        await mutateStoredBookmarks((bookmarks) => bookmarks.map((stored) => {
+          if (stored.id !== item.id && (stored.url !== item.url || stored.dateAdded !== item.dateAdded)) return stored;
+          return {
+            ...stored,
+            contentText: content.textContent || '',
+            contentTitle: content.title || stored.contentTitle || '',
+            contentExcerpt: content.excerpt || '',
+            contentMetaDesc: content.metaDesc || '',
+            contentMetaKeywords: content.metaKeywords || [],
+            contentHeadings: content.headings || [],
+            contentStructuredTypes: content.structuredTypes || [],
+            contentFetchedAt: content.fetchedAt || Date.now(),
+            contentStatus: content.status || 'failed',
+            contentFailureReason: content.failureReason || '',
+            contentSource: content.source || '',
+          };
+        }));
       }).catch(err => console.warn('Bookmark content backfill failed:', err));
     }
 
@@ -2176,9 +2672,13 @@ async function maybeBackfillAIForItem(item, context) {
       return;
     }
 
-    const bookmarks = await getStoredBookmarks();
-    const stored = bookmarks.find(b => b.id === item.id || (b.url === item.url && b.dateAdded === item.dateAdded));
-    if (!stored) {
+    let storedFound = false;
+    await mutateStoredBookmarks((bookmarks) => bookmarks.map((stored) => {
+      if (stored.id !== item.id && (stored.url !== item.url || stored.dateAdded !== item.dateAdded)) return stored;
+      storedFound = true;
+      return { ...stored, tags: merged, tagsAuto: merged };
+    }));
+    if (!storedFound) {
       _logIfReady({
         type: 'backfill_fail',
         provider: config.provider,
@@ -2189,10 +2689,6 @@ async function maybeBackfillAIForItem(item, context) {
       });
       return;
     }
-
-    stored.tags = merged;
-    stored.tagsAuto = merged;
-    await setStoredBookmarks(bookmarks);
 
     _logIfReady({
       type: 'backfill_success',
@@ -2255,26 +2751,21 @@ async function maybeBackfillAIForItem(item, context) {
 
 async function updateBookmark(id, changes) {
   try {
-    const existing = await getStoredBookmarks();
-    const index = existing.findIndex((b) => b.id === id);
-    if (index === -1) {
-      // 可能是 id 变了，通过 url 匹配
-      const bookmark = await chrome.bookmarks.get(id).catch(() => null);
-      if (!bookmark || !bookmark[0]) return;
-      const item = bookmarkToItem(bookmark[0]);
-      const idx = existing.findIndex((b) => b.url === item.url);
-      if (idx !== -1) {
-        existing[idx] = { ...existing[idx], ...item };
-      }
-    } else {
-      existing[index] = {
+    const native = await chrome.bookmarks.get(id).catch(() => null);
+    await mutateStoredBookmarks((existing) => {
+      let index = existing.findIndex((item) => item.id === id);
+      if (index < 0 && native?.[0]?.url) index = existing.findIndex((item) => item.url === native[0].url);
+      if (index < 0) return existing;
+      const next = existing.slice();
+      next[index] = {
         ...existing[index],
-        title: changes.title || existing[index].title,
-        url: changes.url || existing[index].url,
-        domain: changes.url ? extractDomain(changes.url) : existing[index].domain
+        id,
+        title: changes.title !== undefined ? changes.title : existing[index].title,
+        url: changes.url !== undefined ? changes.url : existing[index].url,
+        domain: changes.url !== undefined ? extractDomain(changes.url) : existing[index].domain,
       };
-    }
-    await setStoredBookmarks(existing);
+      return next;
+    });
   } catch (err) {
     console.error('更新书签失败:', err);
   }
@@ -2289,9 +2780,10 @@ async function enrichClickCounts(bookmarks, concurrency = 5) {
       const visits = await chrome.history.getVisits({ url: item.url });
       const count = visits ? visits.length : 0;
       if (count !== (item.clickCount || 0)) {
-        item.clickCount = count;
-        item.lastClickedAt = count > 0 ? Date.now() : item.lastClickedAt;
-        updated.push(item);
+        const lastClickedAt = count > 0
+          ? Math.max(...visits.map((visit) => Number(visit.visitTime) || 0))
+          : null;
+        updated.push({ id: item.id, url: item.url, clickCount: count, lastClickedAt });
       }
     } catch (e) {
       // 某些 URL（如 chrome://）不支持 history API，静默忽略
@@ -2420,12 +2912,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'getBookmarks':
       (async () => {
-        let bookmarks = await getStoredBookmarks();
-        // 尝试从历史记录刷新点击次数（不阻塞返回）
-        enrichClickCounts(bookmarks, 5).then(updated => {
-          if (updated.length > 0) setStoredBookmarks(bookmarks);
-        }).catch(() => {});
-        sendResponse({ success: true, bookmarks });
+        sendResponse({ success: true, bookmarks: await getStoredBookmarks() });
       })();
       return true;
 
@@ -2453,12 +2940,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         */
-        const filtered = bookmarks.filter((b) => b.id !== message.id);
-        if (filtered.length !== bookmarks.length) {
-          await setStoredBookmarks(filtered);
-        }
+        let total = bookmarks.length;
+        await mutateStoredBookmarks((current) => {
+          const filtered = current.filter((item) => item.id !== message.id);
+          total = filtered.length;
+          return filtered;
+        });
         await addTombstone(target);
-        sendResponse({ success: true, total: filtered.length });
+        sendResponse({ success: true, total });
       })();
       return true;
 
@@ -2480,26 +2969,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             failedIds.push(b.id);
           }
         }
-        const existingTombstones = await pruneTombstones(await getTombstones(), await getEffectiveRetentionDays());
-        const merged = [...existingTombstones];
-        const keys = new Set(merged.map(t => t.url + '_' + t.dateAdded));
-        for (const item of bookmarks) {
-          if (removedIds.has(item.id) && item.url) {
+        const retentionDays = await getEffectiveRetentionDays();
+        await mutateTombstones(async (current) => {
+          const merged = [...await pruneTombstones(current, retentionDays)];
+          const keys = new Set(merged.map(t => t.url + '_' + t.dateAdded));
+          for (const item of bookmarks) {
+            if (!removedIds.has(item.id) || !item.url) continue;
             const key = item.url + '_' + item.dateAdded;
             if (!keys.has(key)) {
               merged.push({ ...item, deletedAt: Date.now() });
               keys.add(key);
             }
           }
-        }
-        await setTombstones(merged);
-        const remaining = bookmarks.filter((item) => !removedIds.has(item.id));
-        await setStoredBookmarks(remaining);
+          return merged;
+        });
+        let remainingCount = 0;
+        await mutateStoredBookmarks((current) => {
+          const remaining = current.filter((item) => !removedIds.has(item.id));
+          remainingCount = remaining.length;
+          return remaining;
+        });
         sendResponse({
           success: failedIds.length === 0,
           removed: removedIds.size,
           failed: failedIds.length,
-          total: remaining.length,
+          total: remainingCount,
           error: failedIds.length ? 'some_bookmarks_could_not_be_deleted' : undefined,
         });
       })();
@@ -2522,20 +3016,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         // 更新本地存储
-        const bookmarks = await getStoredBookmarks();
-        const item = bookmarks.find((b) => b.id === id);
-        if (item) {
-          if (title !== undefined) item.title = title;
-          if (url !== undefined) {
-            item.url = url;
-            item.domain = extractDomain(url);
-          }
-          // 更新标签
-          if (tags !== undefined) {
-            item.tags = tags;
-          }
-          await setStoredBookmarks(bookmarks);
-        }
+        await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => item.id !== id ? item : {
+          ...item,
+          ...(title !== undefined ? { title } : {}),
+          ...(url !== undefined ? { url, domain: extractDomain(url) } : {}),
+          ...(tags !== undefined ? { tags: [...tags] } : {}),
+        }));
         sendResponse({ success: true });
       })();
       return true;
@@ -2577,31 +3063,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: false, error: 'No IDs provided' });
           return;
         }
-        const bookmarks = await getStoredBookmarks();
         const idSet = new Set(ids);
         let updated = 0;
-        for (const item of bookmarks) {
-          if (!idSet.has(item.id)) continue;
-          if (mode === 'addTag' && addTags) {
-            item.tags = Array.from(new Set([...(item.tags || []), ...addTags]));
-            updated++;
-          } else if (mode === 'removeTag' && removeTags) {
-            item.tags = (item.tags || []).filter(t => !removeTags.includes(t));
-            updated++;
-          } else if (mode === 'setTags' && tags) {
-            item.tags = [...tags];
-            updated++;
-          } else if (mode === 'pin') {
-            item.pinned = true;
-            item.pinnedAt = Date.now();
-            updated++;
-          } else if (mode === 'unpin') {
-            item.pinned = false;
-            item.pinnedAt = null;
-            updated++;
-          }
-        }
-        await setStoredBookmarks(bookmarks);
+        await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
+          if (!idSet.has(item.id)) return item;
+          updated++;
+          if (mode === 'addTag' && addTags) return { ...item, tags: Array.from(new Set([...(item.tags || []), ...addTags])) };
+          if (mode === 'removeTag' && removeTags) return { ...item, tags: (item.tags || []).filter(t => !removeTags.includes(t)) };
+          if (mode === 'setTags' && tags) return { ...item, tags: [...tags] };
+          if (mode === 'pin') return { ...item, pinned: true, pinnedAt: Date.now() };
+          if (mode === 'unpin') return { ...item, pinned: false, pinnedAt: null };
+          updated--;
+          return item;
+        }));
         sendResponse({ success: true, updated });
       })();
       return true;
@@ -2625,30 +3099,50 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         const bookmarks = await getStoredBookmarks();
         const removed = bookmarks.filter((b) => removedIds.has(b.id));
-        const remaining = bookmarks.filter((b) => !removedIds.has(b.id));
         await Promise.all(removed.map((bookmark) => addTombstone(bookmark)));
-        await setStoredBookmarks(remaining);
+        let remainingCount = 0;
+        await mutateStoredBookmarks((current) => {
+          const remaining = current.filter((item) => !removedIds.has(item.id));
+          remainingCount = remaining.length;
+          return remaining;
+        });
         sendResponse({
           success: failedIds.length === 0,
           removed: removedIds.size,
           failed: failedIds.length,
-          total: remaining.length,
+          total: remainingCount,
           error: failedIds.length ? 'some_bookmarks_could_not_be_deleted' : undefined,
         });
       })();
       return true;
 
+    case 'healthDeleteBookmarks':
+      (async () => {
+        sendResponse(await deleteHealthBookmarks(message.ids || [], message.operationId));
+      })();
+      return true;
+
+    case 'healthUndoDelete':
+      (async () => {
+        sendResponse(await undoHealthBookmarks(message.operationId));
+      })();
+      return true;
+
     case 'exportData':
       (async () => {
-        const bookmarks = await getStoredBookmarks();
-        sendResponse({ success: true, bookmarks });
+        const [bookmarks, tree] = await Promise.all([getStoredBookmarks(), buildBookmarkExportTree()]);
+        sendResponse({ success: true, version: 2, exportedAt: Date.now(), bookmarks, tree });
       })();
       return true;
 
     case 'importData':
     case 'importBookmarksV2':
       (async () => {
-        sendResponse(await importBookmarksV2(message));
+        sendResponse(await runIdempotentOperation(
+          'bookmark-import',
+          message.operationId,
+          () => runSerializedOperationDomain('bookmark-import', () => importBookmarksV2(message)),
+        ));
       })();
       return true;
 
@@ -2660,20 +3154,83 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'retryImportOperation':
       (async () => {
-        sendResponse(await retryImportOperation(message.operationId));
+        sendResponse(await runIdempotentOperation(
+          'bookmark-import-retry',
+          message.requestId,
+          () => runSerializedOperationDomain('bookmark-import', () => retryImportOperation(message.operationId)),
+        ));
       })();
       return true;
 
     case 'rollbackImportOperation':
       (async () => {
-        sendResponse(await rollbackImportOperation(message.operationId));
+        sendResponse(await runIdempotentOperation(
+          'bookmark-import-rollback',
+          message.requestId,
+          () => runSerializedOperationDomain('bookmark-import', () => rollbackImportOperation(message.operationId)),
+        ));
       })();
       return true;
+
+    case 'incrementalQueueGet':
+      (async () => sendResponse({ success: true, queue: await getIncrementalClassificationQueue() }))();
+      return true;
+
+    case 'labelCacheGet':
+      (async () => sendResponse({ success: true, cache: await getLabelCache() }))();
+      return true;
+
+    case 'labelCacheMerge':
+      (async () => sendResponse({ success: true, cache: await mergeLabelCache(message.cacheEntries || []) }))();
+      return true;
+
+    case 'labelCacheClear':
+      (async () => {
+        await mutateStorageResource(LABEL_CACHE_KEY, () => undefined);
+        sendResponse({ success: true });
+      })();
+      return true;
+
+    case 'incrementalQueueClaim':
+      (async () => sendResponse({ success: true, queue: await claimIncrementalClassificationQueue() }))();
+      return true;
+
+    case 'incrementalQueueEnqueue':
+      (async () => sendResponse({ success: true, queue: await enqueueIncrementalClassificationEntries(message.entries) }))();
+      return true;
+
+    case 'incrementalQueueFail':
+      (async () => {
+        const queue = await failIncrementalClassificationQueue(message.ids || [], message.error);
+        sendResponse({ success: true, queue });
+      })();
+      return true;
+
+    case 'incrementalQueueComplete':
+      (async () => {
+        const queue = await completeIncrementalClassificationQueue(message.ids || []);
+        sendResponse({ success: true, queue });
+      })();
+      return true;
+
+    case 'incrementalQueueRetry':
+      (async () => {
+        const queue = await retryIncrementalClassificationQueue(message.ids || []);
+        sendResponse({ success: true, queue });
+      })();
+      return true;
+
+    case 'incrementalQueueAbandon':
+      (async () => {
+        const queue = await abandonIncrementalClassificationQueue(message.ids || []);
+        sendResponse({ success: true, queue });
+      })();
+      return true;
+
     case 'getTombstones':
       (async () => {
         const retentionDays = await getEffectiveRetentionDays();
-        const tombstones = await pruneTombstones(await getTombstones(), retentionDays);
-        await setTombstones(tombstones);
+        const tombstones = await mutateTombstones((current) => pruneTombstones(current, retentionDays));
         const settings = await getAppSettings();
         sendResponse({ success: true, tombstones, retentionDays, retentionOptions: TOMBSTONE_RETENTION_OPTIONS });
       })();
@@ -2681,14 +3238,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'restoreTombstone':
       (async () => {
-        const tombstones = await getTombstones();
-        const idx = tombstones.findIndex(t => t.url === message.url && t.dateAdded === message.dateAdded);
-        if (idx < 0) {
-          sendResponse({ success: false, error: 'Tombstone not found' });
-          return;
-        }
-        const item = tombstones[idx];
-        try {
+        sendResponse(await runSerializedOperationDomain('tombstones', async () => {
+          const tombstones = await getTombstones();
+          const item = tombstones.find(t => t.url === message.url && t.dateAdded === message.dateAdded);
+          if (!item) return { success: false, error: 'Tombstone not found' };
+          try {
           const validParentIds = new Set();
           if (item.parentId) {
             try {
@@ -2712,33 +3266,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             restoredToFallback: restore.restoredToFallback,
           });
           restored.index = Number.isInteger(created.index) ? created.index : (restore.create.index ?? 0);
-          const stored = await getStoredBookmarks();
-          const storedItem = stored.find(bookmark => bookmark.id === restored.id);
-          if (storedItem) {
-            storedItem.index = restored.index;
-            await setStoredBookmarks(stored);
+          await mutateStoredBookmarks((stored) => stored.map((bookmark) => bookmark.id === restored.id
+            ? { ...bookmark, index: restored.index }
+            : bookmark));
+            await mutateTombstones((current) => current.filter(t => !(t.url === item.url && t.dateAdded === item.dateAdded)));
+            return { success: true, bookmarkId: created.id, restoredToFallback: restore.restoredToFallback };
+          } catch (err) {
+            return { success: false, error: err.message };
           }
-          tombstones.splice(idx, 1);
-          await setTombstones(tombstones);
-          sendResponse({ success: true, bookmarkId: created.id, restoredToFallback: restore.restoredToFallback });
-        } catch (err) {
-          sendResponse({ success: false, error: err.message });
-        }
+        }));
       })();
       return true;
 
     case 'purgeTombstone':
       (async () => {
-        const tombstones = await getTombstones();
-        const next = tombstones.filter(t => !(t.url === message.url && t.dateAdded === message.dateAdded));
-        await setTombstones(next);
+        const next = await mutateTombstones((current) => current.filter(t => !(t.url === message.url && t.dateAdded === message.dateAdded)));
         sendResponse({ success: true, total: next.length });
       })();
       return true;
 
     case 'clearTombstones':
       (async () => {
-        await setTombstones([]);
+        await mutateTombstones(() => []);
         sendResponse({ success: true });
       })();
       return true;
@@ -2761,11 +3310,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           await setAppSettings({ tombstoneRetentionDays: days });
           // 立即裁剪过期 tombstone
-          const tombstones = await getTombstones();
-          const pruned = await pruneTombstones(tombstones, days);
-          if (pruned.length !== tombstones.length) {
-            await setTombstones(pruned);
-          }
+          await mutateTombstones((current) => pruneTombstones(current, days));
         } else {
           await setAppSettings(patch || {});
         }
@@ -2879,7 +3424,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'setAIConfig': {
       (async () => {
         try {
+          const previous = await getAIConfig();
           const config = await setAIConfig(message.config || {});
+          if (previous.allowPageContentForAi !== config.allowPageContentForAi) {
+            await clearAICache();
+          }
+          if (config.allowPageContentForAi === false) {
+            await mutateStorageResource(PAGE_CONTENT_CACHE_KEY, () => undefined);
+            const pageContentFields = [
+              'contentText', 'contentTitle', 'contentExcerpt', 'contentMetaDesc', 'contentMetaKeywords',
+              'contentHeadings', 'contentStructuredTypes', 'contentFetchedAt', 'contentStatus',
+              'contentFailureReason', 'contentSource', 'excerpt', 'metaDesc', 'metaKeywords',
+              'headings', 'structuredTypes',
+            ];
+            await mutateStoredBookmarks((bookmarks) => bookmarks.map((bookmark) => {
+              if (!pageContentFields.some((field) => Object.prototype.hasOwnProperty.call(bookmark, field))) return bookmark;
+              const sanitized = { ...bookmark };
+              for (const field of pageContentFields) delete sanitized[field];
+              return sanitized;
+            }));
+          }
           sendResponse({ success: true, config });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
@@ -2953,23 +3517,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         const { url } = message;
         if (!url) { sendResponse({ success: false, error: 'No URL' }); return; }
-        const bookmarks = await getStoredBookmarks();
         const normalizedUrl = url.replace(/\/+$/, '');
         let found = false;
-        for (const item of bookmarks) {
-          if (item.url && item.url.replace(/\/+$/, '') === normalizedUrl) {
-            item.clickCount = (item.clickCount || 0) + 1;
-            item.lastClickedAt = Date.now();
-            found = true;
-            break;
-          }
-        }
-        if (found) {
-          await setStoredBookmarks(bookmarks);
-          sendResponse({ success: true });
-        } else {
-          sendResponse({ success: false, error: 'Bookmark not found' });
-        }
+        await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
+          if (found || !item.url || item.url.replace(/\/+$/, '') !== normalizedUrl) return item;
+          found = true;
+          return { ...item, clickCount: (item.clickCount || 0) + 1, lastClickedAt: Date.now() };
+        }));
+        sendResponse(found ? { success: true } : { success: false, error: 'Bookmark not found' });
       })();
       return true;
     }
@@ -2979,7 +3534,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const bookmarks = await getStoredBookmarks();
         const updated = await enrichClickCounts(bookmarks, 10);
         if (updated.length > 0) {
-          await setStoredBookmarks(bookmarks);
+          const updatesById = new Map(updated.map((item) => [item.id, item]));
+          await mutateStoredBookmarks((current) => current.map((item) => {
+            const update = updatesById.get(item.id);
+            if (!update || update.url !== item.url) return item;
+            return { ...item, clickCount: update.clickCount, lastClickedAt: update.lastClickedAt };
+          }));
         }
         sendResponse({ success: true, updated: updated.length });
       })();
@@ -3167,17 +3727,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // 同步更新已保存书签的 tags，确保插件主页显示最新标签
           if (queueItem && queueItem.url && confirmedTags && confirmedTags.length > 0) {
             try {
-              const stored = await getStoredBookmarks();
               let updated = false;
-              for (const item of stored) {
-                if (item.url && item.url === queueItem.url) {
-                  item.tags = [...confirmedTags];
-                  item.tagsAuto = [...confirmedTags];
-                  updated = true;
-                }
-              }
+              const stored = await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
+                if (!item.url || item.url !== queueItem.url) return item;
+                updated = true;
+                return { ...item, tags: [...confirmedTags], tagsAuto: [...confirmedTags] };
+              }));
               if (updated) {
-                await setStoredBookmarks(stored);
                 chrome.runtime.sendMessage({
                   action: 'bookmarksUpdated',
                   bookmarks: stored
@@ -3558,13 +4114,13 @@ chrome.bookmarks.onMoved.addListener((id, moveInfo) => {
       const folderOptions = await loadBookmarkFolderOptions();
       const folderPath = folderOptions.find((folder) => folder.id === moveInfo.parentId)?.path || '';
 
-      const bookmarks = await getStoredBookmarks();
-      const stored = bookmarks.find((item) => item.id === id);
-      if (stored) {
-        stored.parentId = moveInfo.parentId;
-        stored.folderName = folderName;
-        stored.folderPath = folderPath;
-        await setStoredBookmarks(bookmarks);
+      let updated = false;
+      await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
+        if (item.id !== id) return item;
+        updated = true;
+        return { ...item, parentId: moveInfo.parentId, folderName, folderPath };
+      }));
+      if (updated) {
         chrome.runtime.sendMessage({
           action: 'bookmarksUpdated',
           ids: [id],
@@ -3583,22 +4139,19 @@ chrome.bookmarks.onMoved.addListener((id, moveInfo) => {
 
 chrome.bookmarks.onRemoved.addListener((id, removeInfo) => {
   // 从存储中移除并写入 tombstone
-  getStoredBookmarks().then(async (bookmarks) => {
-    const target = bookmarks.find((b) => b.id === id);
-    const filtered = bookmarks.filter((b) => b.id !== id);
-    if (filtered.length !== bookmarks.length) {
-      await setStoredBookmarks(filtered);
-      if (target) await addTombstone(target);
-    } else if (removeInfo && removeInfo.node && removeInfo.node.url && target) {
-      // 已经被过滤了也要写 tombstone
-      await addTombstone(target);
-    }
+  (async () => {
+    let target = null;
+    await mutateStoredBookmarks((bookmarks) => {
+      target = bookmarks.find((item) => item.id === id) || null;
+      return target ? bookmarks.filter((item) => item.id !== id) : bookmarks;
+    });
+    if (target) await addTombstone(target);
     chrome.runtime.sendMessage({
       action: 'bookmarksDeleted',
       ids: [id],
       urls: removeInfo?.node?.url ? [removeInfo.node.url] : [],
     }).catch(() => {});
-  });
+  })().catch(() => {});
 });
 
 // ===== 定时检测失效书签 =====
@@ -4016,9 +4569,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       }
 
       // 从时间轴存储中删除
-      const stored = await getStoredBookmarks();
-      const filtered = stored.filter(b => b.url !== tab.url);
-      await setStoredBookmarks(filtered);
+      await mutateStoredBookmarks((stored) => stored.filter(b => b.url !== tab.url));
 
       // 通知 popup 刷新
       chrome.runtime.sendMessage({
@@ -4043,15 +4594,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url && !tab.url.startsWith('chrome-extension://')) {
     const normalizedUrl = tab.url.replace(/\/+$/, '');
-    getStoredBookmarks().then(bookmarks => {
-      for (const item of bookmarks) {
-        if (item.url && item.url.replace(/\/+$/, '') === normalizedUrl) {
-          item.clickCount = (item.clickCount || 0) + 1;
-          item.lastClickedAt = Date.now();
-          setStoredBookmarks(bookmarks).catch(() => {});
-          break;
-        }
-      }
+    mutateStoredBookmarks((bookmarks) => {
+      let updated = false;
+      const clickedAt = Date.now();
+      return bookmarks.map((item) => {
+        if (updated || !item.url || item.url.replace(/\/+$/, '') !== normalizedUrl) return item;
+        updated = true;
+        return { ...item, clickCount: (item.clickCount || 0) + 1, lastClickedAt: clickedAt };
+      });
     }).catch(() => {});
   }
 });
@@ -4232,7 +4782,7 @@ async function findFolderIdByPath(path) {
   }
 }
 
-async function findOrCreateFolderPath(path) {
+async function findOrCreateFolderPath(path, createdFolders) {
   try {
     const normalized = normalizeBookmarkFolderPath(path);
     if (!normalized) return null;
@@ -4251,7 +4801,12 @@ async function findOrCreateFolderPath(path) {
     for (const part of parts) {
       const children = await chrome.bookmarks.getChildren(parent.id);
       let next = children.find(node => !node.url && node.title === part);
-      if (!next) next = await chrome.bookmarks.create({ parentId: parent.id, title: part });
+      if (!next) {
+        next = await chrome.bookmarks.create({ parentId: parent.id, title: part });
+        if (Array.isArray(createdFolders) && !createdFolders.some((folder) => folder.id === next.id)) {
+          createdFolders.push({ id: next.id, parentId: next.parentId, title: next.title, path: [...actualParts, part].join('/') });
+        }
+      }
       parent = next;
       actualParts.push(part);
     }

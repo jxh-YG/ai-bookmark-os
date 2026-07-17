@@ -47,7 +47,7 @@ for (const name of readdirSync(dist)) {
 }
 
 // 1) Full timeline modules at extension root
-for (const part of ['background', 'content', 'pages', 'shared', 'rules', 'icons']) {
+for (const part of ['background', 'content', 'pages', 'shared', 'icons']) {
   const src = path.join(timelineSource, part);
   if (existsSync(src)) copyDir(src, path.join(dist, part));
 }
@@ -193,7 +193,6 @@ const manifest = {
     'history',
     'notifications',
     'scripting',
-    'declarativeNetRequest',
     'sidePanel',
     'favicon',
     'windows',
@@ -234,15 +233,6 @@ const manifest = {
     },
   },
   omnibox: { keyword: 'bk' },
-  declarative_net_request: {
-    rule_resources: [
-      {
-        id: 'frame_allow_rules',
-        enabled: true,
-        path: 'rules/frame_allow.json',
-      },
-    ],
-  },
 };
 writeFileSync(path.join(dist, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
 

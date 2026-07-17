@@ -7,7 +7,7 @@
   function normalizeUrl(value) {
     try {
       const parsed = new URL(String(value || '').trim());
-      if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname) return '';
+      if (!/^(https?|ftp):$/.test(parsed.protocol) || !parsed.hostname) return '';
       parsed.protocol = parsed.protocol.toLowerCase();
       parsed.hostname = parsed.hostname.toLowerCase();
       parsed.hash = '';
@@ -53,7 +53,7 @@
     }
   }
 
-  function buildImportPlan({ incoming, existing, rootTitle, rootDate, duplicateStrategy = 'merge' }) {
+  function buildImportPlan({ incoming, existing, folders: sourceFolders = [], rootTitle, rootDate, duplicateStrategy = 'merge' }) {
     const rootPath = normalizeFolderPath(`${text(rootTitle) || 'AI Bookmark OS Import'}/${text(rootDate) || 'import'}`);
     const existingByLocation = new Map();
     for (const item of existing || []) {
@@ -68,6 +68,11 @@
     const merge = [];
     const invalid = [];
     const plannedKeys = new Set();
+
+    for (const sourcePath of sourceFolders || []) {
+      const normalized = normalizeFolderPath(sourcePath);
+      if (normalized) addFolderPath(folders, `${rootPath}/${normalized}`);
+    }
 
     for (const source of incoming || []) {
       const url = normalizeUrl(source && source.url);

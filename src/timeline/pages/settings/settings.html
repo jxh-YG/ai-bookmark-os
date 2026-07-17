@@ -590,6 +590,18 @@
             </div>
           </div>
         </div>
+        <div class="setting-card import-operation-card">
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" data-i18n="importHistory">导入操作记录</div>
+              <div class="setting-desc" data-i18n="importHistoryDesc">查看最近导入的完成、部分失败和撤销状态。</div>
+            </div>
+            <div class="setting-control">
+              <button id="refreshImportOperationsBtn" class="btn btn-secondary btn-sm" type="button" data-i18n="refresh">刷新</button>
+            </div>
+          </div>
+          <div id="importOperationsList" class="tagrule-list"></div>
+        </div>
         <input type="file" id="importFileInput" accept=".json,.html,.htm" style="display:none;">
       </div>
 
@@ -667,7 +679,7 @@
         <div class="ai-subhead ai-subhead--static">
           <div>
             <div class="setting-label">AI 辅助标签</div>
-            <div class="setting-desc" data-i18n="aiSectionDesc">规则引擎置信度不足时，调用云端 AI 辅助打标签。仅发送标题与 URL。</div>
+            <div class="setting-desc" data-i18n="aiSectionDesc">规则引擎置信度不足时调用云端 AI；默认发送页面内容，可在下方关闭。</div>
           </div>
         </div>
 
@@ -805,6 +817,19 @@
             </div>
           </div>
 
+          <div class="setting-row">
+            <div class="setting-main">
+              <div class="setting-label" id="aiPageContentLabel" data-i18n="aiPageContent">发送页面内容</div>
+              <div class="setting-desc" data-i18n="aiPageContentDesc">允许提取并向当前 AI 服务商发送页面摘要、正文片段、标题结构、关键词和结构化内容类型。默认开启。</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="aiPageContentToggle" aria-labelledby="aiPageContentLabel" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
           <div class="setting-row ai-assist-prompt-row">
             <div class="setting-main" style="flex: 1; min-width: 0;">
               <div class="setting-label">AI 辅助分类提示词</div>
@@ -827,7 +852,7 @@
           </div>
 
           <div class="privacy-notice" data-i18n="aiPrivacyNotice" style="margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 8px; font-size: 12px; color: var(--text-secondary);">
-            When AI is enabled, bookmark titles and URLs are sent to your chosen AI provider. Page content is not sent.
+            AI requests are sent to the selected provider. When page content sharing is enabled, summaries, excerpts and page structure may also be sent.
           </div>
         </div>
 
@@ -1356,12 +1381,12 @@
           </div>
           <div class="setting-row">
             <div class="setting-main">
-              <div class="setting-label" data-i18n="rssProxyFallback">Proxy fallback</div>
-              <div class="setting-desc" data-i18n="rssProxyFallbackDesc">Fall back to a public proxy when direct fetch fails (for sources unreachable from your network)</div>
+              <div class="setting-label" id="rssProxyFallbackLabel" data-i18n="rssProxyFallback">Proxy fallback</div>
+              <div class="setting-desc" data-i18n="rssProxyFallbackDesc">When direct fetch fails, send the subscription URL and fetched feed content to your configured proxy. Off by default.</div>
             </div>
             <div class="setting-control">
               <label class="toggle-switch">
-                <input type="checkbox" id="rssProxyFallbackToggle">
+                <input type="checkbox" id="rssProxyFallbackToggle" aria-labelledby="rssProxyFallbackLabel">
                 <span class="toggle-slider"></span>
               </label>
             </div>

@@ -22,7 +22,6 @@
     "history",
     "notifications",
     "scripting",
-    "declarativeNetRequest",
     "sidePanel",
     "favicon",
     "windows"
@@ -79,14 +78,5 @@
   },
   "omnibox": {
     "keyword": "bk"
-  },
-  "declarative_net_request": {
-    "rule_resources": [
-      {
-        "id": "frame_allow_rules",
-        "enabled": true,
-        "path": "src/timeline/rules/frame_allow.json"
-      }
-    ]
   }
 }

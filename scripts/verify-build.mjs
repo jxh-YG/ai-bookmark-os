@@ -49,7 +49,6 @@ const required = [
   'shared/ai-tagger.js',
   'shared/bookmark-stats.js',
   'content/content-extractor.js',
-  'rules/frame_allow.json',
   'icons/icon128.png',
   'ai/sidepanel.html',
   'ai/bookmark-nav.html',
@@ -69,6 +68,12 @@ for (const f of required) {
 }
 
 const manifest = JSON.parse(readFileSync(join(dist, 'manifest.json'), 'utf8'));
+if (manifest.permissions?.includes('declarativeNetRequest') || existsSync(join(dist, 'rules/frame_allow.json'))) {
+  console.error('build must not remove third-party frame security headers');
+  ok = false;
+} else {
+  console.log('OK no frame security-header override');
+}
 if (manifest.manifest_version !== 3) {
   console.error('manifest_version must be 3');
   ok = false;

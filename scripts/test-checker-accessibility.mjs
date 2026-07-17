@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const checker = readFileSync('src/timeline/pages/checker/checker.js', 'utf8');
-assert.match(checker, /let activeRunId = 0;/);
+assert.match(checker, /let activeRunId = '';/);
 assert.match(checker, /function scheduleResultsRender\(\)[\s\S]{0,700}requestAnimationFrame/);
 assert.match(checker, /runId !== activeRunId/);
-assert.match(checker, /function stopCheck\(\)[\s\S]{0,350}activeRunId \+= 1/);
+assert.match(checker, /function stopCheck\(\)[\s\S]{0,350}activeRunId = ''/);
 assert.match(checker, /status:\s*['"]cancelled['"]/);
 assert.match(checker, /checkerLastResult[\s\S]{0,900}results:/);
 

@@ -1316,12 +1316,12 @@ function testUiContracts() {
   );
   assert.match(
     background,
-    /bookmarks\.onMoved\.addListener[\s\S]{0,1800}stored\.parentId\s*=\s*moveInfo\.parentId/,
+    /bookmarks\.onMoved\.addListener[\s\S]{0,1800}parentId:\s*moveInfo\.parentId/,
     '原生书签移动后必须更新本地镜像的 parentId',
   );
   assert.match(
     background,
-    /bookmarks\.onMoved\.addListener[\s\S]{0,2200}stored\.folderPath\s*=\s*folderPath/,
+    /bookmarks\.onMoved\.addListener[\s\S]{0,2200}folderName,\s*folderPath/,
     '原生书签移动后必须更新本地镜像的 folderPath',
   );
   assert.match(
@@ -1366,7 +1366,7 @@ function testUiContracts() {
 
   assert.match(
     background,
-    /const\s+filtered\s*=\s*bookmarks\.filter\(\(b\)\s*=>\s*b\.id\s*!==\s*message\.id\);/,
+    /mutateStoredBookmarks\(\(current\)\s*=>\s*\{[\s\S]{0,300}current\.filter\(\(item\)\s*=>\s*item\.id\s*!==\s*message\.id\)/,
     '单条删除只能从本地镜像移除目标书签 ID',
   );
   const popupDelete = readFunctionBody(popup, 'deleteBookmark');

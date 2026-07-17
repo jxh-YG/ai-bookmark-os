@@ -600,7 +600,7 @@
     "description": "AI settings section title"
   },
   "aiSectionDesc": {
-    "message": "Use cloud AI to assist tagging when the rule engine is uncertain. Only title and URL are sent, not page content.",
+    "message": "Use cloud AI when local rules are uncertain. Titles, URLs, summaries, excerpts and page structure are sent by default; page-content sharing can be disabled below.",
     "description": "AI settings section description"
   },
   "aiEnabled": {
@@ -768,8 +768,24 @@
     "description": "AI cache cleared message"
   },
   "aiPrivacyNotice": {
-    "message": "When AI is enabled, bookmark titles and URLs are sent to your chosen AI provider. Page content is not sent.",
+    "message": "AI requests are sent to the selected provider. When page-content sharing is enabled, summaries, excerpts, heading structure, keywords and structured content types are also sent. When disabled, only title, URL, domain, candidate tags and folder information are sent.",
     "description": "AI privacy notice"
+  },
+  "aiPageContent": {
+    "message": "Share page content",
+    "description": "AI page-content sharing toggle"
+  },
+  "aiPageContentDesc": {
+    "message": "Allow page summaries, excerpts, heading structure, keywords and structured content types to be extracted and sent to the selected AI provider. Enabled by default.",
+    "description": "AI page-content sharing description"
+  },
+  "importHistory": {
+    "message": "Import history",
+    "description": "Import operation history title"
+  },
+  "importHistoryDesc": {
+    "message": "Review recent completed, partial, conflicting and undone imports.",
+    "description": "Import operation history description"
   },
   "aiLogsTitle": {
     "message": "AI Classification Logs",

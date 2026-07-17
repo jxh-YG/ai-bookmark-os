@@ -5,6 +5,7 @@
 const AI_CONFIG_KEY = 'ai_classifier_config';
 const AI_STATS_KEY = 'ai_classifier_stats';
 const AI_CACHE_KEY = 'ai_tag_cache';
+const AI_CACHE_VERSION = 2;
 const AI_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 天
 const AI_MAX_CACHE = 500;
 
@@ -209,6 +210,23 @@ function resolveProvider(config) {
 const AI_MAX_CONCURRENCY = 2;
 let _aiRunning = 0;
 const _aiQueue = [];
+const _aiStorageQueues = new Map();
+
+function mutateAIStorage(key, updater) {
+  const previous = _aiStorageQueues.get(key) || Promise.resolve();
+  const mutation = previous.catch(() => undefined).then(async () => {
+    const stored = await chrome.storage.local.get(key);
+    const next = await updater(stored[key]);
+    if (next === undefined) await chrome.storage.local.remove(key);
+    else await chrome.storage.local.set({ [key]: next });
+    return next;
+  });
+  _aiStorageQueues.set(key, mutation);
+  mutation.finally(() => {
+    if (_aiStorageQueues.get(key) === mutation) _aiStorageQueues.delete(key);
+  }).catch(() => {});
+  return mutation;
+}
 
 function _acquireAISlot() {
   return new Promise((resolve) => {
@@ -245,6 +263,7 @@ async function getAIConfig() {
     customFormat: 'openai',
     customEndpoint: '',
     customFullUrl: false,
+    allowPageContentForAi: true,
     assistPrompt: DEFAULT_AI_ASSIST_PROMPT
   };
   const merged = { ...defaults, ...(result[AI_CONFIG_KEY] || {}) };
@@ -258,8 +277,9 @@ function normalizeAIAssistPrompt(prompt) {
 }
 
 async function setAIConfig(config) {
-  await chrome.storage.local.set({ [AI_CONFIG_KEY]: config });
-  return config;
+  const next = { ...(config || {}), allowPageContentForAi: config?.allowPageContentForAi !== false };
+  await mutateAIStorage(AI_CONFIG_KEY, () => next);
+  return next;
 }
 
 async function getAIStats() {
@@ -275,30 +295,71 @@ async function getAIStats() {
 }
 
 async function updateAIStats(delta) {
-  const stats = await getAIStats();
-  stats.totalTriggered += delta.totalTriggered || 0;
-  stats.totalClassified += delta.totalClassified || 0;
-  stats.successCount += delta.successCount || 0;
-  stats.failCount += delta.failCount || 0;
-  if (delta.latencyMs) {
-    const n = stats.successCount || 1;
-    stats.avgLatencyMs = Math.round((stats.avgLatencyMs * (n - 1) + delta.latencyMs) / n);
-  }
-  if (delta.successCount) stats.lastUsed = Date.now();
-  await chrome.storage.local.set({ [AI_STATS_KEY]: stats });
+  await mutateAIStorage(AI_STATS_KEY, (current) => {
+    const stats = current || {
+      totalTriggered: 0,
+      totalClassified: 0,
+      successCount: 0,
+      failCount: 0,
+      avgLatencyMs: 0,
+      lastUsed: null
+    };
+    const previousSuccesses = stats.successCount || 0;
+    const successDelta = delta.successCount || 0;
+    const next = {
+      ...stats,
+      totalTriggered: (stats.totalTriggered || 0) + (delta.totalTriggered || 0),
+      totalClassified: (stats.totalClassified || 0) + (delta.totalClassified || 0),
+      successCount: previousSuccesses + successDelta,
+      failCount: (stats.failCount || 0) + (delta.failCount || 0),
+    };
+    if (delta.latencyMs && successDelta) {
+      next.avgLatencyMs = Math.round(((stats.avgLatencyMs || 0) * previousSuccesses + delta.latencyMs) / next.successCount);
+    }
+    if (successDelta) next.lastUsed = Date.now();
+    return next;
+  });
 }
 
-// ===== AI 结果缓存（同一 URL 不重复调用）=====
-async function getAICache(url) {
-  if (!url) return null;
+function hashAIInput(value) {
+  let hash = 5381;
+  const text = String(value || '');
+  for (let index = 0; index < text.length; index++) {
+    hash = ((hash << 5) + hash + text.charCodeAt(index)) | 0;
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function normalizedAIUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return String(value || '').trim();
+  }
+}
+
+function aiCacheEntries(raw) {
+  return raw?.version === AI_CACHE_VERSION && raw.entries && typeof raw.entries === 'object'
+    ? raw.entries
+    : {};
+}
+
+// ===== AI 结果缓存（完整输入签名相同才复用）=====
+async function getAICache(cacheKey) {
+  if (!cacheKey) return null;
   try {
     const result = await chrome.storage.local.get(AI_CACHE_KEY);
-    const cache = result[AI_CACHE_KEY] || {};
-    const entry = cache[url];
+    const cache = aiCacheEntries(result[AI_CACHE_KEY]);
+    const entry = cache[cacheKey];
     if (!entry) return null;
     if (Date.now() - entry.timestamp > AI_CACHE_TTL) {
-      delete cache[url];
-      await chrome.storage.local.set({ [AI_CACHE_KEY]: cache });
+      await mutateAIStorage(AI_CACHE_KEY, (current) => {
+        const entries = { ...aiCacheEntries(current) };
+        delete entries[cacheKey];
+        return { version: AI_CACHE_VERSION, entries };
+      });
       return null;
     }
     return entry;
@@ -307,18 +368,16 @@ async function getAICache(url) {
   }
 }
 
-async function setAICache(url, tags, provider) {
-  if (!url) return;
+async function setAICache(cacheKey, tags, provider, sourceUrl) {
+  if (!cacheKey) return;
   try {
-    const result = await chrome.storage.local.get(AI_CACHE_KEY);
-    const cache = result[AI_CACHE_KEY] || {};
-    cache[url] = { tags, provider, timestamp: Date.now() };
-    const keys = Object.keys(cache);
-    if (keys.length > AI_MAX_CACHE) {
-      const oldest = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp)[0];
-      delete cache[oldest];
-    }
-    await chrome.storage.local.set({ [AI_CACHE_KEY]: cache });
+    await mutateAIStorage(AI_CACHE_KEY, (current) => {
+      const entries = { ...aiCacheEntries(current) };
+      entries[cacheKey] = { tags, provider, sourceUrl: normalizedAIUrl(sourceUrl), timestamp: Date.now() };
+      const keys = Object.keys(entries).sort((a, b) => entries[b].timestamp - entries[a].timestamp);
+      for (const key of keys.slice(AI_MAX_CACHE)) delete entries[key];
+      return { version: AI_CACHE_VERSION, entries };
+    });
   } catch {
     // 缓存失败不影响主流程
   }
@@ -343,6 +402,32 @@ function readablePageSignals(bookmark) {
     keywords: keywords.slice(0, 20).join(', '),
     types: types.slice(0, 12).join(', ')
   };
+}
+
+function buildAICacheKey(bookmark, candidateTags, tagDescriptions, config, resolved) {
+  const allowContent = config.allowPageContentForAi !== false;
+  const pageSignals = allowContent ? readablePageSignals(bookmark) : { headings: '', keywords: '', types: '' };
+  const content = allowContent ? [
+    bookmark.metaDesc || '',
+    bookmark.excerpt || '',
+    readableBookmarkContent(bookmark),
+    pageSignals.headings,
+    pageSignals.keywords,
+    pageSignals.types,
+  ].join('\n') : '';
+  return hashAIInput(JSON.stringify({
+    version: AI_CACHE_VERSION,
+    url: normalizedAIUrl(bookmark.url),
+    title: String(bookmark.title || '').trim().replace(/\s+/g, ' '),
+    contentHash: allowContent ? hashAIInput(content) : '',
+    allowPageContentForAi: allowContent,
+    provider: config.provider || '',
+    endpoint: resolved?.endpoint || '',
+    model: resolved?.model || '',
+    prompt: normalizeAIAssistPrompt(config.assistPrompt),
+    candidates: (candidateTags || []).map((item) => [item.tag, Number(item.score || 0)]),
+    tagDescriptions: tagDescriptions || {},
+  }));
 }
 
 const GENERIC_AI_TAGS = new Set([
@@ -401,7 +486,7 @@ function normalizeSuggestedFolderPath(value) {
 }
 
 // ===== Prompt 构建 =====
-function buildClassificationPrompt(bookmark, candidateTags, tagDescriptions, assistPrompt) {
+function buildClassificationPrompt(bookmark, candidateTags, tagDescriptions, assistPrompt, allowPageContentForAi = true) {
   const tagList = Object.entries(tagDescriptions)
     .map(([tag, desc]) => `  ${tag}: ${desc}`)
     .join('\n');
@@ -412,15 +497,19 @@ function buildClassificationPrompt(bookmark, candidateTags, tagDescriptions, ass
     .join('\n') || '  （无）';
 
   const basePrompt = normalizeAIAssistPrompt(assistPrompt);
-  const pageSignals = readablePageSignals(bookmark);
-
-  return `${basePrompt}
-
+  const pageSignals = allowPageContentForAi ? readablePageSignals(bookmark) : { headings: '', keywords: '', types: '' };
+  const pageContext = allowPageContentForAi ? `
 Page structure: ${pageSignals.headings || '(not extracted)'}
 Page keywords: ${pageSignals.keywords || '(not extracted)'}
-Structured content types: ${pageSignals.types || '(not extracted)'}
+Structured content types: ${pageSignals.types || '(not extracted)'}` : '';
+  const contentFields = allowPageContentForAi ? `
+  描述: ${bookmark.metaDesc || bookmark.excerpt || ''}
+  页面正文摘录: ${readableBookmarkContent(bookmark)}` : '';
 
-你是一个书签分类助手。请根据书签的标题、URL、域名、页面正文和描述，从下面的候选标签中选出最匹配的 1-3 个标签。
+  return `${basePrompt}
+${pageContext}
+
+你是一个书签分类助手。请根据提供的书签信息，从下面的候选标签中选出最匹配的 1-3 个标签。
 
 候选标签（仅允许返回列表中的标签）：
 ${tagList}
@@ -428,9 +517,7 @@ ${tagList}
 书签信息：
   标题: ${bookmark.title || ''}
   URL: ${bookmark.url || ''}
-  域名: ${bookmark.domain || ''}
-  描述: ${bookmark.metaDesc || bookmark.excerpt || ''}
-  页面正文摘录: ${readableBookmarkContent(bookmark)}
+  域名: ${bookmark.domain || ''}${contentFields}
 
 规则引擎的初步判断（仅供参考，可能不准确）：
 ${ruleTopTags}
@@ -461,7 +548,7 @@ function parseAIClassification(raw, validTags) {
 }
 
 // ===== 收藏前 AI 建议 =====
-function buildBookmarkSuggestionPrompt(bookmark, candidateTags, tagDescriptions, assistPrompt, folderOptions = []) {
+function buildBookmarkSuggestionPrompt(bookmark, candidateTags, tagDescriptions, assistPrompt, folderOptions = [], allowPageContentForAi = true) {
   const tagList = Object.entries(tagDescriptions)
     .map(([tag, desc]) => `  ${tag}: ${desc}`)
     .join('\n');
@@ -472,7 +559,14 @@ function buildBookmarkSuggestionPrompt(bookmark, candidateTags, tagDescriptions,
     .join('\n') || '  (none)';
 
   const basePrompt = normalizeAIAssistPrompt(assistPrompt);
-  const pageSignals = readablePageSignals(bookmark);
+  const pageSignals = allowPageContentForAi ? readablePageSignals(bookmark) : { headings: '', keywords: '', types: '' };
+  const pageContext = allowPageContentForAi ? `
+Page structure: ${pageSignals.headings || '(not extracted)'}
+Page keywords: ${pageSignals.keywords || '(not extracted)'}
+Structured content types: ${pageSignals.types || '(not extracted)'}` : '';
+  const contentFields = allowPageContentForAi ? `
+  页面摘要: ${bookmark.metaDesc || bookmark.excerpt || bookmark.contentText || ''}
+  页面正文摘录: ${readableBookmarkContent(bookmark)}` : '';
 
   const existingFolders = (Array.isArray(folderOptions) ? folderOptions : [])
     .map(folder => String(folder?.path || '').trim())
@@ -482,12 +576,9 @@ function buildBookmarkSuggestionPrompt(bookmark, candidateTags, tagDescriptions,
     .join('\n') || '  （无）';
 
   return `${basePrompt}
+${pageContext}
 
-Page structure: ${pageSignals.headings || '(not extracted)'}
-Page keywords: ${pageSignals.keywords || '(not extracted)'}
-Structured content types: ${pageSignals.types || '(not extracted)'}
-
-你是一个书签收藏前的 AI 分类建议助手。请根据标题、URL、域名、页面正文、页面摘要与规则引擎候选标签，给出用户确认前可编辑的收藏建议。
+你是一个书签收藏前的 AI 分类建议助手。请根据提供的书签信息与规则引擎候选标签，给出用户确认前可编辑的收藏建议。
 
 候选标签（优先从这里选择，最多 3 个）：
 ${tagList || ruleTopTags}
@@ -501,9 +592,7 @@ ${existingFolders}
 收藏对象：
   标题: ${bookmark.title || ''}
   URL: ${bookmark.url || ''}
-  域名: ${bookmark.domain || ''}
-  页面摘要: ${bookmark.metaDesc || bookmark.excerpt || bookmark.contentText || ''}
-  页面正文摘录: ${readableBookmarkContent(bookmark)}
+  域名: ${bookmark.domain || ''}${contentFields}
 
 输出要求：
 1. 只返回 JSON 对象，不要 markdown，不要解释性前后缀。
@@ -549,7 +638,14 @@ async function suggestBookmarkWithAI(bookmark, candidateTags, signals) {
 
   const tagDescriptions = typeof TAG_PROTOTYPES !== 'undefined' ? TAG_PROTOTYPES : {};
   const folderOptions = Array.isArray(signals?.folderOptions) ? signals.folderOptions : [];
-  const prompt = buildBookmarkSuggestionPrompt(bookmark, candidateTags || [], tagDescriptions, config.assistPrompt, folderOptions);
+  const prompt = buildBookmarkSuggestionPrompt(
+    bookmark,
+    candidateTags || [],
+    tagDescriptions,
+    config.assistPrompt,
+    folderOptions,
+    config.allowPageContentForAi !== false,
+  );
   const body = resolved.buildBody(prompt, resolved.model);
   const timeoutMs = Math.max(3000, (config.timeout || 8) * 1000);
   const release = await _acquireAISlot();
@@ -705,7 +801,13 @@ async function callAI(bookmark, candidateTags, tagDescriptions) {
   const resolved = resolveProvider(config);
   if (!resolved) return null;
 
-  const prompt = buildClassificationPrompt(bookmark, candidateTags, tagDescriptions, config.assistPrompt);
+  const prompt = buildClassificationPrompt(
+    bookmark,
+    candidateTags,
+    tagDescriptions,
+    config.assistPrompt,
+    config.allowPageContentForAi !== false,
+  );
   const body = resolved.buildBody(prompt, resolved.model);
   const timeoutMs = Math.max(3000, (config.timeout || 8) * 1000);
 
@@ -801,7 +903,11 @@ async function classifyWithAI(bookmark, candidateTags, signals, scores) {
   if (!config.enabled || !config.apiKey) return null;
   if (config.assistClassificationEnabled === false) return null;
 
-  const cached = await getAICache(bookmark.url);
+  const tagDescriptions = typeof TAG_PROTOTYPES !== 'undefined' ? TAG_PROTOTYPES : {};
+  const resolved = resolveProvider(config);
+  if (!resolved) return null;
+  const cacheKey = buildAICacheKey(bookmark, candidateTags, tagDescriptions, config, resolved);
+  const cached = await getAICache(cacheKey);
   if (cached && cached.tags) {
     _logIfReady({
       type: 'cache_hit',
@@ -815,11 +921,10 @@ async function classifyWithAI(bookmark, candidateTags, signals, scores) {
 
   await updateAIStats({ totalTriggered: 1 });
 
-  const tagDescriptions = typeof TAG_PROTOTYPES !== 'undefined' ? TAG_PROTOTYPES : {};
   const results = await callAI(bookmark, candidateTags, tagDescriptions);
 
   if (results) {
-    await setAICache(bookmark.url, results, config.provider);
+    await setAICache(cacheKey, results, config.provider, bookmark.url);
   }
 
   return results;
@@ -839,7 +944,13 @@ async function testAIConnection(config) {
     metaDesc: 'React 用于构建用户界面的 JavaScript 库'
   };
   const tagDescriptions = typeof TAG_PROTOTYPES !== 'undefined' ? TAG_PROTOTYPES : {};
-  const prompt = buildClassificationPrompt(testBookmark, [], tagDescriptions, config.assistPrompt);
+  const prompt = buildClassificationPrompt(
+    testBookmark,
+    [],
+    tagDescriptions,
+    config.assistPrompt,
+    config.allowPageContentForAi !== false,
+  );
   const body = resolved.buildBody(prompt, resolved.model);
   const timeoutMs = Math.max(3000, (config.timeout || 8) * 1000);
 

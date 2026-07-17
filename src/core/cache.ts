@@ -1,7 +1,6 @@
 // URL → 打标结果缓存（避免重复请求 LLM）
 import type { BookmarkLabel } from '../types';
 
-const CACHE_KEY = 'labelCache';
 export const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const CACHE_MAX_ENTRIES = 1000;
 export const CACHE_MAX_BYTES = 5 * 1024 * 1024;
@@ -62,19 +61,21 @@ function normalizeCache(cache: CacheMap, now = Date.now()): CacheMap {
 }
 
 export async function loadCache(): Promise<CacheMap> {
-  const data = await chrome.storage.local.get(CACHE_KEY);
-  const raw = data[CACHE_KEY] as CacheMap | undefined;
-  const cache = normalizeCache(raw ?? {});
-  if (JSON.stringify(cache) !== JSON.stringify(raw ?? {})) {
-    await chrome.storage.local.set({ [CACHE_KEY]: cache });
-  }
-  return cache;
+  const response = await chrome.runtime.sendMessage({ action: 'labelCacheGet' }) as { success?: boolean; cache?: CacheMap; error?: string };
+  if (!response?.success) throw new Error(response?.error || 'label_cache_read_failed');
+  return normalizeCache(response.cache ?? {});
 }
 
 export async function saveCache(cache: CacheMap): Promise<void> {
-  await chrome.storage.local.set({ [CACHE_KEY]: normalizeCache(cache) });
+  const normalized = normalizeCache(cache);
+  const response = await chrome.runtime.sendMessage({
+    action: 'labelCacheMerge',
+    cacheEntries: Object.entries(normalized),
+  }) as { success?: boolean; error?: string };
+  if (!response?.success) throw new Error(response?.error || 'label_cache_write_failed');
 }
 
 export async function clearCache(): Promise<void> {
-  await chrome.storage.local.remove(CACHE_KEY);
+  const response = await chrome.runtime.sendMessage({ action: 'labelCacheClear' }) as { success?: boolean; error?: string };
+  if (!response?.success) throw new Error(response?.error || 'label_cache_clear_failed');
 }

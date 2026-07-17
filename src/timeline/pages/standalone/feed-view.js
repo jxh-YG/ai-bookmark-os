@@ -1196,12 +1196,19 @@
     isRefreshing = true;
     toast(t('rssFetching'), 'info');
     try {
-      await send('rssRefreshAll', {});
+      const response = await send('rssRefreshAll', {});
+      if (!response?.success) throw new Error(response?.error || 'rss_refresh_failed');
       await loadFeedsAndRender();
       if (isVisible()) renderCurrentView();
-      toast(t('rssUpdated'), 'success');
+      const summary = response.result?.summary || {};
+      const summaryText = (t('rssRefreshSummary') || 'Succeeded $1, failed $2, skipped $3, new articles $4')
+        .replace('$1', String(summary.succeeded || 0))
+        .replace('$2', String(summary.failed || 0))
+        .replace('$3', String(summary.skipped || 0))
+        .replace('$4', String(summary.added || 0));
+      toast(summaryText, summary.failed > 0 ? 'error' : 'success');
     } catch (err) {
-      toast(t('rssFetchFailed'), 'error');
+      toast(`${t('rssFetchFailed')}: ${err?.message || 'unknown_error'}`, 'error');
     } finally {
       isRefreshing = false;
     }
@@ -1211,12 +1218,13 @@
     if (isRefreshing) return;
     isRefreshing = true;
     try {
-      await send('rssRefreshFeed', { feedId });
+      const response = await send('rssRefreshFeed', { feedId });
+      if (response?.error) throw new Error(response.error);
       await loadFeedsAndRender();
       if (isVisible()) renderCurrentView();
       toast(t('rssUpdated'), 'success');
     } catch (err) {
-      toast(t('rssFetchFailed'), 'error');
+      toast(`${t('rssFetchFailed')}: ${err?.message || 'unknown_error'}`, 'error');
     } finally {
       isRefreshing = false;
     }

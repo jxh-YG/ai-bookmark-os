@@ -78,7 +78,7 @@
     await mutateStorage(FEEDS_KEY, (stored) => {
       const feeds = stored || [];
       if (feeds.some(f => f.url === data.url)) { outcome = { success: false, error: 'duplicate' }; return feeds; }
-      const feed = { id: 'feed_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8), url: data.url, title: data.title || data.url, siteUrl: data.siteUrl || '', favicon: data.favicon || '', folderId: data.folderId || null, autoBookmark: !!data.autoBookmark, notify: data.notify !== false, lastFetched: 0, etag: null, lastModified: null, failCount: 0, createdAt: Date.now() };
+      const feed = { id: 'feed_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8), url: data.url, title: data.title || data.url, siteUrl: data.siteUrl || '', favicon: data.favicon || '', folderId: data.folderId || null, autoBookmark: !!data.autoBookmark, notify: data.notify !== false, lastFetched: 0, etag: null, lastModified: null, failCount: 0, lastStatus: 'pending', lastError: '', nextRetryAt: 0, createdAt: Date.now() };
       outcome = { success: true, feed };
       return [...feeds, feed];
     });

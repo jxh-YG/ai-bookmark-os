@@ -414,6 +414,14 @@ export interface Settings {
   useClassificationCache?: boolean;
   /** 对标题信息不足的书签抓取页面 meta 作为补充语义 */
   usePageMetadata?: boolean;
+  /** AI 辅助标签是否可以提取并发送页面摘要、正文片段和结构信号 */
+  allowPageContentForAi?: boolean;
+  /** 标签阶段单批书签数 */
+  labelBatchSize?: number;
+  /** 标签阶段并发请求数 */
+  labelConcurrency?: number;
+  /** 分配阶段单批书签数 */
+  assignBatchSize?: number;
   /** 新增书签进入待处理队列，并在分类工作台打开时增量归类。 */
   incrementalClassificationEnabled?: boolean;
   /** 注入系统内置分类规则增强；关闭后主要按用户提示词执行 */
@@ -443,6 +451,10 @@ export const DEFAULT_SETTINGS: Settings = {
   reusePreviousAiTree: false,
   useClassificationCache: true,
   usePageMetadata: true,
+  allowPageContentForAi: true,
+  labelBatchSize: 40,
+  labelConcurrency: 2,
+  assignBatchSize: 60,
   incrementalClassificationEnabled: false,
   useBuiltInClassificationRules: true,
   aiRetryCount: 5,

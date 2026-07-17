@@ -141,7 +141,7 @@ function useClassificationCache(settings: Settings): boolean {
 
 /** 是否抓取页面 meta 补充语义（默认开启） */
 function usePageMetadata(settings: Settings): boolean {
-  return settings.usePageMetadata !== false;
+  return settings.usePageMetadata !== false && settings.allowPageContentForAi !== false;
 }
 
 /** 是否追加内置分类保护规则（默认开启） */
@@ -150,6 +150,11 @@ function useBuiltInClassificationRules(settings: Settings): boolean {
 }
 
 function originalFolderInstruction(settings: Settings): string {
+  if (settings.allowPageContentForAi === false) {
+    return respectFolders(settings)
+      ? '\n\n仅使用书签标题、URL 和原文件夹作为分类依据；不得假设或补充页面正文。'
+      : '\n\n仅使用书签标题和 URL 作为分类依据；不得假设或补充页面正文。';
+  }
   if (!respectFolders(settings)) {
     return '\n\n原书签文件夹不会提供，也不得作为分类依据。请根据书签标题、URL 路径、站点信息、页面描述和正文摘录判断实际用途。';
   }
@@ -340,13 +345,15 @@ function classificationCacheKey(bookmark: FlatBookmark, settings?: Settings): st
     customApiStyle: settings?.customApiStyle ?? '',
     customFullUrl: !!settings?.customFullUrl,
   }));
-  // v4: folderPath 不再作为缓存键的一部分——书签移动后应复用已有标签结果，
+  // v5: folderPath 不再作为缓存键的一部分——书签移动后应复用已有标签结果，
   //     folderPath 仅作为 LLM 的参考信号，不影响缓存命中。
   const signature = [
-    'content-context-v4',
+    'content-context-v5',
     normalizedUrl(bookmark.url),
     normalizeCacheText(bookmark.title),
     folderRulesVersion,
+    settings?.usePageMetadata !== false ? 'metadata-on' : 'metadata-off',
+    settings?.allowPageContentForAi !== false ? 'content-sharing-on' : 'content-sharing-off',
     promptVersion,
   ];
   return hashUrl(JSON.stringify(signature));
@@ -981,10 +988,15 @@ export async function estimateClassify(
 ): Promise<ClassifyEstimate> {
   const cacheEnabled = settings ? useClassificationCache(settings) : true;
   const cache = cacheEnabled ? await loadCache() : {};
-  const cached = cacheEnabled ? bookmarks.filter((b) => cache[classificationCacheKey(b, settings)]).length : 0;
+  const cached = cacheEnabled ? bookmarks.filter((b) => {
+    const entry = cache[classificationCacheKey(b, settings)];
+    return entry?.sourceUrl === normalizedUrl(b.url);
+  }).length : 0;
   const pending = bookmarks.length - cached;
   const requests =
-    Math.ceil(pending / BATCH_SIZE) + 1 + Math.ceil(bookmarks.length / ASSIGN_BATCH_SIZE);
+    Math.ceil(pending / (settings ? batchSize(settings) : BATCH_SIZE))
+    + 1
+    + Math.ceil(bookmarks.length / (settings ? assignBatchSize(settings) : ASSIGN_BATCH_SIZE));
   return { total: bookmarks.length, cached, requests };
 }
 

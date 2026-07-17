@@ -31,7 +31,7 @@ function normalizeText(value) {
   return String(value ?? '').trim().replace(/\s+/g, ' ');
 }
 
-function contentContextV3Key(bookmark, settings) {
+function contentContextV5Key(bookmark, settings) {
   const includeFolderPath = settings.respectExistingFolders !== false;
   const folderRulesVersion = `${includeFolderPath ? 'folders-v2' : 'folders-off'}:${settings.useBuiltInClassificationRules !== false ? 'builtin-v1' : 'builtin-off'}`;
   const promptVersion = hashUrl(JSON.stringify({
@@ -43,11 +43,12 @@ function contentContextV3Key(bookmark, settings) {
     customFullUrl: !!settings.customFullUrl,
   }));
   const signature = [
-    'content-context-v3',
+    'content-context-v5',
     normalizeUrl(bookmark.url),
     normalizeText(bookmark.title),
-    includeFolderPath ? normalizeText(bookmark.folderPath) : '',
     folderRulesVersion,
+    settings.usePageMetadata !== false ? 'metadata-on' : 'metadata-off',
+    settings.allowPageContentForAi !== false ? 'content-sharing-on' : 'content-sharing-off',
     promptVersion,
   ];
   return hashUrl(JSON.stringify(signature));
@@ -76,6 +77,32 @@ function createStorage(initial = {}) {
   };
 }
 
+function createChrome(storage, extra = {}) {
+  return {
+    storage: { local: storage.local },
+    runtime: {
+      async sendMessage(message) {
+        if (message.action === 'labelCacheGet') {
+          return { success: true, cache: structuredClone(storage.values.labelCache ?? {}) };
+        }
+        if (message.action === 'labelCacheMerge') {
+          storage.values.labelCache = {
+            ...(storage.values.labelCache ?? {}),
+            ...Object.fromEntries(structuredClone(message.cacheEntries ?? [])),
+          };
+          return { success: true, cache: structuredClone(storage.values.labelCache) };
+        }
+        if (message.action === 'labelCacheClear') {
+          delete storage.values.labelCache;
+          return { success: true };
+        }
+        return { success: true };
+      },
+    },
+    ...extra,
+  };
+}
+
 const baseSettings = {
   provider: 'custom',
   apiKey: 'test-key',
@@ -91,6 +118,7 @@ const baseSettings = {
   respectExistingFolders: true,
   useClassificationCache: true,
   usePageMetadata: false,
+  allowPageContentForAi: true,
   useBuiltInClassificationRules: false,
   classifyPrompts: { label: 'test label prompt', buildTree: '', assign: '' },
   aiRetryCount: 0,
@@ -104,17 +132,21 @@ const bookmark = {
   folderPath: 'Bookmarks Bar/Development/React',
 };
 
-async function testEstimateUsesContentContextV2() {
+function cacheEntry(summary = 'React hooks') {
+  return { summary, tags: ['frontend'], sourceUrl: normalizeUrl(bookmark.url) };
+}
+
+async function testEstimateUsesContentContextV5() {
   const storage = createStorage({
     labelCache: {
-      [contentContextV3Key(bookmark, baseSettings)]: { summary: 'React hooks', tags: ['frontend'] },
+      [contentContextV5Key(bookmark, baseSettings)]: cacheEntry(),
     },
   });
-  globalThis.chrome = { storage: { local: storage.local } };
+  globalThis.chrome = createChrome(storage);
   const { estimateClassify } = await importTypeScript('src/core/classifier.ts');
 
   const hit = await estimateClassify([bookmark], baseSettings);
-  assert.equal(hit.cached, 1, '规范化 URL、标题和目录相同的输入应命中 v2 缓存');
+  assert.equal(hit.cached, 1, '规范化 URL、标题和设置相同的输入应命中 v5 缓存');
 
   const renamed = await estimateClassify([{ ...bookmark, title: 'Vue Hooks Guide' }], baseSettings);
   assert.equal(renamed.cached, 0, '标题变化后不得复用旧标签');
@@ -122,16 +154,26 @@ async function testEstimateUsesContentContextV2() {
   const moved = await estimateClassify([{ ...bookmark, folderPath: 'Bookmarks Bar/Work/React' }], baseSettings);
   const modelChanged = await estimateClassify([bookmark], { ...baseSettings, model: 'next-model' });
   assert.equal(modelChanged.cached, 0, '模型配置变化后不得复用旧标签');
-  assert.equal(moved.cached, 0, '尊重原目录时，目录变化后不得复用旧标签');
+  assert.equal(moved.cached, 1, '目录变化不应使语义相同的标签缓存失效');
+
+  const metadataChanged = await estimateClassify([bookmark], { ...baseSettings, usePageMetadata: true });
+  assert.equal(metadataChanged.cached, 0, '页面元数据开关变化后不得复用旧标签');
+
+  const contentPermissionChanged = await estimateClassify([bookmark], { ...baseSettings, allowPageContentForAi: false });
+  assert.equal(contentPermissionChanged.cached, 0, '页面内容发送授权变化后不得复用旧标签');
+
+  storage.values.labelCache[contentContextV5Key(bookmark, baseSettings)].sourceUrl = 'https://wrong.example.test/';
+  const wrongSource = await estimateClassify([bookmark], baseSettings);
+  assert.equal(wrongSource.cached, 0, '缓存来源 URL 不匹配时成本估算不得计为命中');
 }
 
 async function testEstimateIgnoresFolderWhenDisabledAndMissesV1() {
   const storage = createStorage({
     labelCache: {
-      [contentContextV3Key(bookmark, { ...baseSettings, respectExistingFolders: false })]: { summary: 'React hooks', tags: ['frontend'] },
+      [contentContextV5Key(bookmark, { ...baseSettings, respectExistingFolders: false })]: cacheEntry(),
     },
   });
-  globalThis.chrome = { storage: { local: storage.local } };
+  globalThis.chrome = createChrome(storage);
   const { estimateClassify } = await importTypeScript('src/core/classifier.ts');
 
   const moved = await estimateClassify(
@@ -144,19 +186,18 @@ async function testEstimateIgnoresFolderWhenDisabledAndMissesV1() {
     [hashUrl(`content-context-v1:${bookmark.url}`)]: { summary: 'old', tags: ['old'] },
   };
   const oldVersion = await estimateClassify([bookmark], baseSettings);
-  assert.equal(oldVersion.cached, 0, '旧 v1 URL 缓存必须自然失效');
+  assert.equal(oldVersion.cached, 0, '旧版本 URL 缓存必须自然失效');
 }
 
 async function testLabelingUsesTheSameSignatureAsEstimate() {
   const storage = createStorage({
     labelCache: {
-      [contentContextV3Key(bookmark, baseSettings)]: { summary: 'React hooks', tags: ['frontend'] },
+      [contentContextV5Key(bookmark, baseSettings)]: cacheEntry(),
     },
   });
-  globalThis.chrome = {
-    storage: { local: storage.local },
+  globalThis.chrome = createChrome(storage, {
     permissions: { contains: async () => false },
-  };
+  });
 
   const requests = [];
   globalThis.fetch = async (_url, options) => {
@@ -187,7 +228,7 @@ async function testLabelingUsesTheSameSignatureAsEstimate() {
   assert.equal(requests[0].max_tokens, 4096, '首个 AI 请求必须是建树，而不是重新打标签');
 }
 
-await testEstimateUsesContentContextV2();
+await testEstimateUsesContentContextV5();
 await testEstimateIgnoresFolderWhenDisabledAndMissesV1();
 await testLabelingUsesTheSameSignatureAsEstimate();
 

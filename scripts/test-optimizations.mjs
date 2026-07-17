@@ -86,43 +86,48 @@ async function testValidators() {
 
 // ── 2. health.ts — undoRemoveBookmarks ──────────────────────────
 async function testUndoRemoveBookmarks() {
-  const created = [];
+  const messages = [];
   globalThis.chrome = {
-    bookmarks: {
-      get: async (id) => {
-        if (id === 'bm1') return [{ id: 'bm1', title: 'Test', url: 'https://example.com', parentId: 'folder1', index: 0 }];
-        throw new Error('not found');
-      },
-      remove: async () => {},
-      create: async (opts) => {
-        created.push(opts);
-        return { id: `restored-${created.length}`, ...opts };
+    runtime: {
+      sendMessage: async (message) => {
+        messages.push(message);
+        if (message.action === 'healthDeleteBookmarks') {
+          return {
+            success: false,
+            operationId: message.operationId,
+            total: 2,
+            succeeded: 1,
+            failed: 1,
+            conflicts: 0,
+            items: [
+              { id: 'bm1', status: 'succeeded' },
+              { id: 'bm2', status: 'failed', reason: 'bookmark_not_found' },
+            ],
+          };
+        }
+        return {
+          success: false,
+          operationId: message.operationId,
+          total: 1,
+          succeeded: 0,
+          failed: 0,
+          conflicts: 1,
+          items: [{ id: 'bm1', status: 'conflict', reason: 'bookmark_recreated_after_delete' }],
+        };
       },
     },
-    storage: { local: mockStorage() },
   };
 
   const { removeBookmarks, undoRemoveBookmarks } = await importTypeScript('src/core/health.ts');
+  const removed = await removeBookmarks(['bm1', 'bm2']);
+  assert.equal(removed.succeeded, 1, '部分删除成功必须逐项返回');
+  assert.equal(removed.failed, 1, '部分删除失败必须逐项返回');
+  assert.match(messages[0].operationId, /^health-delete-/);
 
-  // 删除后应有恢复记录
-  await removeBookmarks(['bm1']);
-  const store = globalThis.chrome.storage.local._store;
-  assert.ok(store.healthRemovedBookmarksUndo, '删除后应有恢复记录');
-  assert.equal(store.healthRemovedBookmarksUndo.length, 1);
-  assert.equal(store.healthRemovedBookmarksUndo[0].url, 'https://example.com');
-
-  // 执行撤销
-  const n = await undoRemoveBookmarks();
-  assert.equal(n, 1, '应恢复 1 条书签');
-  assert.equal(created.length, 1, '应调用 chrome.bookmarks.create 一次');
-  assert.equal(created[0].url, 'https://example.com');
-
-  // 撤销后记录已清除
-  assert.equal(store.healthRemovedBookmarksUndo, undefined, '撤销后应清除恢复记录');
-
-  // 重复撤销返回 0
-  const n2 = await undoRemoveBookmarks();
-  assert.equal(n2, 0, '无记录时撤销应返回 0');
+  const undone = await undoRemoveBookmarks();
+  assert.equal(undone.conflicts, 1, '恢复冲突必须保留为冲突结果');
+  assert.match(messages[1].operationId, /^health-undo-/);
+  assert.notEqual(messages[0].operationId, messages[1].operationId, '破坏性操作 ID 必须唯一');
 
   console.log('✅ health.ts undoRemoveBookmarks — 全部通过');
 }
@@ -167,7 +172,7 @@ async function testCreateNestedCategory() {
   console.log('✅ treeEdit.ts createCategoryWithBookmarks 嵌套 — 全部通过');
 }
 
-// ── 5. classifier.ts — 缓存键不含 folderPath ─────────────────────
+// ── 5. classifier.ts — v5 缓存键不含 folderPath ──────────────────
 async function testClassifierCacheKeyNoFolderPath() {
   // 直接验证 classificationCacheKey 的行为：移动书签（改变 folderPath）后缓存键应相同
   const { build: esbuild } = await import('esbuild');
@@ -182,13 +187,16 @@ async function testClassifierCacheKeyNoFolderPath() {
   const source = result.outputFiles[0].text;
 
   // 检查源码中缓存键版本字符串
-  assert.ok(source.includes('content-context-v4'), '缓存键版本应为 v4（不含 folderPath）');
-  assert.ok(!source.includes('content-context-v3'), '旧 v3 缓存键不应存在');
+  assert.ok(source.includes('content-context-v5'), '缓存键版本应为 v5（包含页面元数据开关）');
+  assert.ok(!source.includes('content-context-v4'), '旧 v4 缓存键不应存在');
 
   // 确认缓存键签名数组里没有 folderPath 字段
-  const signatureIdx = source.indexOf("'content-context-v4'");
-  const signatureBlock = source.slice(signatureIdx, signatureIdx + 300);
+  const signatureIdx = source.indexOf("'content-context-v5'");
+  const signatureBlock = source.slice(signatureIdx, signatureIdx + 700);
   assert.ok(!signatureBlock.includes('folderPath'), '缓存键签名中不应包含 folderPath');
+  const { readFileSync } = await import('node:fs');
+  const classifierSource = readFileSync('src/core/classifier.ts', 'utf8');
+  assert.match(classifierSource, /usePageMetadata[^\n]+\? 'metadata-on' : 'metadata-off'/, '缓存键签名应包含页面元数据开关');
 
   console.log('✅ classifier.ts 缓存键不含 folderPath — 全部通过');
 }
@@ -233,7 +241,7 @@ const tests = [
   ['health.ts undoRemoveBookmarks', testUndoRemoveBookmarks],
   ['incrementalQueue isNearLimit', testIncrementalQueueNearLimit],
   ['treeEdit 嵌套子类别', testCreateNestedCategory],
-  ['classifier 缓存键 v4', testClassifierCacheKeyNoFolderPath],
+  ['classifier 缓存键 v5', testClassifierCacheKeyNoFolderPath],
   ['classifier 增量失衡检测', testIncrementalImbalanceWarning],
   ['probe-core HEAD 正向优化', testProbeHeadFirst],
 ];

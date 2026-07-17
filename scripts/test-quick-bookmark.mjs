@@ -421,6 +421,9 @@ for (const needle of [
   assert.ok(source.includes(needle), `quick bookmark duplicate flow missing: ${needle}`);
 }
 
-assert.ok(!source.includes('.slice(0, 500)'), 'folder picker must include the complete browser folder list');
+const folderLoaderStart = source.indexOf('async function loadBookmarkFolderOptions()');
+const folderLoaderEnd = source.indexOf('async function findExistingFolderByExactPath(', folderLoaderStart);
+assert.ok(folderLoaderStart >= 0 && folderLoaderEnd > folderLoaderStart, 'folder picker loader must exist');
+assert.ok(!source.slice(folderLoaderStart, folderLoaderEnd).includes('.slice('), 'folder picker must include the complete browser folder list');
 
 console.log('quick bookmark suggestion regression checks passed');

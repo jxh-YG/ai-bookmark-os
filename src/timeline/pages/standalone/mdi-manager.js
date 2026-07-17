@@ -21,6 +21,7 @@
   const SVG_MDI_RESTORE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="14" height="14" rx="1"/><path d="M7 7V5a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-2"/></svg>';
   const SVG_MDI_CLOSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>';
   const SVG_MDI_RELOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+  const SVG_MDI_EXTERNAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>';
   const SVG_MDI_VOLUME = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
   const SVG_MDI_MUTED = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
   const SVG_MDI_WARNING = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
@@ -388,6 +389,7 @@
           <img class="mdi-window-favicon" src="${escapeHtml(faviconUrl)}" alt="" onerror="this.style.display='none'">
           <span class="mdi-window-title">${escapeHtml(title)}</span>
           <div class="mdi-window-controls">
+            <button class="mdi-btn mdi-btn--external" title="${escapeHtml(i18n('mdiOpenNewTab'))}">${SVG_MDI_EXTERNAL}</button>
             <button class="mdi-btn mdi-btn--reload" title="${escapeHtml(i18n('mdiReload'))}">${SVG_MDI_RELOAD}</button>
             <button class="mdi-btn mdi-btn--minimize" title="${escapeHtml(i18n('mdiMinimize'))}">${SVG_MDI_MINIMIZE}</button>
             <button class="mdi-btn mdi-btn--maximize" title="${escapeHtml(i18n('mdiMaximize'))}">${SVG_MDI_MAXIMIZE}</button>
@@ -416,6 +418,11 @@
       `;
 
       // --- Button handlers ---
+      win.querySelector('.mdi-btn--external').addEventListener('click', (e) => {
+        e.stopPropagation();
+        chrome.tabs.create({ url });
+      });
+
       win.querySelector('.mdi-btn--reload').addEventListener('click', (e) => {
         e.stopPropagation();
         this._rebuildIframe(win, id);
@@ -678,18 +685,6 @@
         data._loadTimeout = setTimeout(() => {
           if (!isLoaded()) {
             markLoaded();
-            // Check if iframe has content
-            try {
-              const doc = iframe.contentDocument;
-              if (doc && doc.body && doc.body.innerHTML.length > 0) {
-                hideLoading();
-                return;
-              }
-            } catch (e) {
-              // Cross-origin: normal, iframe likely loaded fine
-              hideLoading();
-              return;
-            }
             showFallback();
           }
         }, this.opts.iframeLoadTimeout);
@@ -999,16 +994,6 @@
       data._loadTimeout = setTimeout(() => {
         if (!data._iframeLoaded) {
           data._iframeLoaded = true;
-          try {
-            const doc = newIframe.contentDocument;
-            if (doc && doc.body && doc.body.innerHTML.length > 0) {
-              if (loading) loading.style.display = 'none';
-              return;
-            }
-          } catch (err) {
-            if (loading) loading.style.display = 'none';
-            return;
-          }
           if (loading) loading.style.display = 'none';
           if (fallback) fallback.classList.add('mdi-window-fallback--visible');
           newIframe.style.display = 'none';

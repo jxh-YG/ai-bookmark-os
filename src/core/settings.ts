@@ -10,6 +10,40 @@ const LEGACY_CLASSIFY_PROMPTS: ClassifyPrompts = {
   assign: '把每个书签分配到最合适的分类编号。只输出 JSON 数组：[{"id":"书签id","cat":分类编号}]。不要其他文字。',
 };
 
+const LOCAL_ONLY_SYNC_FIELDS = ['apiKey', 'baseUrl', 'classifyPrompts', 'preservedFolderIds', 'preservedFolderPaths'] as const;
+const SETTINGS_MIGRATION_DIAGNOSTIC_KEY = 'settingsMigrationDiagnostic';
+
+type SyncSettings = Omit<Settings, (typeof LOCAL_ONLY_SYNC_FIELDS)[number]>;
+
+function syncSettingsProjection(settings: Settings): SyncSettings {
+  const {
+    apiKey: _apiKey,
+    baseUrl: _baseUrl,
+    classifyPrompts: _classifyPrompts,
+    preservedFolderIds: _preservedFolderIds,
+    preservedFolderPaths: _preservedFolderPaths,
+    ...safe
+  } = settings;
+  return safe;
+}
+
+async function cleanLegacySyncSettings(settings: Settings): Promise<void> {
+  try {
+    const synced = await chrome.storage.sync.get('settings');
+    const legacy = synced.settings;
+    if (!legacy || !LOCAL_ONLY_SYNC_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(legacy, field))) return;
+    await chrome.storage.sync.set({ settings: syncSettingsProjection(settings) });
+  } catch (error) {
+    await chrome.storage.local.set({
+      [SETTINGS_MIGRATION_DIAGNOSTIC_KEY]: {
+        code: 'sync_cleanup_failed',
+        message: error instanceof Error ? error.message : String(error),
+        timestamp: Date.now(),
+      },
+    }).catch(() => undefined);
+  }
+}
+
 function migrateDefaultPrompts(prompts?: Partial<ClassifyPrompts>): ClassifyPrompts {
   const merged = { ...DEFAULT_CLASSIFY_PROMPTS, ...(prompts || {}) };
   return {
@@ -24,14 +58,22 @@ export async function loadSettings(): Promise<Settings> {
   if (data.settings) {
     const merged = { ...DEFAULT_SETTINGS, ...data.settings } as Settings;
     merged.classifyPrompts = migrateDefaultPrompts(data.settings.classifyPrompts || {});
+    await cleanLegacySyncSettings(merged);
     return merged;
   }
   // 本机无设置（新装/重装）：尝试从 sync 恢复外观与供应商偏好
   try {
     const synced = await chrome.storage.sync.get('settings');
     if (synced.settings) {
-      const restored = { ...DEFAULT_SETTINGS, ...synced.settings, apiKey: '', classifyPrompts: migrateDefaultPrompts(synced.settings.classifyPrompts || {}) } as Settings;
+      const restored = {
+        ...DEFAULT_SETTINGS,
+        ...synced.settings,
+        apiKey: '',
+        classifyPrompts: { ...DEFAULT_CLASSIFY_PROMPTS },
+        preservedFolderIds: [],
+      } as Settings;
       await chrome.storage.local.set({ settings: restored });
+      await cleanLegacySyncSettings(restored);
       return restored;
     }
   } catch {
@@ -46,8 +88,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await chrome.storage.local.set({ settings: validated });
   // 镜像到 sync（剔除 apiKey，安全 + 避开 sync 8KB 单项限制风险）
   try {
-    const { apiKey: _omit, ...safe } = validated;
-    await chrome.storage.sync.set({ settings: safe });
+    await chrome.storage.sync.set({ settings: syncSettingsProjection(validated) });
   } catch {
     /* 配额超限或未登录账号时忽略 */
   }

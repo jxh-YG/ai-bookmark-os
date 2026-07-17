@@ -109,24 +109,30 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
     setSelected(new Set([...(dups ?? []), ...hardDead].map((i) => i.bookmark.id)));
 
   const deleteSelected = async () => {
-    const n = await removeBookmarks([...selected]);
-    setMsg(d.deletedOk(n));
-    setCanUndo(n > 0);
-    setDups((prev) => prev?.filter((i) => !selected.has(i.bookmark.id)) ?? null);
-    setDead((prev) => prev?.filter((i) => !selected.has(i.bookmark.id)) ?? null);
-    setSelected(new Set());
-    onBookmarksChanged();
+    if (!window.confirm(`${d.deleteSelected(selected.size)}?`)) return;
+    const result = await removeBookmarks([...selected]);
+    const removedIds = new Set(result.items.filter((item) => item.status === 'succeeded').map((item) => item.id));
+    setMsg(result.failed || result.conflicts
+      ? `${d.deletedOk(result.succeeded)} (${result.succeeded}/${result.total})`
+      : d.deletedOk(result.succeeded));
+    setCanUndo(result.succeeded > 0);
+    setDups((prev) => prev?.filter((i) => !removedIds.has(i.bookmark.id)) ?? null);
+    setDead((prev) => prev?.filter((i) => !removedIds.has(i.bookmark.id)) ?? null);
+    setSelected((prev) => new Set([...prev].filter((id) => !removedIds.has(id))));
+    if (result.succeeded > 0) onBookmarksChanged();
   };
 
   const handleUndoDelete = async () => {
-    const n = await undoRemoveBookmarks();
-    if (n > 0) {
-      setMsg(d.undoDeleteOk(n));
-      setCanUndo(false);
+    const result = await undoRemoveBookmarks();
+    if (result.succeeded > 0) {
+      setMsg(result.failed || result.conflicts
+        ? `${d.undoDeleteOk(result.succeeded)} (${result.succeeded}/${result.total})`
+        : d.undoDeleteOk(result.succeeded));
+      setCanUndo(result.failed + result.conflicts > 0);
       onBookmarksChanged();
     } else {
       setMsg(d.undoDeleteFail);
-      setCanUndo(false);
+      setCanUndo(result.failed + result.conflicts > 0);
     }
   };
 

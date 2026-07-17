@@ -61,6 +61,35 @@ assert.equal(createPlan.create.length, 1);
 assert.equal(createPlan.create[0].folderKey, 'AI Bookmark OS 导入/2026-07-16/Docs');
 assert.deepEqual(plain(createPlan.create[0].metadata.tags), ['work']);
 
+const emptyFolderPlan = buildImportPlan({
+  incoming: [],
+  existing: [],
+  folders: ['Empty/Nested'],
+  rootTitle: 'Imported',
+  rootDate: '2026-07-17',
+});
+assert.equal(emptyFolderPlan.create.length, 0);
+assert.deepEqual(plain(emptyFolderPlan.folders), [
+  { key: 'Imported', parentKey: '', title: 'Imported' },
+  { key: 'Imported/2026-07-17', parentKey: 'Imported', title: '2026-07-17' },
+  { key: 'Imported/2026-07-17/Empty', parentKey: 'Imported/2026-07-17', title: 'Empty' },
+  { key: 'Imported/2026-07-17/Empty/Nested', parentKey: 'Imported/2026-07-17/Empty', title: 'Nested' },
+]);
+
+const duplicateAndMetadataPlan = buildImportPlan({
+  incoming: [
+    { title: 'First', url: 'https://example.com/item', folderPath: 'Docs', dateAdded: 1_700_000_000_000, contentExcerpt: 'summary' },
+    { title: 'Second', url: 'https://example.com/item#fragment', folderPath: 'Docs' },
+  ],
+  existing: [],
+  rootTitle: 'Imported',
+  rootDate: '2026-07-17',
+});
+assert.equal(duplicateAndMetadataPlan.create.length, 1);
+assert.equal(duplicateAndMetadataPlan.skipped.length, 1);
+assert.equal(duplicateAndMetadataPlan.create[0].metadata.dateAdded, 1_700_000_000_000);
+assert.equal(duplicateAndMetadataPlan.create[0].metadata.contentExcerpt, 'summary');
+
 const restored = buildRestoredBookmark({
   id: 'old-id',
   title: 'Pinned bookmark',
@@ -94,5 +123,16 @@ assert.equal(checkerSummary.autoDeleted, undefined);
 const backgroundSource = readFileSync('src/timeline/background/background.js', 'utf8');
 assert.match(backgroundSource, /importScripts\('bookmark-data\.js'\)/);
 assert.doesNotMatch(backgroundSource, /checkerAutoDelete[\s\S]{0,800}chrome\.bookmarks\.remove/);
+assert.match(backgroundSource, /operation\.request\?\.rootTitle/);
+assert.match(backgroundSource, /for \(const key of \['created', 'createdFolders', 'skipped', 'merged', 'invalid', 'failed'\]\)/);
+assert.match(backgroundSource, /operation\.failed\.length \|\| operation\.invalid\.length \? 'partial' : 'completed'/);
+assert.match(backgroundSource, /message\.requestId,[\s\S]{0,160}retryImportOperation\(message\.operationId\)/);
+
+const settingsSource = readFileSync('src/timeline/pages/settings/settings.js', 'utf8');
+assert.match(settingsSource, /version:\s*2,[\s\S]{0,120}roots:/);
+assert.match(settingsSource, /<!DOCTYPE NETSCAPE-Bookmark-file-1>/);
+assert.match(settingsSource, /new DOMParser\(\)\.parseFromString\(text, 'text\/html'\)/);
+assert.match(settingsSource, /node\.type === 'folder'/);
+assert.doesNotMatch(settingsSource, /function buildBookmarksPage\(/);
 
 console.log('data safety regression checks passed');

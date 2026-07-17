@@ -13,6 +13,8 @@
   const RSS_ALARM_NAME = 'rss_poll';
   const FETCH_TIMEOUT_MS = 20000;
   const FAVICON_TIMEOUT_MS = 8000;
+  const POLL_CONCURRENCY = 3;
+  const POLL_CHECKPOINT_KEY = 'rss_poll_checkpoint';
   // 失败退避：failCount 达到阈值时跳过该 feed 几轮
   const FAIL_SKIP_THRESHOLD = 3;
 
@@ -268,8 +270,8 @@
       clearTimeout(tid);
 
       if (resp.status === 304) {
-        await FeedStore.updateFeed(feed.id, { lastFetched: Date.now(), failCount: 0 });
-        return { feedId: feed.id, added: [], notModified: true };
+        await FeedStore.updateFeed(feed.id, { lastFetched: Date.now(), failCount: 0, lastStatus: 'succeeded', lastError: '', nextRetryAt: 0 });
+        return { feedId: feed.id, added: [], notModified: true, status: 'succeeded' };
       }
       if (!resp.ok) {
         throw new Error('HTTP ' + resp.status);
@@ -290,7 +292,10 @@
         lastFetched: Date.now(),
         etag: resp.headers.get('etag') || null,
         lastModified: resp.headers.get('last-modified') || null,
-        failCount: 0
+        failCount: 0,
+        lastStatus: 'succeeded',
+        lastError: '',
+        nextRetryAt: 0
       };
       // 如果发生重定向，更新 feed URL 为最终 URL
       if (finalUrl !== feed.url) {
@@ -310,7 +315,7 @@
       await FeedStore.updateFeed(feed.id, patch);
 
       const added = await FeedStore.upsertItems(feed.id, parsed.items, settings.maxItemsPerFeed);
-      return { feedId: feed.id, added, feedTitle: feed.title, feed };
+      return { feedId: feed.id, added, feedTitle: feed.title, feed, status: 'succeeded' };
     } catch (err) {
       clearTimeout(tid);
       directErr = err;
@@ -325,7 +330,10 @@
           lastFetched: Date.now(),
           etag: null,
           lastModified: null,
-          failCount: 0
+          failCount: 0,
+          lastStatus: 'succeeded',
+          lastError: '',
+          nextRetryAt: 0
         };
         if (!feed.title || feed.title === feed.url) {
           patch.title = proxied.parsed.title || feed.title;
@@ -340,7 +348,7 @@
         await FeedStore.updateFeed(feed.id, patch);
         const added = await FeedStore.upsertItems(feed.id, proxied.parsed.items, settings.maxItemsPerFeed);
         console.info('[RSS] fetched via proxy:', feed.url);
-        return { feedId: feed.id, added, feedTitle: feed.title, feed, via: 'proxy' };
+        return { feedId: feed.id, added, feedTitle: feed.title, feed, via: 'proxy', status: 'succeeded' };
       } catch (proxyErr) {
         console.warn('[RSS] proxy also failed:', feed.url, proxyErr.message);
       }
@@ -348,53 +356,117 @@
 
     // 直连和代理都失败，记录失败计数
     const failCount = (feed.failCount || 0) + 1;
-    await FeedStore.updateFeed(feed.id, { failCount, lastFetched: Date.now() });
     const isTimeout = directErr.name === 'AbortError' || _isTransient(directErr);
     const errMsg = isTimeout ? `timeout after ${FETCH_TIMEOUT_MS / 1000}s` : directErr.message;
+    const nextRetryAt = Date.now() + Math.min(8, Math.max(1, failCount - FAIL_SKIP_THRESHOLD + 1)) * 60 * 1000;
+    await FeedStore.updateFeed(feed.id, {
+      failCount,
+      lastFetched: Date.now(),
+      lastStatus: 'failed',
+      lastError: errMsg,
+      nextRetryAt,
+    });
     console.warn('[RSS] fetch failed:', feed.url, errMsg);
-    return { feedId: feed.id, added: [], error: errMsg, failCount, feed };
+    return { feedId: feed.id, added: [], error: errMsg, failCount, feed, status: 'failed', nextRetryAt };
   }
 
   // 拉取所有 feed。跳过连续失败且未到退避窗口的 feed。
+  let pollAllInFlight = null;
   async function pollAll() {
+    if (pollAllInFlight) return pollAllInFlight;
+    pollAllInFlight = pollAllOnce().finally(() => { pollAllInFlight = null; });
+    return pollAllInFlight;
+  }
+
+  async function pollAllOnce() {
     const feeds = await FeedStore.getAllFeeds();
-    if (feeds.length === 0) return [];
+    if (feeds.length === 0) return { results: [], summary: { total: 0, succeeded: 0, failed: 0, skipped: 0, added: 0 } };
 
     const now = Date.now();
     const settings = await FeedStore.getSettings();
     const intervalMs = (settings.pollIntervalMin || 30) * 60 * 1000;
     const results = [];
-
-    for (const feed of feeds) {
+    const checkpointData = await chrome.storage.local.get(POLL_CHECKPOINT_KEY);
+    const checkpoint = checkpointData[POLL_CHECKPOINT_KEY];
+    const validCheckpoint = checkpoint
+      && checkpoint.version === 1
+      && Array.isArray(checkpoint.pendingFeedIds)
+      && now - (checkpoint.startedAt || 0) < 6 * 60 * 60 * 1000
+      ? checkpoint
+      : null;
+    const resumeIds = validCheckpoint
+      ? new Set(checkpoint.pendingFeedIds || [])
+      : null;
+    const candidates = resumeIds ? feeds.filter((feed) => resumeIds.has(feed.id)) : feeds;
+    const eligible = [];
+    for (const feed of candidates) {
       // 失败退避：failCount 越高，跳过越多轮
       if (feed.failCount >= FAIL_SKIP_THRESHOLD) {
         const skipMs = intervalMs * Math.min(feed.failCount - FAIL_SKIP_THRESHOLD + 1, 8);
         if (feed.lastFetched && (now - feed.lastFetched) < skipMs) {
-          continue; // 跳过本轮
+          results.push({ feedId: feed.id, added: [], skipped: true, status: 'skipped', nextRetryAt: feed.lastFetched + skipMs });
+          continue;
         }
       }
-      const r = await fetchOne(feed);
-      results.push(r);
+      eligible.push(feed);
+    }
 
-      // 自动书签：feed.autoBookmark 为 true 时，将新增文章自动存为书签
-      if (feed.autoBookmark && r.added && r.added.length > 0 && typeof self.saveRssArticleAsBookmark === 'function') {
-        for (const item of r.added) {
-          try {
-            await self.saveRssArticleAsBookmark(item, feed, settings);
-          } catch (e) {
-            console.warn('[RSS] auto-bookmark failed for', item.link, e.message);
+    const pendingIds = new Set(eligible.map((feed) => feed.id));
+    const startedAt = validCheckpoint?.startedAt || now;
+    const summary = validCheckpoint?.summary
+      ? {
+        total: (Number(validCheckpoint.summary.total) || 0) + results.length,
+        succeeded: Number(validCheckpoint.summary.succeeded) || 0,
+        failed: Number(validCheckpoint.summary.failed) || 0,
+        skipped: (Number(validCheckpoint.summary.skipped) || 0) + results.length,
+        added: Number(validCheckpoint.summary.added) || 0,
+      }
+      : {
+        total: results.length,
+        succeeded: 0,
+        failed: 0,
+        skipped: results.length,
+        added: 0,
+      };
+    let checkpointWrites = Promise.resolve();
+    const persistCheckpoint = () => {
+      const value = { version: 1, startedAt, updatedAt: Date.now(), pendingFeedIds: [...pendingIds], summary: { ...summary } };
+      checkpointWrites = checkpointWrites.then(() => chrome.storage.local.set({ [POLL_CHECKPOINT_KEY]: value }));
+      return checkpointWrites;
+    };
+    await persistCheckpoint();
+    let nextIndex = 0;
+    const workers = Array.from({ length: Math.min(POLL_CONCURRENCY, eligible.length) }, async () => {
+      while (nextIndex < eligible.length) {
+        const feed = eligible[nextIndex++];
+        const result = await fetchOne(feed);
+        results.push(result);
+        if (feed.autoBookmark && result.added?.length && typeof self.saveRssArticleAsBookmark === 'function') {
+          for (const item of result.added) {
+            try { await self.saveRssArticleAsBookmark(item, feed, settings); }
+            catch (error) { console.warn('[RSS] auto-bookmark failed for', item.link, error.message); }
           }
         }
+        summary.total += 1;
+        if (result.status === 'succeeded') summary.succeeded += 1;
+        else if (result.status === 'failed') summary.failed += 1;
+        else if (result.status === 'skipped') summary.skipped += 1;
+        summary.added += result.added?.length || 0;
+        pendingIds.delete(feed.id);
+        await persistCheckpoint();
       }
-    }
+    });
+    await Promise.all(workers);
+    await checkpointWrites;
+    await chrome.storage.local.remove(POLL_CHECKPOINT_KEY);
 
     // 通知上层（feed-notifier 会监听）
     if (typeof global.onFeedPollComplete === 'function') {
       try { global.onFeedPollComplete(results); } catch { /* ignore */ }
     }
     // 广播数据变化
-    FeedStore._broadcast('rssDataChanged', { results });
-    return results;
+    FeedStore._broadcast('rssDataChanged', { results, summary });
+    return { results, summary };
   }
 
   // 手动刷新单个 feed

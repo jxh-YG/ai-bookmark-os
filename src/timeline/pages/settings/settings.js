@@ -28,6 +28,8 @@ const exportJsonBtn = document.getElementById('exportJsonBtn');
 const exportHtmlBtn = document.getElementById('exportHtmlBtn');
 const importFileBtn = document.getElementById('importFileBtn');
 const importFileInput = document.getElementById('importFileInput');
+const importOperationsList = document.getElementById('importOperationsList');
+const refreshImportOperationsBtn = document.getElementById('refreshImportOperationsBtn');
 const retentionDaysSelect = document.getElementById('retentionDaysSelect');
 const previewEnabledToggle = document.getElementById('previewEnabledToggle');
 const previewCacheTTLSelect = document.getElementById('previewCacheTTLSelect');
@@ -106,6 +108,7 @@ const aiLogsList = document.getElementById('aiLogsList');
 const aiRefreshLogsBtn = document.getElementById('aiRefreshLogsBtn');
 const aiClearLogsBtn = document.getElementById('aiClearLogsBtn');
 const aiAssistLogicToggle = document.getElementById('aiAssistLogicToggle');
+const aiPageContentToggle = document.getElementById('aiPageContentToggle');
 const aiAssistPromptInput = document.getElementById('aiAssistPromptInput');
 const aiResetAssistPromptBtn = document.getElementById('aiResetAssistPromptBtn');
 
@@ -452,7 +455,7 @@ async function loadRssSettings() {
     rssMaxItemsSelect.value = String(s.maxItemsPerFeed ?? 100);
     rssAutoDiscoverToggle.checked = s.autoDiscover !== false;
     rssNotifyNewToggle.checked = s.notifyNew !== false;
-    rssProxyFallbackToggle.checked = s.proxyFallback !== false;
+    rssProxyFallbackToggle.checked = s.proxyFallback === true;
     rssProxyUrlInput.value = s.proxyUrl || '';
     updateProxyRowState();
     await populateRssFolderSelect(s.defaultFolderId || null);
@@ -463,7 +466,7 @@ async function loadRssSettings() {
     rssMaxItemsSelect.value = '100';
     rssAutoDiscoverToggle.checked = true;
     rssNotifyNewToggle.checked = true;
-    rssProxyFallbackToggle.checked = true;
+    rssProxyFallbackToggle.checked = false;
     rssProxyUrlInput.value = '';
     updateProxyRowState();
     await populateRssFolderSelect(null);
@@ -584,6 +587,7 @@ async function loadAISettings() {
     }
     aiTimeoutInput.value = String(cfg.timeout ?? 8);
     if (aiAssistLogicToggle) aiAssistLogicToggle.checked = cfg.assistClassificationEnabled !== false;
+    if (aiPageContentToggle) aiPageContentToggle.checked = cfg.allowPageContentForAi !== false;
     if (aiAssistPromptInput) aiAssistPromptInput.value = cfg.assistPrompt || DEFAULT_AI_ASSIST_PROMPT;
     if (aiCustomFormatSelect) {
       const fmt = cfg.customFormat === 'google' ? 'gemini' : (cfg.customFormat || 'openai');
@@ -666,6 +670,7 @@ function buildAIConfigFromUI() {
     customEndpoint: aiCustomEndpointInput ? aiCustomEndpointInput.value.trim() : '',
     customFullUrl: !!(aiFullUrlToggle && aiFullUrlToggle.checked),
     assistClassificationEnabled: aiAssistLogicToggle ? aiAssistLogicToggle.checked : true,
+    allowPageContentForAi: aiPageContentToggle ? aiPageContentToggle.checked : true,
     assistPrompt: aiAssistPromptInput ? (aiAssistPromptInput.value.trim() || DEFAULT_AI_ASSIST_PROMPT) : DEFAULT_AI_ASSIST_PROMPT
   };
 }
@@ -1193,9 +1198,21 @@ rssNotifyNewToggle.addEventListener('change', async (e) => {
 });
 
 rssProxyFallbackToggle.addEventListener('change', async (e) => {
-  await saveRssSetting({ proxyFallback: e.target.checked });
-  updateProxyRowState();
-  showToast(i18n('settingsSaved'), 'success');
+  const enabled = e.target.checked;
+  if (enabled && !confirm(i18n('rssProxyConsent') || '启用后，订阅 URL 和代理抓取到的订阅内容会发送到你配置的代理服务。是否继续？')) {
+    e.target.checked = false;
+    updateProxyRowState();
+    return;
+  }
+  try {
+    await saveRssSetting({ proxyFallback: enabled });
+    updateProxyRowState();
+    showToast(i18n('settingsSaved'), 'success');
+  } catch (error) {
+    e.target.checked = !enabled;
+    updateProxyRowState();
+    showToast(error?.message || i18n('saveFailed'), 'error');
+  }
 });
 
 // 保存代理 URL
@@ -1253,8 +1270,15 @@ rssRefreshAllBtn.addEventListener('click', async () => {
   const original = rssRefreshAllBtn.innerHTML;
   try {
     rssRefreshAllBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="spinning"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg><span>' + (i18n('rssRefreshing') || '刷新中...') + '</span>';
-    await chrome.runtime.sendMessage({ action: 'rssRefreshAll' });
-    showToast(i18n('rssRefreshAllDone') || '已刷新', 'success');
+    const response = await chrome.runtime.sendMessage({ action: 'rssRefreshAll' });
+    if (!response?.success) throw new Error(response?.error || 'rss_refresh_failed');
+    const summary = response.result?.summary || {};
+    const summaryText = (i18n('rssRefreshSummary') || '成功 $1，失败 $2，跳过 $3，新增文章 $4')
+      .replace('$1', String(summary.succeeded || 0))
+      .replace('$2', String(summary.failed || 0))
+      .replace('$3', String(summary.skipped || 0))
+      .replace('$4', String(summary.added || 0));
+    showToast(summaryText, summary.failed > 0 ? 'error' : 'success');
     await refreshRssLastUpdated();
     await refreshRssUnreadBadge();
   } catch (e) {
@@ -1296,6 +1320,9 @@ if (aiTimeoutInput) {
 }
 if (aiAssistLogicToggle) {
   aiAssistLogicToggle.addEventListener('change', saveAIConfig);
+}
+if (aiPageContentToggle) {
+  aiPageContentToggle.addEventListener('change', saveAIConfig);
 }
 if (aiAssistPromptInput) {
   aiAssistPromptInput.addEventListener('change', saveAIConfig);
@@ -1365,12 +1392,10 @@ async function handleExportJson() {
     const result = await chrome.runtime.sendMessage({ action: 'exportData' });
     if (!result?.success) { showToast(i18n('importFailed'), 'error'); return; }
     const data = JSON.stringify({
-      version: 1,
-      exportedAt: Date.now(),
-      bookmarks: (result.bookmarks || []).map(b => ({
-        title: b.title, url: b.url, dateAdded: b.dateAdded,
-        folderPath: b.folderPath, tags: b.tags, pinned: b.pinned
-      }))
+      app: 'ai-bookmark-os',
+      version: 2,
+      exportedAt: result.exportedAt || Date.now(),
+      roots: Array.isArray(result.tree) ? result.tree : [],
     }, null, 2);
     const stamp = new Date().toISOString().slice(0, 10);
     downloadFile(`ai-bookmark-os-bookmarks-${stamp}.json`, data, 'application/json');
@@ -1381,7 +1406,7 @@ async function handleExportJson() {
   }
 }
 
-// ===== 导出 HTML 页面（可阅读的极简视图） =====
+// ===== Netscape Bookmark File Format export =====
 function escapeHtmlForExport(s) {
   return (s == null ? '' : String(s))
     .replace(/&/g, '&amp;')
@@ -1391,196 +1416,42 @@ function escapeHtmlForExport(s) {
     .replace(/'/g, '&#39;');
 }
 
-function pad2(n) { return String(n).padStart(2, '0'); }
-
-function formatExportTime(ts) {
-  const t = new Date(ts);
-  return pad2(t.getHours()) + ':' + pad2(t.getMinutes());
+function netscapeTimestamp(value) {
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) && timestamp > 0 ? Math.floor(timestamp / 1000) : Math.floor(Date.now() / 1000);
 }
 
-function formatDateHeader(timestamp, latestTs, lang, now = Date.now()) {
-  const d = new Date(timestamp);
-  const today = new Date(now); today.setHours(0, 0, 0, 0);
-  const dDay = new Date(timestamp); dDay.setHours(0, 0, 0, 0);
-  const diffDays = Math.round((today - dDay) / 86400000);
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const isCN = lang === 'zh-CN';
-  if (diffDays === 0) return isCN ? '今天' : 'Today';
-  if (diffDays === 1) return isCN ? '昨天' : 'Yesterday';
-  if (diffDays < 7) {
-    const time = latestTs ? ' ' + formatExportTime(latestTs) : '';
-    return (isCN
-      ? pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + time
-      : M[d.getMonth()] + ' ' + d.getDate() + time);
-  }
-  if (d.getFullYear() === new Date(now).getFullYear()) {
-    return (isCN
-      ? (d.getMonth() + 1) + '月' + d.getDate() + '日'
-      : M[d.getMonth()] + ' ' + d.getDate());
-  }
-  return (isCN
-    ? d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日'
-    : d.getFullYear() + ' · ' + M[d.getMonth()] + ' ' + d.getDate());
+function buildNetscapeNodes(nodes, depth = 1) {
+  const indent = '    '.repeat(depth);
+  return (Array.isArray(nodes) ? nodes : []).map((node) => {
+    if (!node || typeof node !== 'object') return '';
+    if (node.type === 'bookmark' && node.url) {
+      const tags = Array.isArray(node.metadata?.tags) ? node.metadata.tags.join(',') : '';
+      const tagsAttribute = tags ? ` TAGS="${escapeHtmlForExport(tags)}"` : '';
+      return `${indent}<DT><A HREF="${escapeHtmlForExport(node.url)}" ADD_DATE="${netscapeTimestamp(node.dateAdded)}"${tagsAttribute}>${escapeHtmlForExport(node.title || node.url)}</A>`;
+    }
+    if (node.type !== 'folder') return '';
+    const children = buildNetscapeNodes(node.children || [], depth + 1);
+    return `${indent}<DT><H3 ADD_DATE="${netscapeTimestamp(node.dateAdded)}">${escapeHtmlForExport(node.title || '')}</H3>\n${indent}<DL><p>\n${children}\n${indent}</DL><p>`;
+  }).filter(Boolean).join('\n');
 }
 
-function buildBookmarksPage(bookmarks) {
-  // 按日期分组
-  const groups = new Map();
-  for (const b of bookmarks) {
-    const ts = b.dateAdded || Date.now();
-    const day = new Date(ts); day.setHours(0, 0, 0, 0);
-    const key = day.getTime();
-    if (!groups.has(key)) groups.set(key, { ts: day.getTime(), items: [] });
-    groups.get(key).items.push(b);
-  }
-  const sortedDays = [...groups.values()].sort((a, b) => b.ts - a.ts);
-  const total = bookmarks.length;
-  const stamp = new Date().toISOString().slice(0, 10);
-  const lang = (typeof _currentLang !== 'undefined' && _currentLang === 'zh_CN') ? 'zh-CN' : 'en';
-  const labels = {
-    en: { title: 'Bookmarks', count: (n) => `${n} item${n === 1 ? '' : 's'} · exported ${stamp}` },
-    'zh-CN': { title: '书签', count: (n) => `共 ${n} 条 · 导出于 ${stamp}` }
-  };
-  const L = labels[lang] || labels.en;
-
-  const sections = sortedDays.map(group => {
-    // 组内按时间倒序，第一条即为该组最新时间
-    group.items.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
-    const header = formatDateHeader(group.ts, group.items[0].dateAdded, lang);
-    const items = group.items.map(b => {
-        const title = escapeHtml(b.title || b.url || '(untitled)');
-        const url = escapeHtml(b.url || '#');
-        const domain = b.domain ? `<span class="domain">${escapeHtml(b.domain)}</span>` : '';
-        const tags = (b.tags && b.tags.length)
-          ? `<span class="tags">${b.tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</span>`
-          : '';
-        const pin = b.pinned ? `<span class="pin" title="pinned">·</span>` : '';
-        return `      <li><a href="${url}">${title}</a>${pin}${domain}${tags}</li>`;
-      }).join('\n');
-    return `  <section>\n    <h2>${escapeHtml(header)}</h2>\n    <ul>\n${items}\n    </ul>\n  </section>`;
-  }).join('\n');
-
-  return `<!DOCTYPE html>
-<html lang="${lang}">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtml(L.title)} · ${stamp}</title>
-<style>
-:root {
-  --bg: #ffffff;
-  --fg: #1a1a1a;
-  --muted: #8a8a8a;
-  --line: #ececec;
-  --hover: #f6f6f6;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e0e0e;
-    --fg: #ececec;
-    --muted: #777777;
-    --line: #1f1f1f;
-    --hover: #181818;
-  }
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { background: var(--bg); color: var(--fg); }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
-               "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  max-width: 680px;
-  margin: 0 auto;
-  padding: 64px 24px 96px;
-  font-size: 14px;
-  line-height: 1.55;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-}
-header {
-  margin-bottom: 48px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--line);
-}
-h1 {
-  font-size: 17px;
-  font-weight: 500;
-  letter-spacing: 0;
-}
-.meta {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-section { margin-bottom: 36px; }
-h2 {
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--muted);
-  margin-bottom: 10px;
-  font-variant-numeric: tabular-nums;
-}
-ul { list-style: none; }
-li {
-  padding: 5px 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-li:hover { background: var(--hover); }
-a {
-  color: var(--fg);
-  text-decoration: none;
-  word-break: break-word;
-}
-a:hover { text-decoration: underline; text-underline-offset: 2px; }
-.domain {
-  color: var(--muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-}
-.tags { display: inline-flex; gap: 6px; flex-wrap: wrap; }
-.tag {
-  color: var(--muted);
-  font-size: 12px;
-}
-.pin {
-  color: var(--muted);
-  font-size: 12px;
-  width: 4px;
-  height: 4px;
-  background: currentColor;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-  align-self: center;
-}
-@media print {
-  body { padding: 24px 0; }
-  li:hover { background: transparent; }
-}
-</style>
-</head>
-<body>
-<header>
-  <h1>${escapeHtml(L.title)}</h1>
-  <p class="meta">${escapeHtml(L.count(total))}</p>
-</header>
-${sections}
-</body>
-</html>`;
+function buildNetscapeBookmarksPage(tree) {
+  return `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<!-- This is an automatically generated file. It will be read and overwritten. -->
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+<TITLE>AI Bookmark OS Bookmarks</TITLE>
+<H1>AI Bookmark OS Bookmarks</H1>
+<DL><p>
+${buildNetscapeNodes(tree)}
+</DL><p>`;
 }
 
 async function handleExportHtml() {
   try {
     const result = await chrome.runtime.sendMessage({ action: 'exportData' });
     if (!result?.success) { showToast(i18n('importFailed'), 'error'); return; }
-    const page = buildBookmarksPage(result.bookmarks || []);
+    const page = buildNetscapeBookmarksPage(result.tree || []);
     const stamp = new Date().toISOString().slice(0, 10);
     downloadFile(`ai-bookmark-os-bookmarks-${stamp}.html`, page, 'text/html;charset=utf-8');
     showToast(i18n('settingsSaved'), 'success');
@@ -1593,52 +1464,142 @@ async function handleExportHtml() {
 function parseImportedJSON(text) {
   try {
     const data = JSON.parse(text);
+    if (Number(data?.version) === 2 && Array.isArray(data.roots)) {
+      const items = [];
+      const folderPaths = [];
+      const rootNames = new Set(['书签栏', '收藏夹栏', '书签菜单', '其他书签', '其他收藏夹', '移动设备书签', 'bookmarks bar', 'bookmarks menu', 'other bookmarks', 'mobile bookmarks']);
+      const walk = (nodes, path = '') => {
+        for (const node of nodes || []) {
+          if (!node || typeof node !== 'object') continue;
+          if (node.type === 'folder') {
+            const title = String(node.title || '').trim();
+            const nextPath = !path && rootNames.has(title.toLowerCase()) ? '' : [path, title].filter(Boolean).join('/');
+            if (nextPath) folderPaths.push(nextPath);
+            walk(node.children, nextPath);
+          } else if (node.type === 'bookmark' && node.url) {
+            const metadata = node.metadata && typeof node.metadata === 'object' ? node.metadata : {};
+            items.push({
+              ...metadata,
+              title: node.title || node.url,
+              url: node.url,
+              dateAdded: node.dateAdded || Date.now(),
+              folderPath: node.folderPath || path,
+              tags: Array.isArray(metadata.tags) ? metadata.tags : [],
+              pinned: !!metadata.pinned,
+            });
+          }
+        }
+      };
+      walk(data.roots);
+      return { items, folderPaths: [...new Set(folderPaths)] };
+    }
     const list = Array.isArray(data) ? data : (data.bookmarks || []);
-    return list.filter(b => b && b.url).map(b => ({
-      id: 'imp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    const items = list.filter(b => b && b.url).map(b => ({
       title: b.title || b.url,
       url: b.url,
-      domain: extractDomain(b.url),
       dateAdded: b.dateAdded || Date.now(),
+      folderPath: b.folderPath || '',
       tags: Array.isArray(b.tags) ? b.tags : [],
-      pinned: !!b.pinned
+      pinned: !!b.pinned,
     }));
+    return { items, folderPaths: [...new Set(items.map((item) => item.folderPath).filter(Boolean))] };
   } catch (e) { return null; }
 }
 
 function parseImportedHTML(text) {
-  const results = [];
-  const re = /<a[^>]*href=["']([^"']+)["'][^>]*>([^<]*)<\/a>/gi;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const url = m[1];
-    const title = m[2] || url;
-    if (!url || url.startsWith('javascript:') || url.startsWith('data:')) continue;
-    results.push({
-      id: 'imp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-      title, url,
-      domain: extractDomain(url),
-      dateAdded: Date.now(),
-      tags: [], pinned: false
-    });
+  const documentNode = new DOMParser().parseFromString(text, 'text/html');
+  const items = [];
+  const folderPaths = [];
+  const rootNames = new Set(['书签栏', '收藏夹栏', '书签菜单', '其他书签', '其他收藏夹', '移动设备书签', 'bookmarks bar', 'bookmarks menu', 'other bookmarks', 'mobile bookmarks']);
+  const timestamp = (value) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return Date.now();
+    return parsed > 1e12 ? parsed : parsed * 1000;
+  };
+  const safeUrl = (value) => {
+    try {
+      const url = new URL(value);
+      return /^(https?|ftp):$/.test(url.protocol) ? url.toString() : '';
+    } catch { return ''; }
+  };
+  const directChild = (element, tagName) => [...element.children].find((child) => child.tagName === tagName) || null;
+  const walkList = (list, path = '') => {
+    const children = [...list.children];
+    for (let index = 0; index < children.length; index++) {
+      const child = children[index];
+      if (child.tagName === 'DL') {
+        walkList(child, path);
+        continue;
+      }
+      if (child.tagName !== 'DT') continue;
+      const heading = directChild(child, 'H3');
+      const anchor = directChild(child, 'A');
+      if (heading) {
+        const title = heading.textContent.trim();
+        const nextPath = !path && rootNames.has(title.toLowerCase()) ? '' : [path, title].filter(Boolean).join('/');
+        if (nextPath) folderPaths.push(nextPath);
+        let nested = directChild(child, 'DL');
+        if (!nested && children[index + 1]?.tagName === 'DL') nested = children[++index];
+        if (nested) walkList(nested, nextPath);
+        continue;
+      }
+      if (anchor) {
+        const url = safeUrl(anchor.getAttribute('href') || '');
+        if (!url) continue;
+        items.push({
+          title: anchor.textContent.trim() || url,
+          url,
+          dateAdded: timestamp(anchor.getAttribute('add_date')),
+          folderPath: path,
+          tags: String(anchor.getAttribute('tags') || '').split(',').map((tag) => tag.trim()).filter(Boolean),
+          pinned: false,
+        });
+      }
+    }
+  };
+  const rootList = documentNode.querySelector('dl');
+  if (rootList) walkList(rootList);
+  if (!items.length) {
+    for (const anchor of documentNode.querySelectorAll('a[href]')) {
+      const url = safeUrl(anchor.getAttribute('href') || '');
+      if (url) items.push({ title: anchor.textContent.trim() || url, url, dateAdded: timestamp(anchor.getAttribute('add_date')), folderPath: '', tags: [], pinned: false });
+    }
   }
-  return results;
+  return { items, folderPaths: [...new Set(folderPaths)] };
 }
 
 async function handleImportFile(file) {
   const reader = new FileReader();
   reader.onload = async (e) => {
     const text = e.target.result;
-    let items = null;
-    if (file.name.endsWith('.json')) items = parseImportedJSON(text);
-    else items = parseImportedHTML(text);
-    if (!items || items.length === 0) { showToast(i18n('importEmpty'), 'error'); return; }
+    let parsed = null;
+    if (file.name.toLowerCase().endsWith('.json')) parsed = parseImportedJSON(text);
+    else parsed = parseImportedHTML(text);
+    if (!parsed || (parsed.items.length === 0 && parsed.folderPaths.length === 0)) { showToast(i18n('importEmpty'), 'error'); return; }
     try {
-      const result = await chrome.runtime.sendMessage({ action: 'importData', bookmarks: items, mode: 'merge' });
-      if (result?.success) {
-        showToast(i18n('importedCount', [String(result.added)]), 'success');
+      const operationId = `import-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const result = await chrome.runtime.sendMessage({
+        action: 'importBookmarksV2',
+        operationId,
+        bookmarks: parsed.items,
+        folderPaths: parsed.folderPaths,
+        duplicateStrategy: 'merge',
+      });
+      if (result?.success || result?.status === 'partial') {
+        const created = result.created?.length || 0;
+        const merged = result.merged?.length || 0;
+        const skipped = result.skipped?.length || 0;
+        const failed = Number(result.failed || 0);
+        const conflicts = Number(result.conflicts || 0);
+        const isZh = typeof _currentLang !== 'undefined' && _currentLang === 'zh_CN';
+        const summary = isZh
+          ? `创建 ${created}，合并 ${merged}，跳过 ${skipped}，失败 ${failed}，冲突 ${conflicts}`
+          : `Created ${created}, merged ${merged}, skipped ${skipped}, failed ${failed}, conflicts ${conflicts}`;
+        showToast(summary, result?.status === 'partial' ? 'warning' : 'success');
+        await renderImportOperations();
       } else {
         showToast(i18n('importFailed'), 'error');
+        await renderImportOperations();
       }
     } catch (err) {
       console.error(err);
@@ -1658,6 +1619,87 @@ if (importFileInput) {
     importFileInput.value = '';
   });
 }
+
+function importStatusLabel(status) {
+  const zh = typeof _currentLang !== 'undefined' && _currentLang === 'zh_CN';
+  const labels = zh
+    ? { running: '进行中', completed: '已完成', partial: '部分完成', failed: '失败', undoing: '正在撤销', undone: '已撤销', undo_partial: '部分撤销' }
+    : { running: 'Running', completed: 'Completed', partial: 'Partial', failed: 'Failed', undoing: 'Undoing', undone: 'Undone', undo_partial: 'Undo partial' };
+  return labels[status] || status || '-';
+}
+
+async function renderImportOperations() {
+  if (!importOperationsList) return;
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getImportOperations' });
+    const operations = Array.isArray(response?.operations) ? response.operations : [];
+    if (!operations.length) {
+      importOperationsList.innerHTML = `<div class="tagrule-empty">${escapeHtml(i18n('noData') || '暂无记录')}</div>`;
+      return;
+    }
+    importOperationsList.innerHTML = operations.map((operation) => {
+      const isZh = typeof _currentLang !== 'undefined' && _currentLang === 'zh_CN';
+      const created = operation.created?.length || 0;
+      const merged = operation.merged?.length || 0;
+      const skipped = operation.skipped?.length || 0;
+      const invalid = operation.invalid?.length || 0;
+      const failed = operation.failed?.length || 0;
+      const rollbackConflicts = operation.rollback?.conflicts || 0;
+      const issueItems = [
+        ...(operation.failed || []).map((item) => ({ id: item.id || item.url || item.folderKey || item.title || '-', reason: item.error || 'failed' })),
+        ...((operation.rollback?.items || []).filter((item) => item.status !== 'succeeded').map((item) => ({ id: item.id || '-', reason: item.reason || item.status }))),
+      ];
+      const issueDetail = issueItems.length
+        ? `<details class="import-operation-issues"><summary>${escapeHtml(isZh ? `查看 ${issueItems.length} 项明细` : `View ${issueItems.length} item details`)}</summary>${issueItems.slice(0, 50).map((item) => `<div>${escapeHtml(`${item.id}: ${item.reason}`)}</div>`).join('')}</details>`
+        : '';
+      const timestamp = new Date(operation.completedAt || operation.startedAt || Date.now()).toLocaleString();
+      const canRetry = ['running', 'partial', 'failed'].includes(operation.status);
+      const canUndo = ['completed', 'partial', 'undo_partial'].includes(operation.status)
+        || (operation.status === 'running' && created > 0);
+      return `<div class="tagrule-item import-operation-item">
+        <div class="import-operation-main">
+          <div class="import-operation-title"><strong>${escapeHtml(importStatusLabel(operation.status))}</strong> · ${escapeHtml(timestamp)}</div>
+          <div class="import-operation-detail">${escapeHtml(isZh
+            ? `创建 ${created} · 合并 ${merged} · 跳过 ${skipped} · 无效 ${invalid} · 失败 ${failed} · 冲突 ${rollbackConflicts}`
+            : `Created ${created} · Merged ${merged} · Skipped ${skipped} · Invalid ${invalid} · Failed ${failed} · Conflicts ${rollbackConflicts}`)}</div>
+          ${issueDetail}
+        </div>
+        <div class="import-operation-actions">
+          ${canRetry ? `<button class="btn btn-secondary btn-sm" type="button" data-import-action="retry" data-operation-id="${escapeHtml(operation.id)}">${escapeHtml(i18n('retry') || '重试')}</button>` : ''}
+          ${canUndo ? `<button class="btn btn-danger btn-sm" type="button" data-import-action="undo" data-operation-id="${escapeHtml(operation.id)}">${escapeHtml(i18n('undo') || '撤销')}</button>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch {
+    importOperationsList.innerHTML = `<div class="tagrule-empty">${escapeHtml(i18n('loadFailedRetry') || '加载失败，请重试')}</div>`;
+  }
+}
+
+if (refreshImportOperationsBtn) refreshImportOperationsBtn.addEventListener('click', renderImportOperations);
+if (importOperationsList) {
+  importOperationsList.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-import-action]');
+    if (!button) return;
+    const operationId = button.dataset.operationId;
+    button.disabled = true;
+    try {
+      if (button.dataset.importAction === 'undo') {
+        if (!confirm(i18n('confirmUndoImport') || '撤销将保留导入后被修改的书签，并报告冲突。继续？')) return;
+        const requestId = `import-undo-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const result = await chrome.runtime.sendMessage({ action: 'rollbackImportOperation', operationId, requestId });
+        showToast(result?.success ? (i18n('settingsSaved') || '已撤销') : `${i18n('importFailed') || '部分项目未能撤销'} (${result?.succeeded || 0}/${result?.total || 0})`, result?.success ? 'success' : 'warning');
+      } else {
+        const requestId = `import-retry-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const result = await chrome.runtime.sendMessage({ action: 'retryImportOperation', operationId, requestId });
+        showToast(result?.success ? i18n('settingsSaved') : i18n('importFailed'), result?.success ? 'success' : 'warning');
+      }
+    } finally {
+      button.disabled = false;
+      await renderImportOperations();
+    }
+  });
+}
+void renderImportOperations();
 
 // ===== 监听存储变化 =====
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -2253,6 +2295,32 @@ async function loadTreeSettings() {
   }
 }
 
+function treeSyncSettingsProjection(settings) {
+  const {
+    apiKey: _apiKey,
+    baseUrl: _baseUrl,
+    classifyPrompts: _classifyPrompts,
+    preservedFolderIds: _preservedFolderIds,
+    preservedFolderPaths: _preservedFolderPaths,
+    ...safe
+  } = settings || {};
+  return safe;
+}
+
+async function saveTreeSyncSettings(settings) {
+  try {
+    await chrome.storage.sync.set({ settings: treeSyncSettingsProjection(settings) });
+  } catch (error) {
+    await chrome.storage.local.set({
+      settingsMigrationDiagnostic: {
+        code: 'sync_cleanup_failed',
+        message: error?.message || String(error),
+        timestamp: Date.now(),
+      },
+    }).catch(() => undefined);
+  }
+}
+
 async function saveTreeSettings(options = {}) {
   const quiet = !!options.quiet;
   const isAuto = options.mode === 'auto';
@@ -2264,10 +2332,7 @@ async function saveTreeSettings(options = {}) {
   if (!next.model) missing.push('模型名');
 
   await chrome.storage.local.set({ settings: next });
-  try {
-    const { apiKey, ...safe } = next;
-    await chrome.storage.sync.set({ settings: safe });
-  } catch (_) {}
+  await saveTreeSyncSettings(next);
 
   if (missing.length) {
     if (isAuto) {
@@ -2423,10 +2488,7 @@ async function testTreeConnection() {
 
     const sample = extractTreeTestSample(style, text);
     await chrome.storage.local.set({ settings });
-    try {
-      const { apiKey, ...safe } = settings;
-      await chrome.storage.sync.set({ settings: safe });
-    } catch (_) {}
+    await saveTreeSyncSettings(settings);
 
     setTreeStatus(`连接成功 · ${getTreeProvider(settings.provider).label} · ${settings.model}`, 'ok');
     if (typeof showToast === 'function') {

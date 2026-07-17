@@ -231,6 +231,45 @@ async function saveLanguage(language) {
 }
 
 // ===== 失效检测设置管理 =====
+const CHECKER_NUMBER_DEFAULTS = {
+  checkerTimeout: 10000,
+  checkerConcurrency: 5,
+  checkerRetries: 2,
+  checkerBackoffBase: 800,
+  checkerBackoffMax: 3000
+};
+const CHECKER_NUMBER_LIMITS = {
+  checkerTimeout: [1, 120000],
+  checkerConcurrency: [1, 5],
+  checkerRetries: [0, 10],
+  checkerBackoffBase: [0, 30000],
+  checkerBackoffMax: [0, 60000],
+};
+
+function normalizeCheckerNumber(value, key) {
+  const number = Number(value);
+  const fallback = CHECKER_NUMBER_DEFAULTS[key];
+  if (!Number.isFinite(number)) return fallback;
+  const [min, max] = CHECKER_NUMBER_LIMITS[key];
+  return Math.min(max, Math.max(min, Math.trunc(number)));
+}
+
+function applyCheckerNumberChange(key, change, select) {
+  const value = normalizeCheckerNumber(change.newValue, key);
+  select.value = String(value);
+  if (change.newValue !== undefined && change.newValue !== value) {
+    chrome.storage.local.set({ [key]: value }).catch(() => {});
+  }
+}
+
+function requestCheckerSchedulePermission() {
+  try {
+    return chrome.permissions.request({ origins: ['<all_urls>'] }).catch(() => false);
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
 async function loadCheckerSettings() {
   const result = await chrome.storage.local.get([
     'checkerFrequency', 'checkerTime', 'checkerDayOfWeek', 'checkerDayOfMonth',
@@ -242,12 +281,21 @@ async function loadCheckerSettings() {
   populateCheckerDayOfMonthOptions(result.checkerDayOfMonth ?? 1);
   checkerTimeInput.value = result.checkerTime || '03:00';
   checkerAutoDeleteToggle.checked = false;
-  checkerTimeoutSelect.value = result.checkerTimeout || '10000';
-  checkerConcurrencySelect.value = result.checkerConcurrency || '5';
-  // 新增 3 项：未保存时显示默认值（与 HTML selected 保持一致）
-  checkerRetriesSelect.value = String(result.checkerRetries ?? 2);
-  checkerBackoffBaseSelect.value = String(result.checkerBackoffBase ?? 800);
-  checkerBackoffMaxSelect.value = String(result.checkerBackoffMax ?? 3000);
+  const normalizedNumbers = {};
+  const numericMigrations = {};
+  for (const key of Object.keys(CHECKER_NUMBER_DEFAULTS)) {
+    const value = normalizeCheckerNumber(result[key], key);
+    normalizedNumbers[key] = value;
+    if (result[key] !== undefined && result[key] !== value) numericMigrations[key] = value;
+  }
+  checkerTimeoutSelect.value = String(normalizedNumbers.checkerTimeout);
+  checkerConcurrencySelect.value = String(normalizedNumbers.checkerConcurrency);
+  checkerRetriesSelect.value = String(normalizedNumbers.checkerRetries);
+  checkerBackoffBaseSelect.value = String(normalizedNumbers.checkerBackoffBase);
+  checkerBackoffMaxSelect.value = String(normalizedNumbers.checkerBackoffMax);
+  if (Object.keys(numericMigrations).length > 0) {
+    await chrome.storage.local.set(numericMigrations);
+  }
   // 根据频率显示/隐藏时间设置和自动删除
   toggleCheckerScheduleRows(result.checkerFrequency || 'never');
 }
@@ -1014,6 +1062,7 @@ languageSelect.addEventListener('change', async (e) => {
 
 checkerFrequencySelect.addEventListener('change', async (e) => {
   const value = e.target.value;
+  if (value !== 'never') await requestCheckerSchedulePermission();
   toggleCheckerScheduleRows(value);
   await saveCheckerSetting('checkerFrequency', value);
   showToast(i18n('settingsSaved'), 'success');
@@ -1042,30 +1091,42 @@ checkerAutoDeleteToggle.addEventListener('change', async (e) => {
 });
 
 checkerTimeoutSelect.addEventListener('change', async (e) => {
-  await saveCheckerSetting('checkerTimeout', e.target.value);
+  await saveCheckerSetting(
+    'checkerTimeout',
+    normalizeCheckerNumber(e.target.value, 'checkerTimeout')
+  );
   showToast(i18n('settingsSaved'), 'success');
 });
 
 checkerConcurrencySelect.addEventListener('change', async (e) => {
-  await saveCheckerSetting('checkerConcurrency', e.target.value);
+  await saveCheckerSetting(
+    'checkerConcurrency',
+    normalizeCheckerNumber(e.target.value, 'checkerConcurrency')
+  );
   showToast(i18n('settingsSaved'), 'success');
 });
 
 checkerRetriesSelect.addEventListener('change', async (e) => {
-  const v = parseInt(e.target.value, 10);
-  await saveCheckerSetting('checkerRetries', v);
+  await saveCheckerSetting(
+    'checkerRetries',
+    normalizeCheckerNumber(e.target.value, 'checkerRetries')
+  );
   showToast(i18n('settingsSaved'), 'success');
 });
 
 checkerBackoffBaseSelect.addEventListener('change', async (e) => {
-  const v = parseInt(e.target.value, 10);
-  await saveCheckerSetting('checkerBackoffBase', v);
+  await saveCheckerSetting(
+    'checkerBackoffBase',
+    normalizeCheckerNumber(e.target.value, 'checkerBackoffBase')
+  );
   showToast(i18n('settingsSaved'), 'success');
 });
 
 checkerBackoffMaxSelect.addEventListener('change', async (e) => {
-  const v = parseInt(e.target.value, 10);
-  await saveCheckerSetting('checkerBackoffMax', v);
+  await saveCheckerSetting(
+    'checkerBackoffMax',
+    normalizeCheckerNumber(e.target.value, 'checkerBackoffMax')
+  );
   showToast(i18n('settingsSaved'), 'success');
 });
 
@@ -1623,19 +1684,19 @@ chrome.storage.onChanged.addListener((changes, area) => {
       checkerAutoDeleteToggle.checked = !!changes.checkerAutoDelete.newValue;
     }
     if (changes.checkerTimeout) {
-      checkerTimeoutSelect.value = changes.checkerTimeout.newValue || '10000';
+      applyCheckerNumberChange('checkerTimeout', changes.checkerTimeout, checkerTimeoutSelect);
     }
     if (changes.checkerConcurrency) {
-      checkerConcurrencySelect.value = changes.checkerConcurrency.newValue || '5';
+      applyCheckerNumberChange('checkerConcurrency', changes.checkerConcurrency, checkerConcurrencySelect);
     }
     if (changes.checkerRetries) {
-      checkerRetriesSelect.value = String(changes.checkerRetries.newValue ?? 2);
+      applyCheckerNumberChange('checkerRetries', changes.checkerRetries, checkerRetriesSelect);
     }
     if (changes.checkerBackoffBase) {
-      checkerBackoffBaseSelect.value = String(changes.checkerBackoffBase.newValue ?? 800);
+      applyCheckerNumberChange('checkerBackoffBase', changes.checkerBackoffBase, checkerBackoffBaseSelect);
     }
     if (changes.checkerBackoffMax) {
-      checkerBackoffMaxSelect.value = String(changes.checkerBackoffMax.newValue ?? 3000);
+      applyCheckerNumberChange('checkerBackoffMax', changes.checkerBackoffMax, checkerBackoffMaxSelect);
     }
     if (changes.ai_classifier_logs) {
       renderAILogs();

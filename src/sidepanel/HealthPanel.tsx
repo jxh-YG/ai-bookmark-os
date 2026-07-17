@@ -4,7 +4,7 @@ import {
   findDeadLinks,
   findDuplicates,
   hasAllUrlsPermission,
-  recheckUrl,
+  recheckUrlWithSession,
   removeBookmarks,
   requestAllUrlsPermission,
   undoRemoveBookmarks,
@@ -59,23 +59,25 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
     });
   };
 
-  /** 重检单条（登录后复查）：变为 ok 则从列表移除，否则更新原因 */
+  /** 使用当前登录会话重新探测：可访问则移除，否则更新结果与分组。 */
   const recheckOne = async (issue: HealthIssue) => {
+    if (issue.kind !== 'link') return;
     const id = issue.bookmark.id;
     setRechecking((prev) => new Set(prev).add(id));
     try {
-      const r = await recheckUrl(issue.bookmark.url);
+      const result = await recheckUrlWithSession(issue.bookmark.url);
       setDead((prev) => {
         if (!prev) return prev;
-        if (r.kind === 'ok') {
+        if (result.state === 'reachable') {
           return prev.filter((i) => i.bookmark.id !== id);
         }
-        const kind = r.kind; // 'dead' | 'suspect'
         return prev.map((i) =>
-          i.bookmark.id === id ? { ...i, kind, detail: r.detail } : i,
+          i.bookmark.id === id && i.kind === 'link'
+            ? { ...i, detail: result.reason, result }
+            : i,
         );
       });
-      if (r.kind === 'ok') {
+      if (result.state === 'reachable') {
         setSelected((prev) => {
           const next = new Set(prev);
           next.delete(id);
@@ -94,11 +96,15 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
 
   const issues = [...(dups ?? []), ...(dead ?? [])];
 
-  const hardDead = dead?.filter((i) => i.kind === 'dead') ?? [];
-  const suspects = dead?.filter((i) => i.kind === 'suspect') ?? [];
+  const hardDead = dead?.filter(
+    (i) => i.kind === 'link' && i.result.state === 'confirmed_missing',
+  ) ?? [];
+  const pendingReview = dead?.filter(
+    (i) => i.kind === 'link' && i.result.state !== 'confirmed_missing',
+  ) ?? [];
 
   const selectAll = () => setSelected(new Set(issues.map((i) => i.bookmark.id)));
-  /** 只选高置信项：重复 + 确定死链，不含疑似 */
+  /** 只选高置信项：重复 + 已确认不存在，不含任何待复核结果。 */
   const selectSafe = () =>
     setSelected(new Set([...(dups ?? []), ...hardDead].map((i) => i.bookmark.id)));
 
@@ -126,21 +132,44 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
 
   const reasonText = (i: HealthIssue): string => {
     if (i.kind === 'duplicate') return '♻️';
-    switch (i.detail) {
-      case 'login-wall': return d.reasonLoginWall;
-      case 'redirect-home': return d.reasonRedirectHome;
-      case 'soft-404': return d.reasonSoft404;
-      case 'empty-page': return d.reasonEmptyPage;
-      case 'timeout': return d.reasonTimeout;
-      case 'unreachable': return d.reasonUnreachable;
-      default: return i.detail; // HTTP 状态码
+    const { reason, state, statusCode } = i.result;
+    const normalized = reason.trim().toLowerCase().replace(/_/g, '-');
+    let label: string;
+    if (normalized.includes('login') || normalized.includes('auth-required')) {
+      label = d.reasonLoginWall;
+    } else if (normalized.includes('redirect-home') || normalized.includes('homepage')) {
+      label = d.reasonRedirectHome;
+    } else if (normalized.includes('soft-404') || normalized.includes('title-missing')) {
+      label = d.reasonSoft404;
+    } else if (normalized.includes('empty-page') || normalized.includes('content-empty')) {
+      label = d.reasonEmptyPage;
+    } else if (normalized.includes('timeout')) {
+      label = d.reasonTimeout;
+    } else if (normalized.includes('network') || normalized.includes('unreachable')) {
+      label = d.reasonUnreachable;
+    } else if (
+      state === 'access_limited' ||
+      normalized.includes('access-restricted') ||
+      normalized.includes('challenge') ||
+      normalized.includes('waf')
+    ) {
+      label = d.reasonAccessLimited;
+    } else {
+      switch (state) {
+        case 'confirmed_missing': label = d.reasonConfirmedMissing; break;
+        case 'content_suspect': label = d.reasonContentSuspect; break;
+        case 'transient_failure': label = d.reasonTransientFailure; break;
+        case 'unsupported': label = d.reasonUnsupported; break;
+        default: label = reason;
+      }
     }
+    return statusCode == null ? label : `HTTP ${statusCode} · ${label}`;
   };
 
-  const renderSection = (title: string, items: HealthIssue[], suspect?: boolean) => (
+  const renderSection = (title: string, items: HealthIssue[], reviewable?: boolean) => (
     <div className="health-section">
       <div className="health-section-title">{title}</div>
-      {suspect && <div className="health-section-hint">{d.suspectHint}</div>}
+      {reviewable && <div className="health-section-hint">{d.suspectHint}</div>}
       {items.map((i) => (
         <label key={i.bookmark.id} className="health-row">
           <input
@@ -151,8 +180,8 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
           <span className="bm-title" title={i.bookmark.url}>
             {i.bookmark.title}
           </span>
-          <span className={`health-detail ${suspect ? 'suspect' : ''}`}>{reasonText(i)}</span>
-          {suspect && (
+          <span className={`health-detail ${reviewable ? 'suspect' : ''}`}>{reasonText(i)}</span>
+          {reviewable && i.kind === 'link' && (
             <>
               <button
                 className="icon-btn"
@@ -225,8 +254,8 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
               (dead.length > 0 ? (
                 <>
                   {hardDead.length > 0 && renderSection(d.healthDeadSection(hardDead.length), hardDead)}
-                  {suspects.length > 0 &&
-                    renderSection(d.healthSuspectSection(suspects.length), suspects, true)}
+                  {pendingReview.length > 0 &&
+                    renderSection(d.healthSuspectSection(pendingReview.length), pendingReview, true)}
                 </>
               ) : (
                 <div className="empty">{d.healthNoIssues}</div>

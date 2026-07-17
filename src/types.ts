@@ -552,12 +552,37 @@ export interface ApplyRecord {
   removedSourceFolders?: RemovedSourceFolder[];
 }
 
-/** Health issue */
-export interface HealthIssue {
-  bookmark: FlatBookmark;
-  kind: 'duplicate' | 'dead' | 'suspect';
-  detail: string;
+/** Unified result of one link probe. */
+export type LinkCheckState =
+  | 'reachable'
+  | 'confirmed_missing'
+  | 'content_suspect'
+  | 'access_limited'
+  | 'transient_failure'
+  | 'unsupported';
+
+export interface LinkCheckResult {
+  state: LinkCheckState;
+  reason: string;
+  statusCode: number | null;
+  finalUrl: string;
+  checkedAt: number;
+  probeMode: 'anonymous' | 'authenticated' | 'rendered-tab';
 }
+
+/** Health issue. */
+export type HealthIssue =
+  | {
+      bookmark: FlatBookmark;
+      kind: 'duplicate';
+      detail: string;
+    }
+  | {
+      bookmark: FlatBookmark;
+      kind: 'link';
+      detail: string;
+      result: LinkCheckResult;
+    };
 
 /** Health progress */
 export interface HealthProgress {

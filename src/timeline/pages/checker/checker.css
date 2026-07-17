@@ -293,6 +293,16 @@ body {
   background: var(--danger-light);
 }
 
+.action-btn--review-outline {
+  background: transparent;
+  color: var(--warning);
+  border: 1px solid var(--warning);
+}
+
+.action-btn--review-outline:hover {
+  background: var(--warning-light);
+}
+
 /* ===== Filter Group ===== */
 .filter-group {
   display: flex;
@@ -537,7 +547,8 @@ body {
   transition: opacity var(--transition-fast);
 }
 
-.result-item:hover .result-actions {
+.result-item:hover .result-actions,
+.result-item:focus-within .result-actions {
   opacity: 1;
 }
 
@@ -563,6 +574,11 @@ body {
 .result-action-btn--delete:hover {
   background: var(--danger-light);
   color: var(--danger);
+}
+
+.result-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* Spinning animation for checking state */
@@ -826,6 +842,72 @@ body {
   .checker-content {
     margin: 10px;
     width: calc(100% - 20px);
+  }
+}
+
+.result-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0 10px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.result-item--selected {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.delete-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.36);
+}
+
+.delete-confirm-overlay[hidden],
+.delete-confirm-dialog [hidden] {
+  display: none !important;
+}
+
+.delete-confirm-dialog {
+  width: min(420px, 100%);
+  padding: 20px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-md);
+}
+
+.delete-confirm-dialog:focus {
+  outline: none;
+}
+
+.delete-confirm-dialog h2,
+.delete-confirm-dialog p {
+  margin: 0 0 14px;
+}
+
+.delete-confirm-dialog label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (hover: none) {
+  .result-actions {
+    opacity: 1;
   }
 }
 

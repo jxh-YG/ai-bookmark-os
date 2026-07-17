@@ -215,28 +215,16 @@ async function testIncrementalImbalanceWarning() {
   console.log('✅ classifier.ts 增量失衡检测 — 全部通过');
 }
 
-// ── 7. probe.ts — HEAD 优先探测 ──────────────────────────────────
+// ── 7. probe-core.js — HEAD 正向优化 ─────────────────────────────
 async function testProbeHeadFirst() {
-  const { build: esbuild } = await import('esbuild');
-  const result = await esbuild({
-    entryPoints: ['src/core/probe.ts'],
-    bundle: true,
-    format: 'esm',
-    platform: 'browser',
-    write: false,
-    define: { 'chrome': 'globalThis.chrome' },
-  });
-  const source = result.outputFiles[0].text;
-
-  // esbuild 可能将 'HEAD' 转为 "HEAD"，使用正则匹配
-  assert.ok(/method:\s*["']HEAD["']/.test(source), "probe.ts probeUrl 应包含 HEAD 请求方法");
-
-  // 同步检查 bridge 与 probe 行为一致
   const { readFileSync } = await import('node:fs');
+  const core = readFileSync('src/bridge/probe-core.js', 'utf8');
   const bridge = readFileSync('src/bridge/ai-sw-bridge.js', 'utf8');
-  assert.ok(/method:\s*["']HEAD["']/.test(bridge), 'ai-sw-bridge.js probeUrl 应同步 HEAD 先行逻辑');
+  assert.ok(core.includes("fetchOnce(normalizedUrl, 'HEAD'"), 'probe-core checkUrl 应包含 HEAD 正向优化');
+  assert.ok(core.includes("probeMode === 'anonymous'"), '登录态复检不应使用 HEAD');
+  assert.ok(bridge.includes("type === 'checkUrl'"), 'bridge 应将检查请求路由到统一核心');
 
-  console.log('✅ probe.ts + bridge HEAD 先行探测同步 — 全部通过');
+  console.log('✅ probe-core + bridge HEAD 正向优化 — 全部通过');
 }
 
 // ── 主程序 ────────────────────────────────────────────────────────
@@ -247,7 +235,7 @@ const tests = [
   ['treeEdit 嵌套子类别', testCreateNestedCategory],
   ['classifier 缓存键 v4', testClassifierCacheKeyNoFolderPath],
   ['classifier 增量失衡检测', testIncrementalImbalanceWarning],
-  ['probe HEAD 先行同步', testProbeHeadFirst],
+  ['probe-core HEAD 正向优化', testProbeHeadFirst],
 ];
 
 let passed = 0;

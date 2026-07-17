@@ -1,3 +1,9 @@
+// 打包产物由 package-extension 注入本地桥接器；源码直接加载时使用源路径。
+if (!self.AiProbeCore) {
+  importScripts('../../bridge/probe-core.js');
+  importScripts('../../bridge/ai-sw-bridge.js');
+}
+
 // 引入 AI 增强层（需在 smart-tagger.js 之前加载，供其调用 classifyWithAI）
 importScripts('../shared/ai-tagger.js');
 importScripts('bookmark-data.js');
@@ -2540,12 +2546,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true;
 
-    case 'checkUrl':
-      (async () => {
-        const { url, timeout } = message;
-        const result = await checkUrlFromBackground(url, timeout || 10000);
-        sendResponse({ success: true, result });
-      })();
+    case 'getCheckerSettings':
+      getCheckSettings().then((settings) => {
+        sendResponse({ success: true, settings });
+      });
       return true;
 
     case 'togglePin':
@@ -3600,340 +3604,30 @@ chrome.bookmarks.onRemoved.addListener((id, removeInfo) => {
 // ===== 定时检测失效书签 =====
 const CHECKER_ALARM_PREFIX = 'bookmark_checker_';
 
-// ===== 失效检测 - 后台绕过 CORS =====
-//
-// 检测策略：
-//   1) 总超时预算（timeoutMs）控制单 URL 总耗时，避免拖慢整批。
-//   2) 先 HEAD 探测：2xx/3xx 立即返回；4xx/5xx 也降级 GET（部分服务器 HEAD 405/501）。
-//   3) 404/410 必须先读取 HTML：仅当页面明确表示资源不存在，且两次独立 GET 均如此时才判定 broken。
-//      SPA 应用壳、登录页、访问限制页和无法确认的页面均保留为 warning，避免误删可打开书签。
-//   4) 指数退避 + 抖动（full jitter），防雪崩。
-//   5) 单次请求也受 perAttemptMs 上限约束，绝不超过剩余预算。
-//
-// 旧调用方式 `checkUrlFromBackground(url, timeoutMs)` 仍可用（timeoutMs 作为总预算）。
-
-// 判定是否为可重试的瞬时错误
-function isTransientError(err) {
-  if (!err) return false;
-  if (err.name === 'AbortError') return true; // 超时
-  const msg = (err.message || '').toLowerCase();
-  return (
-    msg.includes('failed to fetch') ||
-    msg.includes('networkerror') ||
-    msg.includes('err_name') ||           // DNS 解析失败
-    msg.includes('err_internet') ||       // 离线
-    msg.includes('err_connection') ||      // 连接被重置/拒绝
-    msg.includes('err_timed_out') ||
-    msg.includes('err_ssl') ||            // TLS 握手失败
-    msg.includes('err_aborted') ||
-    msg.includes('net::')                 // 旧 Chromium 错误前缀
-  );
-}
-
-// HTTP 状态码是否值得重试：0=无响应、5xx、429/408/425
-function isRetryableHttpStatus(status) {
-  if (!status) return true;
-  if (status === 408 || status === 425 || status === 429) return true;
-  return status >= 500 && status < 600;
-}
-
-// 业务错误（4xx）：不重试，直接判定
-function isBusinessError(status) {
-  return status >= 400 && status < 500;
-}
-
-// 指数退避 + 抖动（full jitter）
-function backoffMs(attempt, baseMs, maxMs) {
-  const exp = Math.min(maxMs, baseMs * Math.pow(2, attempt));
-  return Math.floor(Math.random() * (exp + 1));
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// 发起单次请求；受 deadline + perAttempt 双重约束
-async function fetchOnce(url, method, deadlineMs, perAttemptMs) {
-  const remaining = deadlineMs - Date.now();
-  if (remaining <= 0) {
-    const e = new Error('deadline exceeded');
-    e.name = 'AbortError';
-    return { ok: false, error: e };
-  }
-  const controller = new AbortController();
-  const timeout = Math.min(perAttemptMs, remaining);
-  const tid = setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(url, {
-      method,
-      signal: controller.signal,
-      redirect: 'follow',
-      // Health checks must not send a browser login session to arbitrary URLs.
-      credentials: 'omit',
-      cache: 'no-store'
-    });
-    clearTimeout(tid);
-    return { ok: true, response };
-  } catch (err) {
-    clearTimeout(tid);
-    return { ok: false, error: err };
-  }
-}
-
-// HTTP 状态码 → 检测结果。
-// 只有资源明确不存在时才允许标记为 broken 并出现在批量清理中；
-// 认证、权限、限流和服务器故障都可能在浏览器标签页中正常打开，因此保留为 warning。
-function classifyByStatus(status) {
-  if (status >= 200 && status < 400) {
-    return { status: 'ok', statusCode: status, message: `HTTP ${status}` };
-  }
-  if (status === 404 || status === 410) {
-    return { status: 'broken', statusCode: status, message: `HTTP ${status} - Not Found` };
-  }
-  if (status >= 400 && status < 500) {
-    return { status: 'warning', statusCode: status, message: `HTTP ${status} - Access Restricted` };
-  }
-  if (status >= 500) {
-    return { status: 'warning', statusCode: status, message: `HTTP ${status} - Server Error` };
-  }
-  return { status: 'warning', statusCode: status, message: `HTTP ${status} - Unknown Response` };
-}
-
-/**
- * 检测单个 URL 是否失效
- * @param {string} url
- * @param {number|object} [timeoutOrOptions] - 兼容旧调用：直接传总超时（ms）
- *   options: {
- *     timeoutMs,      // 总预算（默认 10000）
- *     perAttemptMs,   // 单次请求上限（默认 5000）
- *     retries,        // GET 失败时额外重试次数（默认 2）
- *     baseDelayMs,    // 退避基准（默认 800）
- *     maxDelayMs      // 退避上限（默认 3000）
- *   }
- */
+// ===== Link checking =====
+// Network probing is implemented only by bridge/probe-core.js.
 async function checkUrlFromBackground(url, timeoutOrOptions) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return { status: 'warning', statusCode: 0, message: 'Unsupported URL Scheme' };
-    }
-  } catch {
-    return { status: 'warning', statusCode: 0, message: 'Invalid URL' };
-  }
-
-  const opts = (typeof timeoutOrOptions === 'object' && timeoutOrOptions !== null)
+  const options = typeof timeoutOrOptions === 'object' && timeoutOrOptions !== null
     ? timeoutOrOptions
     : { timeoutMs: timeoutOrOptions };
-  const {
-    timeoutMs = 10000,
-    perAttemptMs = 5000,
-    retries = 2,
-    baseDelayMs = 800,
-    maxDelayMs = 3000,
-  } = opts;
-
-  const deadline = Date.now() + timeoutMs;
-
-  // ---- 1) HEAD 探测 ----
-  const head = await fetchOnce(url, 'HEAD', deadline, perAttemptMs);
-  if (head.ok) {
-    const headStatus = head.response.status;
-    if (headStatus >= 400) {
-      // 4xx/5xx：降级到 GET 重试链做进一步判断
-    } else {
-      // 2xx/3xx HEAD 成功：检查 Content-Type。
-      // 非 HTML 资源（图片、PDF 等）直接判定正常；HTML 需走 GET 内容层检测。
-      const ct = head.response.headers.get('content-type') || '';
-      if (!ct.includes('text/html')) return classifyByStatus(headStatus);
-      // HTML 资源：落入 GET 重试链做内容层检测（登录墙、跳首页、软404）
-    }
-  } else if (!isTransientError(head.error)) {
-    // 非瞬时错误（如 TypeError 编程错误）：再尝试一次 GET
+  const probeCore = self.AiProbeCore;
+  if (probeCore && typeof probeCore.checkUrl === 'function') {
+    return probeCore.checkUrl(url, { ...options, probeMode: 'anonymous' });
   }
-  // 其余情况（HEAD 瞬时错误 / HEAD 4xx-5xx / HEAD 200 HTML）→ 走 GET 重试链
-
-  // ---- 2) GET 重试链 ----
-  let attempts = 0;
-  let lastError = null; // { type: 'http'|'network', status?, error? }
-  let confirmedMissingResponses = 0;
-
-  while (true) {
-    // 预算已耗尽
-    if (Date.now() >= deadline) {
-      return { status: 'warning', statusCode: 0, message: 'Total timeout' };
-    }
-
-    if (attempts > 0) {
-      const wait = backoffMs(attempts - 1, baseDelayMs, maxDelayMs);
-      const remaining = deadline - Date.now();
-      if (wait >= remaining) {
-        return { status: 'warning', statusCode: 0, message: 'Total timeout' };
-      }
-      await sleep(wait);
-    }
-
-    const get = await fetchOnce(url, 'GET', deadline, perAttemptMs);
-    if (get.ok) {
-      const { response } = get;
-      const { status } = response;
-      // 2xx/3xx：需进一步检查内容层（登录墙、跳首页、软404）
-      if (status >= 200 && status < 400) {
-        const ct = (response.headers.get('content-type') || '');
-        if (ct.includes('text/html')) {
-          try {
-            const html = (await response.text()).slice(0, 65536);
-            const contentDetail = inspectContentDetail(url, response.url, html);
-            if (contentDetail === 'login-wall') {
-              return { status: 'warning', statusCode: status, message: 'Login Required', detail: 'login-wall' };
-            }
-            if (contentDetail === 'redirect-home') {
-              return { status: 'warning', statusCode: status, message: 'Redirected to homepage', detail: 'redirect-home' };
-            }
-            if (contentDetail === 'soft-404') {
-              return { status: 'warning', statusCode: status, message: 'Page not found (soft 404)', detail: 'soft-404' };
-            }
-            if (contentDetail === 'empty-page') {
-              return { status: 'warning', statusCode: status, message: 'Empty page', detail: 'empty-page' };
-            }
-          } catch (_) {}
-        }
-        return classifyByStatus(status);
-      }
-      // 非 Not Found 的业务状态：直接判定
-      if (isBusinessError(status) && status !== 404 && status !== 410) {
-        return classifyByStatus(status);
-      }
-      if (status === 404 || status === 410) {
-        const inspection = await inspectMissingResponse(response);
-        if (!inspection.confirmed) {
-          return { status: 'warning', statusCode: status, message: `HTTP ${status} - ${inspection.reason}`, detail: inspection.detail };
-        }
-        confirmedMissingResponses++;
-        if (confirmedMissingResponses >= 2) return classifyByStatus(status);
-      }
-      // 404/410 等待二次确认；5xx 也继续重试。
-      lastError = { type: 'http', status };
-    } else {
-      const err = get.error;
-      // 整体超时（被 deadline 截断的 AbortError）
-      if (err.name === 'AbortError' && Date.now() >= deadline) {
-        return { status: 'warning', statusCode: 0, message: 'Total timeout' };
-      }
-      // 非瞬时错误：直接返回 warning，不重试
-      if (!isTransientError(err)) {
-        return { status: 'warning', statusCode: 0, message: 'Network Error' };
-      }
-      // 瞬时错误 → 可重试
-      lastError = { type: 'network', error: err };
-    }
-
-    attempts++;
-    if (attempts > retries) break;
-  }
-
-  // ---- 3) 重试耗尽：返回最终结果 ----
-  if (lastError && lastError.type === 'http') {
-    if (lastError.status === 404 || lastError.status === 410) {
-      return { status: 'warning', statusCode: lastError.status, message: `Unconfirmed HTTP ${lastError.status}` };
-    }
-    return classifyByStatus(lastError.status);
-  }
-
-  // Browser fetches can fail because of TLS, proxy, VPN, privacy rules, or
-  // temporary DNS trouble. None proves that a bookmark is dead.
-  return { status: 'warning', statusCode: 0, message: 'Network Error' };
+  return {
+    state: 'transient_failure',
+    reason: 'probe-core-not-loaded',
+    statusCode: null,
+    finalUrl: typeof url === 'string' ? url : '',
+    checkedAt: Date.now(),
+    probeMode: 'anonymous',
+  };
 }
 
-const CONFIRMED_MISSING_PATTERNS = [
-  /页面不存在|页面未找到|找不到(该|此|你要的)?页面|页面已删除|内容(不存在|已删除|已下架|已失效)/,
-  /商品(不存在|已下架|已失效|已删除)|宝贝(不存在|已下架)|店铺不存在/,
-  /(文章|视频|帖子|资源)(不存在|已删除|已下架|已失效)/,
-  /page not found|404 not found|content (not found|unavailable|removed)/i,
-  /(item|product|listing) (no longer available|not available|removed|unavailable)/i,
-  /this (page|video|post|account) (isn'?t|is not|is no longer) available/i,
-];
-
-/** 登录页 URL 特征（与 probe.ts 保持一致） */
-const LOGIN_URL_PATTERN = /\/(login|signin|sign-in|passport|auth|account\/login)\b/i;
-
-function containsConfirmedMissingPattern(text) {
-  return CONFIRMED_MISSING_PATTERNS.some((pattern) => pattern.test(text));
-}
-
-function plainPageText(html) {
-  return html
-    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function isJsRenderedShell(html) {
-  return /<script[\s>]/i.test(html) && (
-    /<div[^>]+id=["'](root|app|__next|__nuxt|main)["']/i.test(html) ||
-    /data-reactroot|data-v-app|ng-version|__NEXT_DATA__|window\.__INITIAL_STATE__/i.test(html) ||
-    (html.match(/<script/gi) || []).length >= 3
-  );
-}
-
-/**
- * 检查 200 响应是否为软 404 / 登录墙 / 跳首页（与 probe.ts inspectContent 对齐）。
- * 返回 detail 字符串（'ok'|'login-wall'|'redirect-home'|'soft-404'|'empty-page'）。
- */
-function inspectContentDetail(originalUrl, finalUrl, html) {
-  // 1) 重定向漂移检测
-  try {
-    const orig = new URL(originalUrl);
-    const final = new URL(finalUrl);
-    const origHasPath = orig.pathname.length > 1 || orig.search.length > 0;
-    if (LOGIN_URL_PATTERN.test(final.pathname)) return 'login-wall';
-    if (origHasPath && final.hostname === orig.hostname && final.pathname === '/' && !final.search) {
-      return 'redirect-home';
-    }
-  } catch (_) {}
-
-  const jsShell = isJsRenderedShell(html);
-  const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(html) || [])[1] || '';
-  const snippet = jsShell ? '' : html.slice(0, 4096);
-
-  // 2) 软 404 关键词（SPA 壳只检查标题）
-  for (const p of CONFIRMED_MISSING_PATTERNS) {
-    if (p.test(title) || (snippet && p.test(snippet))) return 'soft-404';
-  }
-
-  // 3) 空页面（仅静态页）
-  if (!jsShell) {
-    const text = plainPageText(html);
-    if (html.length > 0 && text.length < 80) return 'empty-page';
-  }
-  return 'ok';
-}
-
-async function inspectMissingResponse(response) {
-  const status = response.status;
-  if (!(response.headers.get('content-type') || '').includes('text/html')) {
-    return { confirmed: false, status, detail: 'non-html', reason: 'non-HTML response' };
-  }
-  try {
-    const html = (await response.text()).slice(0, 65536);
-    const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(html) || [])[1] || '';
-    const jsShell = isJsRenderedShell(html);
-    const text = jsShell ? '' : plainPageText(html);
-
-    // 修复1&2：移除 text.length<=1200 的错误限制，改为 title OR body 任一命中即确认
-    // 旧逻辑要求 title AND body 同时命中且正文 ≤1200 字符，导致大量含完整页面的404被漏判。
-    const titleConfirms = containsConfirmedMissingPattern(title);
-    const bodyConfirms = !jsShell && containsConfirmedMissingPattern(text);
-    const confirmed = titleConfirms || bodyConfirms;
-
-    return {
-      confirmed,
-      status,
-      detail: confirmed ? 'missing-page-content' : 'inconclusive',
-      reason: confirmed ? 'missing page content' : 'page content is usable or inconclusive',
-    };
-  } catch {
-    return { confirmed: false, status, detail: 'read-error', reason: 'could not read page content' };
-  }
+function checkerNumber(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
 }
 
 async function getCheckSettings() {
@@ -3942,19 +3636,39 @@ async function getCheckSettings() {
     checkerFrequency: 'never',
     checkerConcurrency: 5,
     checkerTime: '03:00',
+    checkerDayOfWeek: 1,
+    checkerDayOfMonth: 1,
     checkerAutoDelete: false,
     checkerRetries: 2,
     checkerBackoffBase: 800,
     checkerBackoffMax: 3000
   };
   const result = await chrome.storage.local.get(Object.keys(defaults));
-  const migratedAutoDelete = result.checkerAutoDelete === true;
-  if (migratedAutoDelete) {
-    // Older releases allowed an irreversible scheduled deletion. Preserve the
-    // user's check schedule, but require an explicit manual deletion instead.
-    await chrome.storage.local.set({ checkerAutoDelete: false, checkerAutoDeleteMigratedAt: Date.now() });
+  const frequency = ['never', 'daily', 'weekly', 'monthly'].includes(result.checkerFrequency)
+    ? result.checkerFrequency
+    : defaults.checkerFrequency;
+  const settings = {
+    checkerTimeout: checkerNumber(result.checkerTimeout, defaults.checkerTimeout, 1, 120000),
+    checkerFrequency: frequency,
+    checkerConcurrency: checkerNumber(result.checkerConcurrency, defaults.checkerConcurrency, 1, 5),
+    checkerTime: typeof result.checkerTime === 'string' && /^\d{2}:\d{2}$/.test(result.checkerTime)
+      ? result.checkerTime
+      : defaults.checkerTime,
+    checkerDayOfWeek: checkerNumber(result.checkerDayOfWeek, defaults.checkerDayOfWeek, 0, 6),
+    checkerDayOfMonth: checkerNumber(result.checkerDayOfMonth, defaults.checkerDayOfMonth, 1, 31),
+    checkerRetries: checkerNumber(result.checkerRetries, defaults.checkerRetries, 0, 10),
+    checkerBackoffBase: checkerNumber(result.checkerBackoffBase, defaults.checkerBackoffBase, 0, 30000),
+    checkerBackoffMax: checkerNumber(result.checkerBackoffMax, defaults.checkerBackoffMax, 0, 60000),
+    checkerAutoDelete: false,
+    migratedAutoDelete: result.checkerAutoDelete === true,
+  };
+  const migration = {};
+  for (const [key, value] of Object.entries(settings)) {
+    if (key !== 'migratedAutoDelete' && result[key] !== value) migration[key] = value;
   }
-  return { ...defaults, ...result, checkerAutoDelete: false, migratedAutoDelete };
+  if (settings.migratedAutoDelete) migration.checkerAutoDeleteMigratedAt = Date.now();
+  if (Object.keys(migration).length) await chrome.storage.local.set(migration);
+  return settings;
 }
 
 async function scheduleCheckerAlarm() {
@@ -4033,6 +3747,28 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   if (!alarm.name.startsWith(CHECKER_ALARM_PREFIX)) return;
 
+  if (!await chrome.permissions.contains({ origins: ['<all_urls>'] })) {
+    await chrome.storage.local.set({
+      checkerLastResult: {
+        version: 2,
+        timestamp: Date.now(),
+        source: 'scheduled',
+        status: 'permission_required',
+        counts: {
+          total: 0,
+          completed: 0,
+          pending: 0,
+          normal: 0,
+          confirmedMissing: 0,
+          needsReview: 0,
+        },
+        results: [],
+        reason: 'permission-required',
+      },
+    });
+    return;
+  }
+
   const settings = await getCheckSettings();
   const timeout = settings.checkerTimeout || 10000;
   const concurrency = settings.checkerConcurrency || 5;
@@ -4042,11 +3778,41 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   let index = 0;
   const results = [];
+  const domainSlots = new Map();
+  const domainQueues = new Map();
+  const rootDomain = (url) => {
+    try {
+      const parts = new URL(url).hostname.split('.');
+      return parts.slice(-2).join('.');
+    } catch (_) {
+      return url;
+    }
+  };
+  const acquireDomainSlot = (domain) => {
+    const current = domainSlots.get(domain) || 0;
+    if (current < 2) {
+      domainSlots.set(domain, current + 1);
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const queue = domainQueues.get(domain) || [];
+      queue.push(resolve);
+      domainQueues.set(domain, queue);
+    });
+  };
+  const releaseDomainSlot = (domain) => {
+    const queue = domainQueues.get(domain);
+    if (queue?.length) {
+      queue.shift()();
+      return;
+    }
+    domainSlots.set(domain, Math.max(0, (domainSlots.get(domain) || 1) - 1));
+  };
 
   // 共享检测配置：总预算来自用户设置，perAttempt 限制为预算的一半避免单次吃光
   const checkOptions = {
     timeoutMs: timeout,
-    perAttemptMs: Math.max(2000, Math.floor(timeout / 2)),
+    perAttemptMs: Math.min(timeout, Math.max(1, Math.floor(timeout / 2))),
     retries: settings.checkerRetries ?? 2,
     baseDelayMs: settings.checkerBackoffBase ?? 800,
     maxDelayMs: settings.checkerBackoffMax ?? 3000
@@ -4056,8 +3822,15 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     while (index < bookmarks.length) {
       const currentIndex = index++;
       const bm = bookmarks[currentIndex];
-      const checkResult = await checkUrlFromBackground(bm.url, checkOptions);
-      results.push({ bookmark: bm, status: checkResult.status, message: checkResult.message });
+      const domain = rootDomain(bm.url);
+      await acquireDomainSlot(domain);
+      let checkResult;
+      try {
+        checkResult = await checkUrlFromBackground(bm.url, checkOptions);
+      } finally {
+        releaseDomainSlot(domain);
+      }
+      results.push({ bookmark: bm, checkResult });
     }
   }
 
@@ -4068,18 +3841,31 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   await Promise.all(workers);
 
   // 保存检测结果
-  const summary = BookmarkData.buildCheckerSummary(results);
-  summary.status = 'completed';
-  summary.pendingCleanupCount = summary.pendingCleanup.length;
-  summary.autoDeleteMigrated = !!settings.migratedAutoDelete;
+  const reachable = results.filter(({ checkResult }) => checkResult.state === 'reachable').length;
+  const confirmedMissing = results.filter(({ checkResult }) => checkResult.state === 'confirmed_missing').length;
+  const summary = {
+    version: 2,
+    timestamp: Date.now(),
+    source: 'scheduled',
+    status: 'completed',
+    counts: {
+      total: results.length,
+      completed: results.length,
+      pending: 0,
+      normal: reachable,
+      confirmedMissing,
+      needsReview: results.length - reachable - confirmedMissing,
+    },
+    results,
+  };
   await chrome.storage.local.set({ checkerLastResult: summary });
 
-  if (summary.broken > 0) {
+  if (confirmedMissing > 0) {
     chrome.notifications?.create({
       type: 'basic',
       iconUrl: '../icons/icon48.png',
       title: 'AI Bookmark OS',
-      message: `检测到 ${summary.broken} 个确认失效书签，已加入待清理列表`
+      message: `Detected ${confirmedMissing} confirmed missing bookmarks; manual cleanup is required.`,
     });
   }
 });

@@ -1,21 +1,17 @@
-// 书签健康检查：重复检测（本地）+ 死链检测（需可选 host 权限）
-// 死链探测在 background service worker 中执行（src/core/probe.ts），
-// 避免 sidepanel 文档上下文触发被测站点的 preload/CSP 报错噪音。
-import type { FlatBookmark, HealthIssue, HealthProgress } from '../types';
-import type { ProbeResult } from './probe';
+// 书签健康检查：重复检测（本地）+ 链接检测（需可选 host 权限）
+// 链接探测统一委托 background service worker 执行。
+import type {
+  FlatBookmark,
+  HealthIssue,
+  HealthProgress,
+  LinkCheckResult,
+  LinkCheckState,
+} from '../types';
 
-const DEAD_CHECK_CONCURRENCY = 8;
+const DEAD_CHECK_CONCURRENCY = 5;
 /** 同一根域名最大并发探测数，避免触发目标站限流 */
 const PER_DOMAIN_CONCURRENCY = 2;
-/** 探测结果缓存 key */
-const PROBE_CACHE_KEY = 'healthProbeCache';
-/** 探测结果缓存 TTL：24 小时 */
-const PROBE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-
-interface ProbeCacheEntry {
-  result: ProbeResult;
-  cachedAt: number;
-}
+const REMOVED_BOOKMARKS_UNDO_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** 提取根域名（用于限流分组） */
 function rootDomain(url: string): string {
@@ -25,34 +21,6 @@ function rootDomain(url: string): string {
     return parts.slice(-2).join('.');
   } catch {
     return url;
-  }
-}
-
-/** 从 storage 加载探测缓存（过期条目自动清除） */
-async function loadProbeCache(): Promise<Map<string, ProbeCacheEntry>> {
-  try {
-    const data = await chrome.storage.local.get(PROBE_CACHE_KEY);
-    const raw = data[PROBE_CACHE_KEY] as Record<string, ProbeCacheEntry> | undefined;
-    if (!raw || typeof raw !== 'object') return new Map();
-    const now = Date.now();
-    const valid = new Map<string, ProbeCacheEntry>();
-    for (const [url, entry] of Object.entries(raw)) {
-      if (entry && now - entry.cachedAt < PROBE_CACHE_TTL_MS) valid.set(url, entry);
-    }
-    return valid;
-  } catch {
-    return new Map();
-  }
-}
-
-/** 将探测结果批量写入缓存 */
-async function saveProbeCache(cache: Map<string, ProbeCacheEntry>): Promise<void> {
-  try {
-    const obj: Record<string, ProbeCacheEntry> = {};
-    for (const [url, entry] of cache) obj[url] = entry;
-    await chrome.storage.local.set({ [PROBE_CACHE_KEY]: obj });
-  } catch {
-    /* storage 写入失败不阻断流程 */
   }
 }
 
@@ -114,26 +82,109 @@ export async function hasAllUrlsPermission(): Promise<boolean> {
   return chrome.permissions.contains({ origins: ['<all_urls>'] });
 }
 
-/** 委托 background 探测单条链接 */
-async function probe(url: string): Promise<ProbeResult> {
+const LINK_CHECK_STATES = new Set<LinkCheckState>([
+  'reachable',
+  'confirmed_missing',
+  'content_suspect',
+  'access_limited',
+  'transient_failure',
+  'unsupported',
+]);
+
+const PROBE_MODES = new Set<LinkCheckResult['probeMode']>([
+  'anonymous',
+  'authenticated',
+  'rendered-tab',
+]);
+
+function failedCheck(
+  url: string,
+  probeMode: LinkCheckResult['probeMode'],
+  reason: string,
+): LinkCheckResult {
+  return {
+    state: 'transient_failure',
+    reason,
+    statusCode: null,
+    finalUrl: url,
+    checkedAt: Date.now(),
+    probeMode,
+  };
+}
+
+function normalizeLinkCheckResult(
+  value: unknown,
+  url: string,
+  fallbackMode: LinkCheckResult['probeMode'],
+): LinkCheckResult | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<LinkCheckResult>;
+  if (!LINK_CHECK_STATES.has(raw.state as LinkCheckState)) return null;
+
+  const numericStatus = raw.statusCode == null ? null : Number(raw.statusCode);
+  const numericCheckedAt = Number(raw.checkedAt);
+  return {
+    state: raw.state as LinkCheckState,
+    reason: typeof raw.reason === 'string' ? raw.reason : '',
+    statusCode: numericStatus != null && Number.isFinite(numericStatus) ? numericStatus : null,
+    finalUrl: typeof raw.finalUrl === 'string' && raw.finalUrl ? raw.finalUrl : url,
+    checkedAt: Number.isFinite(numericCheckedAt) ? numericCheckedAt : Date.now(),
+    probeMode: PROBE_MODES.has(raw.probeMode as LinkCheckResult['probeMode'])
+      ? raw.probeMode as LinkCheckResult['probeMode']
+      : fallbackMode,
+  };
+}
+
+/** 委托 background 重新探测单条链接。 */
+async function probe(
+  url: string,
+  type: 'checkUrl' | 'recheckUrlWithSession',
+  runId?: string,
+  options?: Record<string, number>,
+): Promise<LinkCheckResult> {
+  const fallbackMode = type === 'checkUrl' ? 'anonymous' : 'authenticated';
   try {
-    const r = (await chrome.runtime.sendMessage({ type: 'probeUrl', url })) as
-      | ProbeResult
-      | undefined;
-    return r ?? { kind: 'suspect', detail: 'timeout' };
+    const response = await chrome.runtime.sendMessage({ type, url, runId, options }) as unknown;
+    const wrapped = response && typeof response === 'object' && 'result' in response
+      ? (response as { result?: unknown }).result
+      : response;
+    return normalizeLinkCheckResult(wrapped, url, fallbackMode)
+      ?? failedCheck(url, fallbackMode, 'invalid-probe-response');
   } catch {
-    return { kind: 'suspect', detail: 'timeout' };
+    return failedCheck(url, fallbackMode, 'runtime-message-failed');
   }
 }
 
 /** 重新检测单条链接（登录后复查疑似项） */
-export async function recheckUrl(url: string): Promise<ProbeResult> {
-  return probe(url);
+export async function recheckUrlWithSession(url: string): Promise<LinkCheckResult> {
+  return probe(url, 'recheckUrlWithSession', undefined, await loadCheckerProbeOptions());
+}
+
+function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
+}
+
+async function loadCheckerProbeOptions(): Promise<Record<string, number>> {
+  const data = await chrome.storage.local.get([
+    'checkerTimeout',
+    'checkerRetries',
+    'checkerBackoffBase',
+    'checkerBackoffMax',
+  ]);
+  const timeoutMs = boundedNumber(data.checkerTimeout, 10_000, 1, 120_000);
+  return {
+    timeoutMs,
+    perAttemptMs: Math.min(timeoutMs, Math.max(1, Math.floor(timeoutMs / 2))),
+    retries: boundedNumber(data.checkerRetries, 2, 0, 10),
+    baseDelayMs: boundedNumber(data.checkerBackoffBase, 800, 0, 30_000),
+    maxDelayMs: boundedNumber(data.checkerBackoffMax, 3_000, 0, 60_000),
+  };
 }
 
 /**
- * 死链检测：并发探测全部书签。
- * - 结果缓存 24h，避免重复扫描
+ * 链接检测：并发重新探测全部书签。
  * - 同域并发限制 ≤ PER_DOMAIN_CONCURRENCY，避免触发目标站限流
  */
 export async function findDeadLinks(
@@ -141,8 +192,13 @@ export async function findDeadLinks(
   onProgress: (p: HealthProgress) => void,
   signal: AbortSignal,
 ): Promise<HealthIssue[]> {
-  const probeCache = await loadProbeCache();
   const issues: HealthIssue[] = [];
+  const runId = `health-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const options = await loadCheckerProbeOptions();
+  const cancel = () => {
+    chrome.runtime.sendMessage({ type: 'cancelLinkCheckRun', runId }).catch(() => {});
+  };
+  signal.addEventListener('abort', cancel, { once: true });
   const total = bookmarks.length;
   let done = 0;
   let idx = 0;
@@ -176,41 +232,36 @@ export async function findDeadLinks(
     }
   }
 
-  const newCacheEntries = new Map<string, ProbeCacheEntry>();
-
   const workers = Array.from({ length: DEAD_CHECK_CONCURRENCY }, async () => {
     while (idx < bookmarks.length) {
       if (signal.aborted) throw new DOMException('已取消', 'AbortError');
       const b = bookmarks[idx++];
 
-      // 命中缓存直接复用
-      const cached = probeCache.get(b.url);
-      let r: ProbeResult;
-      if (cached) {
-        r = cached.result;
-      } else {
-        const domain = rootDomain(b.url);
-        await acquireDomainSlot(domain);
-        try {
-          r = await probe(b.url);
-          newCacheEntries.set(b.url, { result: r, cachedAt: Date.now() });
-        } finally {
-          releaseDomainSlot(domain);
-        }
+      const domain = rootDomain(b.url);
+      await acquireDomainSlot(domain);
+      if (signal.aborted) {
+        releaseDomainSlot(domain);
+        throw new DOMException('已取消', 'AbortError');
+      }
+      let result: LinkCheckResult;
+      try {
+        result = await probe(b.url, 'checkUrl', runId, options);
+      } finally {
+        releaseDomainSlot(domain);
       }
 
-      if (r.kind !== 'ok') issues.push({ bookmark: b, kind: r.kind, detail: r.detail });
+      if (result.state !== 'reachable') {
+        issues.push({ bookmark: b, kind: 'link', detail: result.reason, result });
+      }
       done++;
       onProgress({ phase: 'checking', done, total });
     }
   });
 
-  await Promise.all(workers);
-
-  // 合并新探测结果到缓存并持久化
-  if (newCacheEntries.size > 0) {
-    for (const [url, entry] of newCacheEntries) probeCache.set(url, entry);
-    await saveProbeCache(probeCache);
+  try {
+    await Promise.all(workers);
+  } finally {
+    signal.removeEventListener('abort', cancel);
   }
 
   onProgress({ phase: 'done', done, total });
@@ -272,7 +323,7 @@ export async function undoRemoveBookmarks(): Promise<number> {
 
   // TTL 过滤（24h）
   const now = Date.now();
-  const valid = records.filter((r) => now - r.removedAt < PROBE_CACHE_TTL_MS);
+  const valid = records.filter((r) => now - r.removedAt < REMOVED_BOOKMARKS_UNDO_TTL_MS);
   if (!valid.length) return 0;
 
   // 按 index 升序恢复，保持原位置顺序

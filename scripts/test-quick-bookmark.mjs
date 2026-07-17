@@ -359,12 +359,15 @@ const smartContext = {
 vm.createContext(smartContext);
 vm.runInContext(`${smartTaggerSource}; this.smartHelpers = {
   autoTagBookmarkSync,
+  getCanonicalCategoryTerms,
   matchDomainTag,
   matchUrlPathTag
 };`, smartContext);
 
-const { autoTagBookmarkSync } = smartContext.smartHelpers;
+const { autoTagBookmarkSync, getCanonicalCategoryTerms } = smartContext.smartHelpers;
 const tagNamesFor = bookmark => [...autoTagBookmarkSync(bookmark)].map(item => item.tag);
+
+assert.ok([...getCanonicalCategoryTerms('API')].includes('接口'));
 
 assert.deepEqual(tagNamesFor({
   title: 'YouTube product review',

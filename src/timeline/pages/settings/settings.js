@@ -79,6 +79,9 @@ const learnedTagsList = document.getElementById('learnedTagsList');
 // ===== 主动学习 DOM 引用 =====
 const activeLearningBadge = document.getElementById('activeLearningBadge');
 const learningStatsDesc = document.getElementById('learningStatsDesc');
+const viewLearningRecordsBtn = document.getElementById('viewLearningRecordsBtn');
+const clearLearningRecordsBtn = document.getElementById('clearLearningRecordsBtn');
+const learningFeedbackList = document.getElementById('learningFeedbackList');
 const clearReviewQueueBtn = document.getElementById('clearReviewQueueBtn');
 const pendingReviewsList = document.getElementById('pendingReviewsList');
 const recommendationRuleTabs = document.getElementById('recommendationRuleTabs');
@@ -226,17 +229,30 @@ async function saveTheme(theme) {
 
 // ===== 语言管理 =====
 async function loadLanguage() {
-  const result = await chrome.storage.local.get('language');
-  const language = result.language || 'system';
-  languageSelect.value = language;
-  setCurrentLang(language);
-  applyI18n();
+  try {
+    const result = await chrome.storage.local.get('language');
+    const language = result.language || 'system';
+    languageSelect.value = language;
+    setCurrentLang(language);
+    applyI18n();
+    const resolved = language === 'system' ? (navigator.language || 'en') : language;
+    document.documentElement.lang = String(resolved).toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+  } catch {
+    setCurrentLang('system');
+    applyI18n();
+  } finally {
+    document.documentElement.classList.remove('i18n-pending');
+  }
 }
 
 async function saveLanguage(language) {
   await chrome.storage.local.set({ language });
   setCurrentLang(language);
   applyI18n();
+  if (recommendationLearningState) {
+    renderLearningStats(null, recommendationLearningState.stats);
+    renderLearningFeedback(recommendationLearningState.recentFeedback || []);
+  }
 }
 
 // ===== 失效检测设置管理 =====
@@ -2621,9 +2637,9 @@ function bindTreeSettings() {
 }
 
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   loadTheme();
-  loadLanguage();
+  await loadLanguage();
   loadCheckerSettings();
   loadRetentionDays();
   loadPreviewSettings();
@@ -2921,6 +2937,7 @@ let reevaluationItems = new Map();
 let reevaluationSelected = new Set();
 let reevaluationCancelled = false;
 let reevaluationApplying = false;
+let learningFeedbackExpanded = false;
 
 function makeSettingsOperationId(prefix) {
   return `${prefix}_${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`}`;
@@ -2942,6 +2959,7 @@ async function loadActiveLearning() {
 
     updateActiveLearningBadge(queue.length);
     renderLearningStats(stats, recommendationLearningState?.stats);
+    renderLearningFeedback(recommendationLearningState?.recentFeedback || []);
     renderPendingReviews(queue);
     renderRecommendationRules();
   } catch (e) {
@@ -3207,7 +3225,13 @@ function renderLearningStats(stats, recommendationStats) {
     return;
   }
   if (recommendationStats) {
-    learningStatsDesc.textContent = `推荐反馈 ${recommendationStats.total || 0} 条：接受 ${recommendationStats.accepted || 0} / 修改 ${recommendationStats.modified || 0} / 拒绝 ${recommendationStats.rejected || 0} / 取消 ${recommendationStats.cancelled || 0}`;
+    learningStatsDesc.textContent = i18n('recommendationStatsFormat', [
+      recommendationStats.total || 0,
+      recommendationStats.accepted || 0,
+      recommendationStats.modified || 0,
+      recommendationStats.rejected || 0,
+      recommendationStats.cancelled || 0,
+    ]);
     return;
   }
   const accepted = stats.totalAccepted || 0;
@@ -3217,6 +3241,44 @@ function renderLearningStats(stats, recommendationStats) {
   learningStatsDesc.textContent = i18n('learningStatsFormat')
     ? i18n('learningStatsFormat', [total, accepted, modified, ignored])
     : `已确认 ${total} 条：接受 ${accepted} / 修改 ${modified} / 忽略 ${ignored}`;
+}
+
+function renderLearningFeedback(records) {
+  if (!learningFeedbackList || !viewLearningRecordsBtn) return;
+  const items = Array.isArray(records) ? records : [];
+  learningFeedbackList.hidden = !learningFeedbackExpanded;
+  viewLearningRecordsBtn.textContent = i18n(learningFeedbackExpanded ? 'hideLearningRecords' : 'viewLearningRecords');
+  viewLearningRecordsBtn.setAttribute('aria-expanded', String(learningFeedbackExpanded));
+  if (items.length === 0) {
+    const hasLegacySummary = Number(recommendationLearningState?.stats?.total || 0) > 0;
+    learningFeedbackList.innerHTML = `<div class="tagrule-empty">${escapeHtml(i18n(hasLegacySummary ? 'learningRecordsUnavailable' : 'noLearningRecords'))}</div>`;
+    return;
+  }
+  const outcomeKeys = {
+    accepted: 'learningRecordAccepted',
+    modified: 'learningRecordModified',
+    rejected: 'learningRecordRejected',
+    cancelled: 'learningRecordCancelled',
+  };
+  learningFeedbackList.innerHTML = items.map((item) => {
+    const identity = item.domain || String(item.urlFingerprint || '').slice(0, 16) || item.recommendationId || '—';
+    const folderPath = item.selection?.folderPath || '';
+    const tags = Array.isArray(item.selection?.tags) ? item.selection.tags.join(', ') : '';
+    const changedFields = (item.changedFields || []).map(field => field === 'folder'
+      ? i18n('learningRecordFolder')
+      : (field === 'tags' ? i18n('learningRecordTags') : field)).join(', ');
+    const selections = [
+      folderPath ? `${i18n('learningRecordFolder')}：${folderPath}` : '',
+      tags ? `${i18n('learningRecordTags')}：${tags}` : '',
+    ].filter(Boolean).join(' · ');
+    const outcome = i18n(outcomeKeys[item.outcome] || 'learningRecordCancelled');
+    const undone = item.undone ? ` · ${i18n('learningRecordUndone')}` : '';
+    return `<div class="learning-feedback-item">
+      <div class="learning-feedback-head"><strong>${escapeHtml(identity)}</strong><time>${escapeHtml(new Date(Number(item.createdAt) || 0).toLocaleString())}</time></div>
+      <div class="learning-feedback-detail"><span>${escapeHtml(outcome + undone)}</span>${changedFields ? `<span>${escapeHtml(i18n('learningRecordChanged'))}：${escapeHtml(changedFields)}</span>` : ''}</div>
+      ${selections ? `<div class="learning-feedback-selection">${escapeHtml(selections)}</div>` : ''}
+    </div>`;
+  }).join('');
 }
 
 function renderPendingReviews(queue) {
@@ -3394,10 +3456,35 @@ async function onIgnoreReview(id) {
   }
 }
 
-// 清空待确认队列
-clearReviewQueueBtn.addEventListener('click', async () => {
-  if (!confirm('确定清空全部待复核项吗？')) return;
-  await chrome.runtime.sendMessage({ action: 'clearReviewQueue', operationId: makeSettingsOperationId('clear_reviews') });
+viewLearningRecordsBtn?.addEventListener('click', () => {
+  learningFeedbackExpanded = !learningFeedbackExpanded;
+  renderLearningFeedback(recommendationLearningState?.recentFeedback || []);
+});
+
+clearLearningRecordsBtn?.addEventListener('click', async () => {
+  if (!confirm(i18n('clearLearningRecordsConfirm'))) return;
+  clearLearningRecordsBtn.disabled = true;
+  const result = await chrome.runtime.sendMessage({
+    action: 'clearRecommendationLearning',
+    operationId: makeSettingsOperationId('clear_learning'),
+  }).catch(() => null);
+  clearLearningRecordsBtn.disabled = false;
+  if (!result?.success) {
+    showToast(i18n('saveFailed'), 'error');
+    return;
+  }
+  await loadActiveLearning();
+  showToast(i18n('settingsSaved'), 'success');
+});
+
+// 清空待复核项，不影响已经完成的学习反馈和统计。
+clearReviewQueueBtn?.addEventListener('click', async () => {
+  if (!confirm(i18n('clearQueueConfirm'))) return;
+  const result = await chrome.runtime.sendMessage({ action: 'clearReviewQueue', operationId: makeSettingsOperationId('clear_reviews') }).catch(() => null);
+  if (!result?.success) {
+    showToast(i18n('saveFailed'), 'error');
+    return;
+  }
   await loadActiveLearning();
   showToast(i18n('settingsSaved'), 'success');
 });
@@ -3723,7 +3810,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // 监听队列变化广播，刷新徽章和列表
 chrome.runtime.onMessage.addListener((message) => {
-  if (message.action === 'reviewQueueChanged' || message.action === 'recommendationReviewQueueChanged') {
+  if (message.action === 'reviewQueueChanged'
+    || message.action === 'recommendationReviewQueueChanged'
+    || message.action === 'recommendationLearningChanged') {
     loadActiveLearning();
   }
 });

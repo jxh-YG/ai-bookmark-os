@@ -854,7 +854,18 @@ async function getRecommendationLearningState() {
         } : null,
       };
     }),
-    recentFeedback: store.feedback.slice(-100).reverse(),
+    recentFeedback: store.feedback.slice(-100).reverse().map(item => ({
+      id: item.id,
+      operationId: item.operationId,
+      recommendationId: item.recommendationId,
+      urlFingerprint: item.urlFingerprint,
+      domain: String(item.snapshot?.domain || ''),
+      outcome: item.outcome,
+      changedFields: item.changedFields || [],
+      selection: item.selection || { folderPath: '', tags: [] },
+      createdAt: item.createdAt,
+      undone: item.undone === true,
+    })),
   };
 }
 
@@ -905,6 +916,34 @@ async function clearRecommendationReviewQueue(operationId) {
     chrome.runtime.sendMessage({ action: 'recommendationReviewQueueChanged', count: 0 }).catch(() => {});
     return { success: true };
   });
+}
+
+async function clearRecommendationLearning(operationId) {
+  const id = String(operationId || '').trim();
+  if (!id) return { success: false, error: 'missing_operation_id' };
+  return runIdempotentOperation('recommendation_learning_clear', id, () => mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+    const now = Date.now();
+    const store = normalizeRecommendationStore(current, now);
+    const feedbackCount = store.feedback.length;
+    const learnedRuleCount = store.rules.filter(rule => rule.source === 'learned').length;
+    store.feedback = [];
+    store.rules = store.rules.filter(rule => rule.source !== 'learned');
+    store.stats = { ...emptyRecommendationStore(now).stats };
+    store.history = store.history.filter(item => !['feedback', 'undo', 'rebuild'].includes(item.type));
+    if (!store.history.some(item => item.id === id)) {
+      store.history.push({ id, type: 'clear_learning', feedbackCount, learnedRuleCount, createdAt: now });
+    }
+    store.history = store.history.slice(-200);
+    return store;
+  }).then((store) => {
+    chrome.runtime.sendMessage({ action: 'recommendationLearningChanged' }).catch(() => {});
+    return {
+      success: true,
+      stats: store.stats,
+      feedbackCount: store.feedback.length,
+      learnedRuleCount: store.rules.filter(rule => rule.source === 'learned').length,
+    };
+  }));
 }
 
 async function resolveRecommendationReview(payload = {}) {
@@ -2614,6 +2653,56 @@ function withRecommendationEvidence(candidate, source) {
   };
 }
 
+function categoryTermMatchesFolderPath(folderPath, tag) {
+  const canonical = canonicalizeTagName(tag);
+  if (!canonical) return false;
+  const terms = typeof getCanonicalCategoryTerms === 'function'
+    ? getCanonicalCategoryTerms(canonical)
+    : [canonical];
+  const segments = normalizeBookmarkFolderPath(folderPath).split('/').filter(Boolean);
+  return terms.some((term) => {
+    const normalized = String(term || '').toLowerCase().trim();
+    if (normalized.length < 2) return false;
+    if (/^[a-z0-9]+$/i.test(normalized)) {
+      const pattern = new RegExp(`(^|[^a-z0-9])${escapeFolderEvidenceRegExp(normalized)}([^a-z0-9]|$)`, 'i');
+      return segments.some(segment => pattern.test(segment));
+    }
+    return segments.some(segment => segment.toLowerCase().includes(normalized));
+  });
+}
+
+function addReliableFolderProfileTagEvidence(tagCandidates, folderCandidates, core) {
+  const reliableFolders = core.rankCandidates(folderCandidates).filter(candidate => {
+    if (!candidate.exists || candidate.support < core.CONFIDENCE_THRESHOLDS.medium) return false;
+    return candidate.evidence.some((evidence) => {
+      const reason = String(evidence.reason || '');
+      return evidence.family === 'user_rule'
+        || evidence.family === 'learned_rule'
+        || reason.startsWith('domain-history:')
+        || reason.startsWith('profile-content:');
+    });
+  });
+  if (reliableFolders.length === 0) return;
+
+  const tags = [...new Set(tagCandidates.map(candidate => canonicalizeTagName(candidate.tag || candidate.label)).filter(Boolean))];
+  for (const tag of tags) {
+    const folder = reliableFolders.find(candidate => categoryTermMatchesFolderPath(candidate.folderPath || candidate.path, tag));
+    if (!folder) continue;
+    tagCandidates.push({
+      kind: 'tag',
+      tag,
+      label: tag,
+      source: 'folder-profile',
+      evidence: [{
+        family: 'history_profile',
+        strength: 1,
+        reason: `folder-profile-tag:${tag}`,
+        source: 'folder-profile',
+      }],
+    });
+  }
+}
+
 function activeRecommendationRuleCandidates(store, bookmark, folderOptions) {
   const core = self.BookmarkRecommendationCore;
   const hostname = String(bookmark?.domain || extractDomain(bookmark?.url || '') || '').toLowerCase();
@@ -2689,14 +2778,8 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
     }));
   const learned = activeRecommendationRuleCandidates(store, bookmark, folderOptions);
   tagCandidates.push(...learned.tagCandidates);
-  const localTags = core.rankCandidates(tagCandidates);
-  const tagNames = localTags.map(item => item.tag);
-  const aiCandidateTags = localTags.map(item => ({
-    tag: item.tag,
-    score: Math.round(item.support * 100),
-    confidence: item.support,
-    signals: item.reasons || [],
-  }));
+  const initialLocalTags = core.rankCandidates(tagCandidates);
+  const tagNames = initialLocalTags.map(item => item.tag);
 
   const historyCandidates = scoreHistoricalFolderCandidates(storedBookmarks, tagNames, bookmark, null, folderOptions)
     .map(item => withRecommendationEvidence(item, 'history'));
@@ -2705,6 +2788,14 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
   const profileCandidates = scoreFolderProfileCandidates(storedBookmarks, folderOptions, bookmark, tagNames, null)
     .map(item => withRecommendationEvidence(item, 'profile'));
   let folderCandidates = [...learned.folderCandidates, ...historyCandidates, ...existingCandidates, ...profileCandidates];
+  addReliableFolderProfileTagEvidence(tagCandidates, folderCandidates, core);
+  const localTags = core.rankCandidates(tagCandidates);
+  const aiCandidateTags = localTags.map(item => ({
+    tag: item.tag,
+    score: Math.round(item.support * 100),
+    confidence: item.support,
+    signals: item.reasons || [],
+  }));
   let summary = core.summarizeRecommendation(tagCandidates, folderCandidates);
   const signalConflict = summary.tags.length > 1 && summary.tags[0].margin < core.CONFIDENCE_THRESHOLDS.mediumMargin;
   const needsNewFolder = !summary.folders.some(item => item.support >= core.CONFIDENCE_THRESHOLDS.medium) && summary.tags.length > 0;
@@ -3266,6 +3357,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
       const root = document.createElement('div');
       root.id = ROOT_ID;
       const tags = Array.isArray(panelState.tags) ? panelState.tags : [];
+      const tagCandidates = Array.isArray(panelState.tagCandidates) ? panelState.tagCandidates.slice(0, 3) : [];
       const folderOptions = Array.isArray(panelState.folderOptions) ? panelState.folderOptions : [];
       const folderCandidates = Array.isArray(panelState.folderCandidates) ? panelState.folderCandidates.slice(0, 3) : [];
       const isChinese = String(panelState.panelLanguage || '').toLowerCase().startsWith('zh');
@@ -3302,6 +3394,12 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           return `<button type="button" class="ab-candidate${path === recommendedPath ? ' is-selected' : ''}" data-candidate-path="${esc(path)}" data-candidate-id="${esc(candidate.id || candidate.folderId || '')}" data-candidate-existing="${candidate.exists ? 'true' : 'false'}"><span><strong>${esc(path)}</strong>${reasons ? `<small>${esc(reasons)}</small>` : ''}</span><em class="is-${esc(candidate.confidence || 'low')}">${esc(confidenceText(candidate.confidence))}</em></button>`;
         }).join('')
         : `<div class="ab-abstain">${copy.noRecommendation}</div>`;
+      const selectedTagSet = new Set(tags.map(tag => String(tag).toLowerCase()));
+      const tagCandidateHtml = tagCandidates.map(candidate => {
+        const tag = String(candidate.tag || '');
+        const selected = selectedTagSet.has(tag.toLowerCase());
+        return `<button type="button" class="ab-tag-candidate${selected ? ' is-selected' : ''}" data-tag="${esc(tag)}" aria-pressed="${selected}"><span>#${esc(tag)}</span><em class="is-${esc(candidate.confidence || 'low')}">${esc(confidenceText(candidate.confidence))}</em></button>`;
+      }).join('');
       root.innerHTML = `
         <style>
           #${ROOT_ID}{position:fixed;inset:0;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;color:#1d1d1f;pointer-events:none;display:flex;align-items:stretch;justify-content:flex-end;box-sizing:border-box}
@@ -3335,6 +3433,12 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           #${ROOT_ID} .ab-candidate small{font-size:10px;color:#6e6e73;overflow-wrap:anywhere}
           #${ROOT_ID} .ab-candidate em{flex:0 0 auto;font-size:10px;font-style:normal;font-weight:700;color:#6e6e73}
           #${ROOT_ID} .ab-candidate em.is-high{color:#188038} #${ROOT_ID} .ab-candidate em.is-medium{color:#9a6700}
+          #${ROOT_ID} .ab-tag-candidates{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+          #${ROOT_ID} .ab-tag-candidate{min-height:30px;padding:5px 9px;border:1px solid rgba(0,0,0,.1);border-radius:7px;background:#fff;color:#1d1d1f;display:inline-flex;align-items:center;gap:7px;box-shadow:none}
+          #${ROOT_ID} .ab-tag-candidate:hover,#${ROOT_ID} .ab-tag-candidate.is-selected{border-color:#0a84ff;background:rgba(10,132,255,.07);transform:none}
+          #${ROOT_ID} .ab-tag-candidate span{font-size:11px;font-weight:650}
+          #${ROOT_ID} .ab-tag-candidate em{font-size:10px;font-style:normal;color:#6e6e73}
+          #${ROOT_ID} .ab-tag-candidate em.is-high{color:#188038} #${ROOT_ID} .ab-tag-candidate em.is-medium{color:#9a6700}
           #${ROOT_ID} .ab-abstain{padding:9px 10px;border-left:3px solid #8e8e93;background:rgba(118,118,128,.08);font-size:11px;color:#6e6e73}
           #${ROOT_ID} .ab-folder-row{display:grid;grid-template-columns:1fr;gap:8px}
           #${ROOT_ID} .ab-folder-search-row{position:relative}
@@ -3393,7 +3497,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
               <div class="ab-folder-hint">${copy.categoryHint}</div>
               <div id="abDestination" class="ab-destination" aria-live="polite"></div>
             </div>
-            <div class="ab-grid"><div><label>${copy.tags}</label><input id="abTagsInput" value="${esc(tags.join(', '))}" placeholder="${copy.tagHint}"></div><div><label>${copy.recommendedPath}</label><input value="${esc(recommendedPath)}" disabled></div></div>
+            <div class="ab-grid"><div><label>${copy.tags}</label><input id="abTagsInput" value="${esc(tags.join(', '))}" placeholder="${copy.tagHint}">${tagCandidateHtml ? `<div class="ab-tag-candidates" role="group" aria-label="${copy.tags}">${tagCandidateHtml}</div>` : ''}</div><div><label>${copy.recommendedPath}</label><input value="${esc(recommendedPath)}" disabled></div></div>
             <label>${copy.summary}</label><textarea id="abSummaryInput" placeholder="${copy.summaryHint}">${esc(panelState.summary || '')}</textarea>
             <label>${copy.reason}</label><textarea id="abReasonInput" placeholder="${copy.reasonHint}">${esc(panelState.reason || '')}</textarea>
             <div class="ab-note">${esc(panelState.aiError || (panelState.aiAvailable ? copy.aiReady : (panelState.abstained ? copy.noRecommendation : copy.localReady)))}</div>
@@ -3513,6 +3617,26 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           }
         });
       });
+      const tagsInput = root.querySelector('#abTagsInput');
+      const syncTagCandidateSelection = () => {
+        const selected = new Set((tagsInput?.value || '').split(/[,，]/).map(value => value.trim().toLowerCase()).filter(Boolean));
+        root.querySelectorAll('.ab-tag-candidate').forEach((button) => {
+          const active = selected.has(String(button.dataset.tag || '').toLowerCase());
+          button.classList.toggle('is-selected', active);
+          button.setAttribute('aria-pressed', String(active));
+        });
+      };
+      root.querySelectorAll('.ab-tag-candidate').forEach(button => button.addEventListener('click', () => {
+        if (!tagsInput) return;
+        const candidateTag = String(button.dataset.tag || '').trim();
+        const values = tagsInput.value.split(/[,，]/).map(value => value.trim()).filter(Boolean);
+        const index = values.findIndex(value => value.toLowerCase() === candidateTag.toLowerCase());
+        if (index >= 0) values.splice(index, 1);
+        else if (candidateTag) values.push(candidateTag);
+        tagsInput.value = values.join(', ');
+        syncTagCandidateSelection();
+      }));
+      tagsInput?.addEventListener('input', syncTagCandidateSelection);
       const setFolderDropdownOpen = (open, showAll = false) => {
         folderDropdownOpen = open;
         if (folderSearch) folderSearch.dataset.showAll = showAll ? 'true' : '';
@@ -3669,9 +3793,11 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           panelState.recommendationId = '';
           selectedExistingFolder = null;
           if (folderSearch) folderSearch.value = '';
-          const tagsInput = root.querySelector('#abTagsInput');
           if (tagsInput) tagsInput.value = '';
-          root.querySelectorAll('.ab-candidate').forEach(item => item.classList.remove('is-selected'));
+          root.querySelectorAll('.ab-candidate, .ab-tag-candidate').forEach(item => {
+            item.classList.remove('is-selected');
+            if (item.classList.contains('ab-tag-candidate')) item.setAttribute('aria-pressed', 'false');
+          });
           const note = root.querySelector('.ab-note');
           if (note) note.textContent = copy.rejected;
           updateDestination();
@@ -4744,6 +4870,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       getRecommendationLearningState()
         .then(state => sendResponse({ success: true, state }))
         .catch(error => sendResponse({ success: false, error: error?.message || 'learning_state_failed' }));
+      return true;
+    }
+
+    case 'clearRecommendationLearning': {
+      clearRecommendationLearning(message.operationId)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: error?.message || 'learning_clear_failed' }));
       return true;
     }
 

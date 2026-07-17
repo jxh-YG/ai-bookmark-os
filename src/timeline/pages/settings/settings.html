@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="i18n-pending">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1164,12 +1164,12 @@
               <div class="setting-label" data-i18n="learningStats">Learning Statistics</div>
               <div id="learningStatsDesc" class="setting-desc" data-i18n="learningStatsDesc">—</div>
             </div>
-            <div class="setting-control">
-              <button id="clearReviewQueueBtn" class="btn btn-danger btn-sm">
-                <span data-i18n="clearQueue">Clear Queue</span>
-              </button>
+            <div class="setting-control learning-stats-actions">
+              <button id="viewLearningRecordsBtn" class="btn btn-secondary btn-sm" type="button" data-i18n="viewLearningRecords">View records</button>
+              <button id="clearLearningRecordsBtn" class="btn btn-danger btn-sm" type="button" data-i18n="clearLearningRecords">Clear learning records</button>
             </div>
           </div>
+          <div id="learningFeedbackList" class="learning-feedback-list" aria-live="polite" hidden></div>
         </div>
 
         <div class="setting-card">
@@ -1197,7 +1197,10 @@
         <!-- 待确认列表 -->
         <div class="setting-card">
           <div class="tagrule-card-row">
-            <div class="setting-label" data-i18n="pendingReviews">Pending Reviews</div>
+            <div class="pending-review-header">
+              <div class="setting-label" data-i18n="pendingReviews">Pending Reviews</div>
+              <button id="clearReviewQueueBtn" class="btn btn-danger btn-sm" type="button" data-i18n="clearQueue">Clear pending reviews</button>
+            </div>
             <div id="pendingReviewsList" class="review-list"></div>
           </div>
         </div>

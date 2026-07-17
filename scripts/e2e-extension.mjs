@@ -135,7 +135,44 @@ try {
       contentExcerpt: 'private summary',
       contentHeadings: ['Private heading'],
     };
-    await chrome.storage.local.set({ bookmark_timeline_data: bookmarks });
+    const now = Date.now();
+    await chrome.storage.local.set({
+      bookmark_timeline_data: bookmarks,
+      bookmark_recommendation_store_v2: {
+        version: 2,
+        migratedAt: now,
+        rules: [],
+        stopWords: [],
+        snapshots: [],
+        reviewQueue: [],
+        feedback: [
+          {
+            id: 'feedback-e2e-rejected',
+            operationId: 'feedback-e2e-rejected',
+            recommendationId: 'recommendation-e2e-rejected',
+            urlFingerprint: 'fingerprint-rejected',
+            outcome: 'rejected',
+            changedFields: [],
+            selection: { folderPath: '', tags: [] },
+            snapshot: { domain: 'rejected.example' },
+            createdAt: now - 1000,
+          },
+          {
+            id: 'feedback-e2e-cancelled',
+            operationId: 'feedback-e2e-cancelled',
+            recommendationId: 'recommendation-e2e-cancelled',
+            urlFingerprint: 'fingerprint-cancelled',
+            outcome: 'cancelled',
+            changedFields: [],
+            selection: { folderPath: '', tags: [] },
+            snapshot: { domain: 'cancelled.example' },
+            createdAt: now,
+          },
+        ],
+        stats: { total: 2, accepted: 0, modified: 0, rejected: 1, cancelled: 1, lastFeedbackAt: now },
+        history: [],
+      },
+    });
   }, { port });
 
   const pageErrors = [];
@@ -191,6 +228,12 @@ try {
   await settings.locator('[data-panel="activelearning"]').click();
   await settings.locator('#panel-activelearning').waitFor({ state: 'visible' });
   assert.equal(await settings.locator('#recommendationRuleTabs [role="tab"]').count(), 4);
+  await settings.locator('#viewLearningRecordsBtn').click();
+  assert.equal(await settings.locator('#learningFeedbackList .learning-feedback-item').count(), 2);
+  const learningFeedbackText = await settings.locator('#learningFeedbackList').innerText();
+  assert.match(learningFeedbackText, /rejected\.example[\s\S]*(拒绝|Rejected)/i);
+  assert.match(learningFeedbackText, /cancelled\.example[\s\S]*(取消|Cancelled)/i);
+  assert.doesNotMatch(learningFeedbackText, /https?:\/\//i, 'learning feedback details must not expose original URLs');
   await settings.locator('#reevaluateBookmarksBtn').click();
   await settings.locator('#reevaluationResults').filter({ hasText: /评估完成|Evaluation complete/i }).waitFor({ timeout: 15000 });
   await settings.locator('.review-item--recommendation').first().waitFor({ state: 'visible', timeout: 10000 });

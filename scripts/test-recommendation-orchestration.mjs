@@ -13,6 +13,8 @@ let aiConfig = { enabled: true, apiKey: 'test-key', assistClassificationEnabled:
 let aiResult = null;
 let aiCalls = 0;
 let nextRecommendationId = 0;
+let existingFolderCandidates = [];
+let profileFolderCandidates = [];
 
 const context = {
   Array,
@@ -31,19 +33,21 @@ const context = {
   extractDomain: url => {
     try { return new URL(url).hostname; } catch { return ''; }
   },
+  escapeFolderEvidenceRegExp: value => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+  getCanonicalCategoryTerms: value => value === 'API' ? ['API', '接口'] : [value],
   getAIConfig: async () => aiConfig,
   getStoredBookmarks: async () => [],
   keywordMatchesWhole: (keyword, text) => text.split(/\s+/).includes(keyword),
   loadBookmarkFolderOptions: async () => [],
-  isCanonicalCategoryTag: value => ['AI', '开发', '设计'].includes(value),
+  isCanonicalCategoryTag: value => ['AI', 'API', '开发', '设计'].includes(value),
   makeRecommendationId: () => `rec-${++nextRecommendationId}`,
   matchBookmarkFolderOption: (folders, path) => folders.find(folder => folder.path === path) || null,
   normalizeBookmarkFolderPath: path => String(path || '').split('/').map(part => part.trim()).filter(Boolean).join('/'),
   persistRecommendationSnapshot: async () => null,
   preloadSmartTaggerCaches: async () => undefined,
-  scoreExistingFolderCandidates: () => [],
+  scoreExistingFolderCandidates: () => existingFolderCandidates,
   scoreFolderPathEvidence: () => ({ score: 60, reasons: ['local-tag:ai'] }),
-  scoreFolderProfileCandidates: () => [],
+  scoreFolderProfileCandidates: () => profileFolderCandidates,
   scoreHistoricalFolderCandidates: () => [],
   suggestBookmarkWithAI: async () => {
     aiCalls += 1;
@@ -130,5 +134,52 @@ assert.equal(recommendation.folders[0].exists, false);
 assert.equal(recommendation.folders[0].confidence, 'high');
 assert.ok(recommendation.folders[0].positiveFamilies.includes('ai'));
 assert.ok(recommendation.folders[0].positiveFamilies.some(family => family !== 'ai'));
+
+aiConfig = { enabled: false, apiKey: '', assistClassificationEnabled: true };
+localTags = [{ tag: 'API', score: 30, confidence: 0.4, signals: ['domain'] }];
+existingFolderCandidates = [];
+profileFolderCandidates = [{
+  id: 'api-relay',
+  title: 'API中转',
+  folderName: 'API中转',
+  path: 'AI 整理/人工智能/API中转',
+  folderPath: 'AI 整理/人工智能/API中转',
+  exists: true,
+  score: 100,
+  count: 2,
+  reasons: ['domain-history:newapi.bizdecipher.com', 'profile-content:2'],
+}];
+recommendation = await context.buildBookmarkRecommendation({
+  title: 'API 密钥 - BizDecipher',
+  url: 'https://newapi.bizdecipher.com/keys',
+  domain: 'newapi.bizdecipher.com',
+}, {
+  folderOptions: [{ id: 'api-relay', title: 'API中转', path: 'AI 整理/人工智能/API中转' }],
+  storedBookmarks: [],
+  allowAI: false,
+  persist: false,
+});
+assert.equal(recommendation.tags[0].tag, 'API');
+assert.equal(recommendation.tags[0].confidence, 'high', '可靠目录画像与路径标签一致时应补强本地标签');
+assert.ok(recommendation.tags[0].positiveFamilies.includes('history_profile'));
+
+profileFolderCandidates = [];
+existingFolderCandidates = [{
+  id: 'api-name-only',
+  title: 'API中转',
+  folderName: 'API中转',
+  path: 'AI 整理/人工智能/API中转',
+  folderPath: 'AI 整理/人工智能/API中转',
+  exists: true,
+  score: 100,
+  reasons: ['local-tag:api'],
+}];
+recommendation = await context.buildBookmarkRecommendation(bookmark, {
+  folderOptions: [{ id: 'api-name-only', title: 'API中转', path: 'AI 整理/人工智能/API中转' }],
+  storedBookmarks: [],
+  allowAI: false,
+  persist: false,
+});
+assert.notEqual(recommendation.tags[0].confidence, 'high', '只有目录名称匹配时不得循环抬高标签置信度');
 
 console.log('recommendation orchestration tests passed');

@@ -515,6 +515,19 @@ function canonicalizeTagName(value) {
   return CATEGORY_ALIASES[tag] || tag;
 }
 
+function getCanonicalCategoryTerms(value) {
+  const canonical = canonicalizeTagName(value);
+  if (!canonical) return [];
+  const terms = [canonical];
+  for (const [alias, target] of Object.entries(CATEGORY_ALIASES)) {
+    if (target === canonical) terms.push(alias);
+  }
+  for (const [folderName, target] of FOLDER_SYNONYM_MAP) {
+    if (canonicalizeTagName(target) === canonical) terms.push(folderName);
+  }
+  return [...new Set(terms.map(term => String(term || '').trim()).filter(Boolean))];
+}
+
 function isCanonicalCategoryTag(value) {
   return Object.prototype.hasOwnProperty.call(CATEGORY_ID_BY_LABEL, canonicalizeTagName(value));
 }

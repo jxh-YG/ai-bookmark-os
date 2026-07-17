@@ -11,6 +11,7 @@ assert.ok(start >= 0 && end > start, 'recommendation learning helpers should be 
 const storage = new Map();
 const mutationQueues = new Map();
 const chrome = {
+  runtime: { sendMessage: async () => ({}) },
   storage: {
     local: {
       async get(keys) {
@@ -89,6 +90,8 @@ vm.runInContext(`${backgroundSource.slice(start, end)}; this.learning = {
   recomputeLearnedRuleStates,
   submitRecommendationFeedback,
   getRecommendationLearningState,
+  clearRecommendationReviewQueue,
+  clearRecommendationLearning,
   mutateRecommendationRule,
   rebuildRecommendationLearning
 };`, context);
@@ -191,7 +194,7 @@ const feedbackCountBeforeUndo = state.recentFeedback.filter(item => item.outcome
 const statsTotalBeforeUndo = state.stats.total;
 await learning.mutateRecommendationRule({ operationId: 'undo-1', mutation: 'undo_last' });
 state = await learning.getRecommendationLearningState();
-assert.equal(state.recentFeedback.find(item => item.operationId === 'cancel-flow').undone, undefined, '撤销最近学习应跳过取消记录');
+assert.equal(state.recentFeedback.find(item => item.operationId === 'cancel-flow').undone, false, '撤销最近学习应跳过取消记录');
 assert.equal(state.recentFeedback.filter(item => item.outcome !== 'cancelled' && !item.undone).length, feedbackCountBeforeUndo - 1);
 assert.equal(state.stats.total, statsTotalBeforeUndo - 1);
 
@@ -200,6 +203,46 @@ await learning.rebuildRecommendationLearning('rebuild-1');
 await learning.rebuildRecommendationLearning('rebuild-1');
 state = await learning.getRecommendationLearningState();
 assert.equal(state.recentFeedback.length, feedbackCount, '重复重建不得复制反馈');
+assert.equal(state.recentFeedback.find(item => item.operationId === 'cancel-flow').domain, 'cancel.example');
+assert.equal('snapshot' in state.recentFeedback[0], false, '学习记录接口不应暴露完整推荐快照');
+
+let persisted = storage.get(STORE_KEY);
+persisted.reviewQueue = [{ id: 'review-keep', legacy: true }];
+storage.set(STORE_KEY, persisted);
+const feedbackBeforeQueueClear = state.recentFeedback.length;
+const statsBeforeQueueClear = { ...state.stats };
+await learning.clearRecommendationReviewQueue('clear-reviews-1');
+state = await learning.getRecommendationLearningState();
+assert.equal(state.reviewQueue.length, 0, '清空待复核应只清理队列');
+assert.equal(state.recentFeedback.length, feedbackBeforeQueueClear, '清空待复核不得删除学习记录');
+assert.deepEqual({ ...state.stats }, statsBeforeQueueClear, '清空待复核不得重置学习统计');
+
+persisted = storage.get(STORE_KEY);
+persisted.reviewQueue = [{ id: 'review-preserved', legacy: true }];
+persisted.rules.push({
+  id: 'manual-rule',
+  kind: 'domain_tag',
+  pattern: 'manual.example',
+  target: '开发',
+  source: 'user',
+  state: 'active',
+  positiveFingerprints: [],
+  negativeFingerprints: [],
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+});
+storage.set(STORE_KEY, persisted);
+assert.deepEqual({ ...await learning.clearRecommendationLearning('') }, { success: false, error: 'missing_operation_id' });
+await learning.clearRecommendationLearning('clear-learning-1');
+await learning.clearRecommendationLearning('clear-learning-1');
+state = await learning.getRecommendationLearningState();
+assert.equal(state.recentFeedback.length, 0);
+assert.deepEqual({ ...state.stats }, {
+  total: 0, accepted: 0, modified: 0, rejected: 0, cancelled: 0, lastFeedbackAt: 0,
+});
+assert.equal(state.rules.some(rule => rule.source === 'learned'), false, '清空学习记录应删除自动学习规则');
+assert.equal(state.rules.some(rule => rule.id === 'manual-rule' && rule.state === 'active'), true, '清空学习记录必须保留手动规则');
+assert.equal(state.reviewQueue.some(item => item.id === 'review-preserved'), true, '清空学习记录必须保留待复核项');
 
 const missing = await submit('missing-rec', 'does-not-exist');
 assert.deepEqual({ ...missing }, { success: false, error: 'recommendation_not_found' });

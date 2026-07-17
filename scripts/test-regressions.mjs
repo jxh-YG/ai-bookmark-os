@@ -1261,6 +1261,7 @@ function testUiContracts() {
   const standalone = read('src/timeline/pages/standalone/standalone.js');
   const settings = read('src/timeline/pages/settings/settings.html');
   const settingsScript = read('src/timeline/pages/settings/settings.js');
+  const settingsStyle = read('src/timeline/pages/settings/settings.css');
   const background = read('src/timeline/background/background.js');
   const sidepanel = read('src/sidepanel/App.tsx');
 
@@ -1299,6 +1300,20 @@ function testUiContracts() {
     '工作台空数据时应隐藏占位视图，避免把空态推到首屏之外',
   );
   assert.match(settings, /<kbd[^>]*>\s*bk\s*<\/kbd>/, '设置页必须显示 manifest 的 bk 关键词');
+  assert.match(settings, /<html[^>]*class=["'][^"']*i18n-pending/, '设置页首屏应在语言加载完成前保持隐藏');
+  assert.match(settingsStyle, /html\.i18n-pending\s+body\s*\{[^}]*visibility:\s*hidden/, '语言待加载状态不得显示英文回退文案');
+  assert.match(settingsScript, /finally\s*\{\s*document\.documentElement\.classList\.remove\(['"]i18n-pending['"]\)/, '语言读取成功或失败后都必须恢复页面显示');
+  assert.match(settingsScript, /DOMContentLoaded['"],\s*async[\s\S]{0,120}await\s+loadLanguage\(\)/, '设置页其余面板应在语言应用后初始化');
+  assert.match(settings, /id=["']learningFeedbackList["']/, '学习统计必须提供反馈记录明细容器');
+  assert.match(settings, /id=["']clearLearningRecordsBtn["']/, '学习统计必须提供独立的学习记录清理入口');
+  assert.match(settings, /id=["']clearReviewQueueBtn["'][\s\S]{0,100}clearQueue/, '待复核列表必须提供语义明确的队列清理入口');
+  assert.match(settingsScript, /recommendationLearningState\?\.recentFeedback/, '设置页必须渲染后台返回的最近反馈');
+  assert.match(settingsScript, /accepted:\s*['"]learningRecordAccepted['"][\s\S]{0,180}rejected:\s*['"]learningRecordRejected['"][\s\S]{0,100}cancelled:\s*['"]learningRecordCancelled['"]/, '学习记录必须区分接受、拒绝和取消');
+  assert.match(settingsScript, /action:\s*['"]clearRecommendationLearning['"]/, '清空学习记录必须走独立后台 mutation');
+  assert.match(background, /case\s+['"]clearRecommendationLearning['"]/, '后台必须处理学习记录清理消息');
+  assert.match(background, /store\.rules\s*=\s*store\.rules\.filter\(rule\s*=>\s*rule\.source\s*!==\s*['"]learned['"]\)/, '清空学习记录只能移除自动学习规则');
+  assert.match(background, /draft\.tags\s*=\s*recommendation\.tags\[0\]\?\.confidence\s*===\s*['"]high['"]/, '中低置信标签不得默认选中');
+  assert.match(background, /panelState\.tagCandidates[\s\S]{0,160}slice\(0,\s*3\)/, '快捷收藏必须展示最多三个标签候选');
   assert.match(
     standalone,
     /const\s+res\s*=\s*await chrome\.runtime\.sendMessage\(\{\s*action:\s*['"]togglePin['"][\s\S]{0,180}res\s*&&\s*res\.success/,

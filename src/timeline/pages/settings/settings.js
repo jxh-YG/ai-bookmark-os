@@ -81,6 +81,12 @@ const activeLearningBadge = document.getElementById('activeLearningBadge');
 const learningStatsDesc = document.getElementById('learningStatsDesc');
 const clearReviewQueueBtn = document.getElementById('clearReviewQueueBtn');
 const pendingReviewsList = document.getElementById('pendingReviewsList');
+const recommendationRuleTabs = document.getElementById('recommendationRuleTabs');
+const recommendationRulesList = document.getElementById('recommendationRulesList');
+const undoRecommendationLearningBtn = document.getElementById('undoRecommendationLearningBtn');
+const rebuildRecommendationLearningBtn = document.getElementById('rebuildRecommendationLearningBtn');
+const reevaluateBookmarksBtn = document.getElementById('reevaluateBookmarksBtn');
+const reevaluationResults = document.getElementById('reevaluationResults');
 
 // ===== 通知设置 DOM 引用 =====
 const notificationEnabledToggle = document.getElementById('notificationEnabledToggle');
@@ -2836,16 +2842,9 @@ function renderStopWords(stopWords) {
   `).join('');
   stopWordsList.querySelectorAll('.tagrule-item-delete').forEach(btn => {
     btn.addEventListener('click', async () => {
-      // 停用词删除：重新获取规则，移除该项后保存
-      const res = await chrome.runtime.sendMessage({ action: 'getDynamicRules' });
-      if (res && res.success && res.rules) {
-        const word = btn.dataset.word;
-        res.rules.stopWords = (res.rules.stopWords || []).filter(w => w !== word);
-        // 直接保存（复用 saveDynamicRules via background）
-        await chrome.runtime.sendMessage({ action: 'saveDynamicRules', rules: res.rules });
-        await loadTagRules();
-        showToast(i18n('settingsSaved'), 'success');
-      }
+      await chrome.runtime.sendMessage({ action: 'removeDynamicStopWord', word: btn.dataset.word });
+      await loadTagRules();
+      showToast(i18n('settingsSaved'), 'success');
     });
   });
 }
@@ -2916,22 +2915,280 @@ clearLearnedTagsBtn.addEventListener('click', async () => {
 });
 
 // ===== 主动学习管理 =====
+let recommendationRuleState = 'candidate';
+let recommendationLearningState = null;
+let reevaluationItems = new Map();
+let reevaluationSelected = new Set();
+let reevaluationCancelled = false;
+let reevaluationApplying = false;
+
+function makeSettingsOperationId(prefix) {
+  return `${prefix}_${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`}`;
+}
+
 async function loadActiveLearning() {
   try {
-    const [queueRes, statsRes] = await Promise.all([
+    const [queueRes, statsRes, recommendationRes] = await Promise.all([
       chrome.runtime.sendMessage({ action: 'getReviewQueue' }),
-      chrome.runtime.sendMessage({ action: 'getLearningStats' })
+      chrome.runtime.sendMessage({ action: 'getLearningStats' }),
+      chrome.runtime.sendMessage({ action: 'getRecommendationLearningState' })
     ]);
 
-    const queue = (queueRes && queueRes.success) ? queueRes.queue || [] : [];
+    const legacyQueue = (queueRes && queueRes.success) ? queueRes.queue || [] : [];
     const stats = (statsRes && statsRes.success) ? statsRes.stats : null;
+    recommendationLearningState = recommendationRes?.success ? recommendationRes.state : null;
+    const recommendationQueue = (recommendationLearningState?.reviewQueue || []).filter(item => !item.legacy);
+    const queue = [...recommendationQueue, ...legacyQueue];
 
     updateActiveLearningBadge(queue.length);
-    renderLearningStats(stats);
+    renderLearningStats(stats, recommendationLearningState?.stats);
     renderPendingReviews(queue);
+    renderRecommendationRules();
   } catch (e) {
     // 静默处理
   }
+}
+
+function renderRecommendationRules() {
+  if (!recommendationRulesList) return;
+  const rules = (recommendationLearningState?.rules || []).filter(rule => rule.state === recommendationRuleState);
+  if (rules.length === 0) {
+    recommendationRulesList.innerHTML = '<div class="tagrule-empty">当前状态暂无规则</div>';
+    return;
+  }
+  recommendationRulesList.innerHTML = rules.map(rule => {
+    const positives = (rule.positiveFingerprints || []).length;
+    const negatives = (rule.negativeFingerprints || []).length;
+    const source = rule.source === 'user' ? '手动' : rule.source === 'legacy' ? '旧版待验证' : '自动学习';
+    const action = rule.state === 'disabled'
+      ? '<button class="btn btn-secondary btn-sm recommendation-rule-action" data-mutation="restore">恢复</button>'
+      : '<button class="btn btn-secondary btn-sm recommendation-rule-action" data-mutation="disable">停用</button>';
+    return `<div class="tagrule-item recommendation-rule-item" data-id="${escapeHtml(rule.id)}">
+      <span class="tagrule-item-text"><strong>${escapeHtml(rule.pattern)}</strong><small>${escapeHtml(rule.kind)} · ${source} · 确认 ${positives} / 反向 ${negatives}</small></span>
+      <span class="tagrule-item-tag">${escapeHtml(rule.target)}</span>
+      <span class="recommendation-rule-buttons">${action}<button class="btn btn-danger btn-sm recommendation-rule-action" data-mutation="delete">删除</button></span>
+    </div>`;
+  }).join('');
+  recommendationRulesList.querySelectorAll('.recommendation-rule-action').forEach(button => {
+    button.addEventListener('click', async () => {
+      const item = button.closest('.recommendation-rule-item');
+      const mutation = button.dataset.mutation;
+      if (mutation === 'delete' && !confirm('确定删除这条学习规则吗？')) return;
+      button.disabled = true;
+      const result = await chrome.runtime.sendMessage({
+        action: 'mutateRecommendationRule',
+        operationId: makeSettingsOperationId('rule'),
+        ruleId: item?.dataset.id,
+        mutation
+      }).catch(() => null);
+      if (!result?.success) showToast('规则操作失败', 'error');
+      await loadActiveLearning();
+    });
+  });
+}
+
+if (recommendationRuleTabs) {
+  recommendationRuleTabs.querySelectorAll('[data-state]').forEach(tab => tab.addEventListener('click', () => {
+    recommendationRuleState = tab.dataset.state || 'candidate';
+    recommendationRuleTabs.querySelectorAll('[data-state]').forEach(item => {
+      const active = item === tab;
+      item.classList.toggle('is-active', active);
+      item.setAttribute('aria-selected', String(active));
+    });
+    renderRecommendationRules();
+  }));
+}
+
+if (undoRecommendationLearningBtn) {
+  undoRecommendationLearningBtn.addEventListener('click', async () => {
+    if (!confirm('撤销最近一次推荐学习反馈吗？')) return;
+    const result = await chrome.runtime.sendMessage({
+      action: 'mutateRecommendationRule',
+      operationId: makeSettingsOperationId('undo'),
+      mutation: 'undo_last'
+    }).catch(() => null);
+    showToast(result?.success ? '已撤销最近学习' : '撤销失败', result?.success ? 'success' : 'error');
+    await loadActiveLearning();
+  });
+}
+
+if (rebuildRecommendationLearningBtn) {
+  rebuildRecommendationLearningBtn.addEventListener('click', async () => {
+    if (!confirm('根据保留的反馈重建自动学习规则吗？手动规则不会改变。')) return;
+    rebuildRecommendationLearningBtn.disabled = true;
+    const result = await chrome.runtime.sendMessage({
+      action: 'rebuildRecommendationLearning',
+      operationId: makeSettingsOperationId('rebuild')
+    }).catch(() => null);
+    rebuildRecommendationLearningBtn.disabled = false;
+    showToast(result?.success ? '学习规则已重建' : '重建失败', result?.success ? 'success' : 'error');
+    await loadActiveLearning();
+  });
+}
+
+function canApplyReevaluation(item) {
+  const folder = item?.recommendation?.folders?.[0];
+  if (!(folder?.confidence === 'high' && folder?.exists && (folder.id || folder.folderId))) return false;
+  const folderChanged = (folder.id || folder.folderId) !== item.parentId;
+  const recommendedTag = item.recommendation?.tags?.[0]?.confidence === 'high'
+    ? item.recommendation.tags[0].tag
+    : '';
+  const tagChanged = !!recommendedTag && !(item.tags || []).some(tag => tag.toLowerCase() === recommendedTag.toLowerCase());
+  return folderChanged || tagChanged;
+}
+
+async function applyReevaluationItem(item) {
+  if (!canApplyReevaluation(item)) return { success: false, reason: 'recommendation_not_applicable' };
+  const recommendation = item.recommendation;
+  const folder = recommendation.folders[0];
+  const folderId = folder.id || folder.folderId;
+  const recommendedTag = recommendation.tags?.[0]?.confidence === 'high' ? recommendation.tags[0].tag : '';
+  const tags = recommendedTag ? [recommendedTag] : [];
+  let moved = false;
+  try {
+    if (folderId !== item.parentId) {
+      await chrome.bookmarks.move(item.id, { parentId: folderId });
+      moved = true;
+    }
+    if (recommendedTag) {
+      const updated = await chrome.runtime.sendMessage({ action: 'updateBookmark', id: item.id, tags }).catch(() => null);
+      if (!updated?.success) throw new Error('tag_update_failed');
+    }
+    await chrome.runtime.sendMessage({
+      action: 'submitBookmarkRecommendationFeedback',
+      operationId: makeSettingsOperationId('reevaluate_apply'),
+      recommendationId: recommendation.recommendationId,
+      bookmarkId: item.id,
+      outcome: 'accepted',
+      changedFields: [],
+      selection: { folderPath: folder.folderPath || folder.path, tags }
+    }).catch(() => null);
+    return { success: true };
+  } catch (error) {
+    if (moved && item.parentId) {
+      await chrome.bookmarks.move(item.id, { parentId: item.parentId }).catch(() => null);
+    }
+    return { success: false, reason: error?.message || 'apply_failed' };
+  }
+}
+
+async function applySelectedReevaluations(ids, requireConfirmation = true) {
+  if (reevaluationApplying) return;
+  const selectedItems = ids.map(id => reevaluationItems.get(id)).filter(canApplyReevaluation);
+  if (selectedItems.length === 0) return;
+  const tagChanges = selectedItems.filter(item => {
+    const tag = item.recommendation?.tags?.[0];
+    return tag?.confidence === 'high' && !(item.tags || []).some(existing => existing.toLowerCase() === tag.tag.toLowerCase());
+  }).length;
+  const folderChanges = selectedItems.filter(item => {
+    const folder = item.recommendation?.folders?.[0];
+    return (folder?.id || folder?.folderId) !== item.parentId;
+  }).length;
+  if (requireConfirmation && !confirm(`将应用 ${selectedItems.length} 条高置信建议：移动 ${folderChanges} 条，更新标签 ${tagChanges} 条。是否继续？`)) return;
+  reevaluationApplying = true;
+  let succeeded = 0;
+  const failures = [];
+  for (let index = 0; index < selectedItems.length; index++) {
+    renderReevaluationResults(reevaluationItems, `正在应用 ${index + 1} / ${selectedItems.length}`);
+    const item = selectedItems[index];
+    const result = await applyReevaluationItem(item);
+    if (result.success) {
+      succeeded += 1;
+      reevaluationItems.delete(item.id);
+      reevaluationSelected.delete(item.id);
+    } else {
+      failures.push({ id: item.id, reason: result.reason });
+    }
+  }
+  renderReevaluationResults(
+    reevaluationItems,
+    failures.length > 0 ? `应用完成：成功 ${succeeded}，失败 ${failures.length}` : `已成功应用 ${succeeded} 条建议`,
+  );
+  reevaluationApplying = false;
+  showToast(failures.length > 0 ? `部分应用失败：${failures.length} 条` : `已应用 ${succeeded} 条重新评估结果`, failures.length > 0 ? 'error' : 'success');
+}
+
+function renderReevaluationResults(items, progressText = '', evaluating = false) {
+  if (!reevaluationResults) return;
+  const values = [...items.values()];
+  const rows = values.map(item => {
+    const recommendation = item.recommendation;
+    const folder = recommendation?.folders?.[0];
+    const tags = (recommendation?.tags || []).map(tag => tag.tag).join(', ');
+    const canApply = canApplyReevaluation(item);
+    return `<div class="reevaluation-item" data-id="${escapeHtml(item.id)}">
+      ${canApply ? `<label class="reevaluation-select"><input type="checkbox" ${reevaluationSelected.has(item.id) ? 'checked' : ''} aria-label="选择 ${escapeHtml(item.title || item.id)}"></label>` : '<span class="reevaluation-select-spacer"></span>'}
+      <span><strong>${escapeHtml(item.title || item.id)}</strong><small>${folder ? `${escapeHtml(folder.folderPath || folder.path)} · ${escapeHtml(folder.confidence)}` : escapeHtml(item.reason || '暂不推荐目录')}${tags ? ` · ${escapeHtml(tags)}` : ''}</small></span>
+      ${canApply ? `<button class="btn btn-primary btn-sm reevaluation-apply" ${reevaluationApplying ? 'disabled' : ''}>应用</button>` : ''}
+    </div>`;
+  }).join('');
+  const applicableCount = values.filter(canApplyReevaluation).length;
+  const selectedCount = [...reevaluationSelected].filter(id => canApplyReevaluation(items.get(id))).length;
+  const batch = applicableCount > 0
+    ? `<div class="reevaluation-batch"><span>可应用 ${applicableCount} 条，已选 ${selectedCount} 条</span><button id="applySelectedReevaluationsBtn" class="btn btn-primary btn-sm" type="button" ${selectedCount === 0 || reevaluationApplying ? 'disabled' : ''}>应用已选</button></div>`
+    : '';
+  const cancel = evaluating ? ' <button id="cancelReevaluationBtn" class="btn btn-secondary btn-sm" type="button">取消</button>' : '';
+  reevaluationResults.innerHTML = `<div class="reevaluation-progress">${escapeHtml(progressText)}${cancel}</div>${batch}${rows || '<div class="tagrule-empty">暂无可显示结果</div>'}`;
+  reevaluationResults.querySelector('#cancelReevaluationBtn')?.addEventListener('click', () => { reevaluationCancelled = true; });
+  reevaluationResults.querySelectorAll('.reevaluation-select input').forEach(checkbox => checkbox.addEventListener('change', () => {
+    const id = checkbox.closest('.reevaluation-item')?.dataset.id;
+    if (!id) return;
+    if (checkbox.checked) reevaluationSelected.add(id);
+    else reevaluationSelected.delete(id);
+    renderReevaluationResults(reevaluationItems, progressText);
+  }));
+  reevaluationResults.querySelector('#applySelectedReevaluationsBtn')?.addEventListener('click', () => {
+    applySelectedReevaluations([...reevaluationSelected]).catch(() => showToast('批量应用失败', 'error'));
+  });
+  reevaluationResults.querySelectorAll('.reevaluation-apply').forEach(button => button.addEventListener('click', async () => {
+    const row = button.closest('.reevaluation-item');
+    const item = reevaluationItems.get(row?.dataset.id);
+    const recommendation = item?.recommendation;
+    const folder = recommendation?.folders?.[0];
+    if (!item || !folder || !confirm(`将“${item.title || item.id}”移动到“${folder.folderPath || folder.path}”并应用推荐标签吗？`)) return;
+    button.disabled = true;
+    const result = await applyReevaluationItem(item);
+    if (result.success) {
+      reevaluationItems.delete(item.id);
+      reevaluationSelected.delete(item.id);
+      renderReevaluationResults(reevaluationItems, progressText);
+      showToast('已应用重新评估结果', 'success');
+    } else {
+      button.disabled = false;
+      showToast('应用重新评估结果失败', 'error');
+    }
+  }));
+}
+
+if (reevaluateBookmarksBtn) {
+  reevaluateBookmarksBtn.addEventListener('click', async () => {
+    reevaluateBookmarksBtn.disabled = true;
+    reevaluationCancelled = false;
+    reevaluationItems = new Map();
+    reevaluationSelected = new Set();
+    const bookmarkResponse = await chrome.runtime.sendMessage({ action: 'getBookmarks' }).catch(() => null);
+    const bookmarks = bookmarkResponse?.bookmarks || [];
+    if (reevaluationResults) {
+      reevaluationResults.innerHTML = '<div class="reevaluation-progress">准备重新评估… <button id="cancelReevaluationBtn" class="btn btn-secondary btn-sm" type="button">取消</button></div>';
+      reevaluationResults.querySelector('#cancelReevaluationBtn')?.addEventListener('click', () => { reevaluationCancelled = true; });
+    }
+    for (let index = 0; index < bookmarks.length && !reevaluationCancelled; index += 10) {
+      const chunk = bookmarks.slice(index, index + 10);
+      const result = await chrome.runtime.sendMessage({ action: 'reevaluateBookmarks', ids: chunk.map(item => item.id), allowAI: false }).catch(() => null);
+      for (const responseItem of result?.items || []) {
+        const bookmark = chunk.find(item => item.id === responseItem.id);
+        reevaluationItems.set(responseItem.id, {
+          ...responseItem,
+          title: bookmark?.title || responseItem.id,
+          tags: bookmark?.tags || [],
+          parentId: bookmark?.parentId || '',
+        });
+      }
+      renderReevaluationResults(reevaluationItems, `已评估 ${Math.min(index + chunk.length, bookmarks.length)} / ${bookmarks.length}`, true);
+    }
+    renderReevaluationResults(reevaluationItems, reevaluationCancelled ? `已取消，保留 ${reevaluationItems.size} 条结果` : `评估完成，共 ${reevaluationItems.size} 条结果`);
+    reevaluateBookmarksBtn.disabled = false;
+  });
 }
 
 function updateActiveLearningBadge(count) {
@@ -2944,9 +3201,13 @@ function updateActiveLearningBadge(count) {
   }
 }
 
-function renderLearningStats(stats) {
-  if (!stats) {
+function renderLearningStats(stats, recommendationStats) {
+  if (!stats && !recommendationStats) {
     learningStatsDesc.textContent = i18n('learningStatsDesc') || '—';
+    return;
+  }
+  if (recommendationStats) {
+    learningStatsDesc.textContent = `推荐反馈 ${recommendationStats.total || 0} 条：接受 ${recommendationStats.accepted || 0} / 修改 ${recommendationStats.modified || 0} / 拒绝 ${recommendationStats.rejected || 0} / 取消 ${recommendationStats.cancelled || 0}`;
     return;
   }
   const accepted = stats.totalAccepted || 0;
@@ -2965,6 +3226,40 @@ function renderPendingReviews(queue) {
   }
 
   pendingReviewsList.innerHTML = queue.map(item => {
+    if (item.type === 'move_observation') {
+      return `<div class="review-item review-item--observation" data-id="${escapeHtml(item.id)}">
+        <div class="review-info">
+          <div class="review-title">${escapeHtml(item.title || item.bookmarkId)}</div>
+          <div class="review-meta"><span class="review-reason">移动待复核</span><span>来源待确认</span></div>
+        </div>
+        <div class="review-folder-change"><span>${escapeHtml(item.fromFolderPath || '未分类')}</span><span aria-hidden="true">→</span><strong>${escapeHtml(item.toFolderPath || '未知目录')}</strong></div>
+        <div class="review-actions">
+          <button class="btn btn-primary btn-sm recommendation-review-action" data-decision="accept">确认为手动移动</button>
+          <button class="btn btn-secondary btn-sm recommendation-review-action" data-decision="ignore">忽略观察</button>
+        </div>
+      </div>`;
+    }
+    if (item.type === 'bookmark_recommendation') {
+      const recommendation = item.recommendation;
+      const folders = (recommendation?.folders || []).slice(0, 3);
+      const tags = (recommendation?.tags || []).slice(0, 3);
+      const canApply = !!(folders[0]?.existing && folders[0]?.id) || !!tags[0]?.tag;
+      const folderCandidates = folders.map((candidate, index) => `<span class="review-candidate"><b>${index + 1}</b><span class="review-candidate-label">${escapeHtml(candidate.folderPath || '未知目录')}</span><small>${recommendationConfidenceText(candidate.confidence)}</small></span>`).join('');
+      const tagCandidates = tags.map((candidate, index) => `<span class="review-candidate"><b>${index + 1}</b><span class="review-candidate-label">#${escapeHtml(candidate.tag)}</span><small>${recommendationConfidenceText(candidate.confidence)}</small></span>`).join('');
+      return `<div class="review-item review-item--recommendation" data-id="${escapeHtml(item.id)}">
+        <div class="review-info">
+          <div class="review-title">${escapeHtml(item.title || item.bookmarkId)}</div>
+          <div class="review-meta"><span class="review-reason">智能分类建议</span><span class="review-confidence">${recommendationConfidenceText(item.confidence)}</span>${item.aiTriggered ? '<span class="review-source review-source--ai">AI 辅助</span>' : ''}</div>
+        </div>
+        ${folderCandidates ? `<div class="review-candidates" aria-label="目录候选">${folderCandidates}</div>` : ''}
+        ${tagCandidates ? `<div class="review-candidates" aria-label="标签候选">${tagCandidates}</div>` : ''}
+        <div class="review-actions">
+          <button class="btn btn-primary btn-sm recommendation-review-action" data-decision="accept" ${canApply ? '' : 'disabled'}>采用首选</button>
+          <button class="btn btn-danger btn-sm recommendation-review-action" data-decision="reject">不采用建议</button>
+          ${recommendation ? '' : '<button class="btn btn-secondary btn-sm recommendation-review-action" data-decision="ignore">移除失效项</button>'}
+        </div>
+      </div>`;
+    }
     const isAI = item.source === 'ai';
     const aiBadge = isAI
       ? `<span class="review-source review-source--ai">${i18n('aiAssistedTag') || 'AI 辅助分类'}</span>`
@@ -3011,6 +3306,29 @@ function renderPendingReviews(queue) {
   pendingReviewsList.querySelectorAll('.review-ignore').forEach(btn => {
     btn.addEventListener('click', () => onIgnoreReview(btn.dataset.id));
   });
+  pendingReviewsList.querySelectorAll('.recommendation-review-action').forEach(button => {
+    button.addEventListener('click', () => onResolveRecommendationReview(
+      button.closest('.review-item')?.dataset.id,
+      button.dataset.decision,
+    ));
+  });
+}
+
+function recommendationConfidenceText(value) {
+  return ({ high: '高置信', medium: '中置信', low: '低置信', none: '暂不推荐' })[value] || '暂不推荐';
+}
+
+async function onResolveRecommendationReview(reviewId, decision) {
+  if (!reviewId || !decision) return;
+  if (decision === 'accept' && !confirm('确认采用此项并用于后续推荐学习吗？')) return;
+  const result = await chrome.runtime.sendMessage({
+    action: 'resolveRecommendationReview',
+    operationId: makeSettingsOperationId('resolve_review'),
+    reviewId,
+    decision,
+  }).catch(() => null);
+  showToast(result?.success ? '待复核项已处理' : `处理失败：${result?.error || 'unknown'}`, result?.success ? 'success' : 'error');
+  await loadActiveLearning();
 }
 
 function getReasonText(reason) {
@@ -3044,6 +3362,7 @@ async function onConfirmReview(id, isModify) {
 
     await chrome.runtime.sendMessage({
       action: 'confirmTagReview',
+      operationId: makeSettingsOperationId('legacy_review'),
       queueItem: item,
       confirmedTags: [tag],
       reviewAction: isModify ? 'modified' : 'accepted'
@@ -3063,7 +3382,11 @@ async function onIgnoreReview(id) {
     const item = queueRes.queue.find(q => q.id === id);
     if (!item) return;
 
-    await chrome.runtime.sendMessage({ action: 'ignoreTagReview', queueItem: item });
+    await chrome.runtime.sendMessage({
+      action: 'ignoreTagReview',
+      operationId: makeSettingsOperationId('legacy_ignore'),
+      queueItem: item
+    });
     await loadActiveLearning();
     showToast(i18n('settingsSaved'), 'success');
   } catch (e) {
@@ -3073,7 +3396,8 @@ async function onIgnoreReview(id) {
 
 // 清空待确认队列
 clearReviewQueueBtn.addEventListener('click', async () => {
-  await chrome.runtime.sendMessage({ action: 'clearReviewQueue' });
+  if (!confirm('确定清空全部待复核项吗？')) return;
+  await chrome.runtime.sendMessage({ action: 'clearReviewQueue', operationId: makeSettingsOperationId('clear_reviews') });
   await loadActiveLearning();
   showToast(i18n('settingsSaved'), 'success');
 });
@@ -3399,12 +3723,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // 监听队列变化广播，刷新徽章和列表
 chrome.runtime.onMessage.addListener((message) => {
-  if (message.action === 'reviewQueueChanged') {
-    updateActiveLearningBadge(message.count || 0);
-    // 如果当前在主动学习面板，刷新列表
-    const panel = document.getElementById('panel-activelearning');
-    if (panel && panel.classList.contains('active')) {
-      loadActiveLearning();
-    }
+  if (message.action === 'reviewQueueChanged' || message.action === 'recommendationReviewQueueChanged') {
+    loadActiveLearning();
   }
 });

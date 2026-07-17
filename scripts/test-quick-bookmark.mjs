@@ -380,7 +380,7 @@ assert.deepEqual(tagNamesFor({
   title: 'Source repository',
   url: 'https://github.com/example/project/tree/main',
   domain: 'github.com',
-}), ['开发']);
+}), ['开发', '项目']);
 assert.deepEqual(tagNamesFor({ title: '', url: 'not a url', domain: '' }), ['其他']);
 assert.deepEqual(tagNamesFor({
   title: '',

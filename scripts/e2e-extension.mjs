@@ -145,9 +145,10 @@ try {
   assert.equal(await settings.locator('#aiPageContentToggle').isChecked(), true);
   assert.match(await settings.locator('[data-i18n="aiPrivacyNotice"]').innerText(), /AI|服务商|provider/i);
 
+  const aiRequestsBeforeConnectionTest = requests.ai;
   await settings.locator('#aiTestBtn').click();
   await settings.locator('.toast').filter({ hasText: /连接成功|Connection successful/i }).waitFor({ timeout: 10000 });
-  assert.equal(requests.ai, 1, 'AI connection test did not reach the local mock service');
+  assert.equal(requests.ai, aiRequestsBeforeConnectionTest + 1, 'AI connection test did not reach the local mock service exactly once');
 
   await settings.locator('#aiPageContentToggle').evaluate((element) => element.click());
   await waitForStorage(settings, async () => {
@@ -187,7 +188,23 @@ try {
   await settings.keyboard.press('Tab');
   assert.equal(await settings.evaluate(() => document.activeElement?.matches('button, input, select, textarea, a[href]')), true, 'keyboard focus did not reach an interactive control');
 
+  await settings.locator('[data-panel="activelearning"]').click();
+  await settings.locator('#panel-activelearning').waitFor({ state: 'visible' });
+  assert.equal(await settings.locator('#recommendationRuleTabs [role="tab"]').count(), 4);
+  await settings.locator('#reevaluateBookmarksBtn').click();
+  await settings.locator('#reevaluationResults').filter({ hasText: /评估完成|Evaluation complete/i }).waitFor({ timeout: 15000 });
+  await settings.locator('.review-item--recommendation').first().waitFor({ state: 'visible', timeout: 10000 });
+  assert.equal(await settings.locator('#reevaluationResults .reevaluation-select input').count(), 0, 'medium-confidence reevaluation items must not be preselected');
+  const recommendationCandidates = await settings.locator('.review-item--recommendation .review-candidates').allInnerTexts();
+  assert.doesNotMatch(recommendationCandidates.join('\n'), /E2E Synthetic/, 'folder names must not leak into tag candidates');
+  await settings.screenshot({ path: join(artifactsPath, 'learning-desktop.png'), fullPage: true });
+  await assertNoHorizontalOverflow(settings, 'learning desktop');
+
   await settings.setViewportSize({ width: 390, height: 844 });
+  await settings.screenshot({ path: join(artifactsPath, 'learning-narrow.png'), fullPage: true });
+  await assertNoHorizontalOverflow(settings, 'learning narrow');
+  await settings.locator('[data-panel="ai"]').click();
+  await settings.locator('#panel-ai').waitFor({ state: 'visible' });
   await settings.screenshot({ path: join(artifactsPath, 'settings-narrow.png') });
   await assertNoHorizontalOverflow(settings, 'settings narrow');
   const compressedRows = await settings.locator('#panel-ai .setting-row:visible .setting-main').evaluateAll((elements) => elements

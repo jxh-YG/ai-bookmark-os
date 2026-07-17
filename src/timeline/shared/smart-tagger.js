@@ -36,9 +36,9 @@ const DOMAIN_RULES = [
   { domains: ['coursera.org', 'udemy.com', 'edx.org', 'khanacademy.org',
                'mdn.mozilla.org', 'developer.mozilla.org', 'w3schools.com',
                'runoob.com', 'liaoxuefeng.com', 'leetcode.com', 'hackerrank.com',
-               'codecademy.com', 'pluralsight.com', 'linkedin.com/learning',
+               'codecademy.com', 'pluralsight.com',
                'skillshare.com', 'udacity.com', 'brilliant.org', 'duolingo.com',
-               'memrise.com', 'quizlet.com', 'coursera.org', 'ocw.mit.edu',
+               'memrise.com', 'quizlet.com', 'ocw.mit.edu',
                'edu.cn', 'xuetangx.com', 'icourse163.org', 'imooc.com',
                'nowcoder.com', 'luogu.com.cn', 'atcoder.jp', 'codeforces.com'],
     tag: '学习', color: '#ff9800' },
@@ -54,7 +54,7 @@ const DOMAIN_RULES = [
   // 阅读
   { domains: ['medium.com', 'substack.com', 'juejin.cn',
                'csdn.net', 'dev.to', 'hackernoon.com', 'infoq.com',
-               'towardsdatascience.com', 'freecodecamp.org', 'sspai.com',
+               'freecodecamp.org', 'sspai.com',
                'qdaily.com', 'guokr.com',
                'douban.com', 'goodreads.com', 'book.douban.com',
                'readwise.io', 'pocket.co', 'instapaper.com', 'getpocket.com',
@@ -66,7 +66,7 @@ const DOMAIN_RULES = [
                'remove.bg', 'squoosh.app', 'excalidraw.com', 'draw.io',
                'diagrams.net', 'mermaid-js.github.io', 'carbon.now.sh',
                'diffchecker.com', 'prettier.io', 'babeljs.io', 'typescriptlang.org',
-               'caniuse.com', 'bundlephobia.com', 'npm trends.com',
+               'caniuse.com', 'bundlephobia.com', 'npmtrends.com',
                'speedtest.net', 'fast.com', 'virustotal.com', 'whois.com',
                'dnschecker.org', 'downforeveryoneorjustme.com', 'archive.org',
                'web.archive.org', 'temp-mail.org', '10minutemail.com'],
@@ -100,19 +100,19 @@ const DOMAIN_RULES = [
 
   // 金融
   { domains: ['stripe.com', 'paypal.com', 'coinbase.com', 'binance.com',
-               'eastmoney.com', 'xueqiu.com', 'investing.com', 'bloomberg.com',
-               'yahoo.com/finance', 'finance.yahoo.com', 'robinhood.com',
+               'eastmoney.com', 'xueqiu.com', 'investing.com',
+               'finance.yahoo.com', 'robinhood.com',
                'fidelity.com', 'vanguard.com', 'schwab.com', 'wise.com',
                'revolut.com', 'okx.com', 'huobi.com', 'gate.io',
                'tradingview.com', 'seekingalpha.com', 'morningstar.com'],
     tag: '金融', color: '#ffc107' },
 
   // 旅行
-  { domains: ['booking.com', 'airbnb.com', 'trip.com', 'google.com/maps',
+  { domains: ['booking.com', 'airbnb.com', 'trip.com',
                'maps.google.com', 'ctrip.com', 'lonelyplanet.com', 'mafengwo.cn',
                'tripadvisor.com', 'expedia.com', 'hotels.com', 'agoda.com',
                'kayak.com', 'skyscanner.com', 'priceline.com',
-               'qunar.com', 'tuniu.com', 'mafengwo.cn', 'qyer.com'],
+               'qunar.com', 'tuniu.com', 'qyer.com'],
     tag: '旅行', color: '#009688' },
 
   // AI
@@ -121,7 +121,7 @@ const DOMAIN_RULES = [
                'poe.com', 'perplexity.ai', 'character.ai', 'civitai.com',
                'ollama.com', 'lmstudio.ai', 'together.ai', 'anyscale.com',
                'modal.com', 'runpod.io', 'vast.ai', 'lambda.ai',
-               'deepmind.com', 'ai.google', 'ai.meta.com', 'microsoft.com/ai',
+               'deepmind.com', 'ai.google', 'ai.meta.com',
                'tongyi.aliyun.com', 'yiyan.baidu.com', 'chat.zhipu.ai',
                'kimi.moonshot.cn', 'doubao.com', 'tiangong.cn'],
     tag: 'AI', color: '#673ab7' },
@@ -130,9 +130,9 @@ const DOMAIN_RULES = [
   { domains: ['store.steampowered.com', 'epicgames.com', 'gog.com',
                'playstation.com', 'xbox.com', 'nintendo.com',
                'blizzard.com', 'riotgames.com', 'ea.com', 'ubisoft.com',
-               'twitch.tv', 'ign.com', 'gamespot.com', 'kotaku.com',
+               'ign.com', 'gamespot.com', 'kotaku.com',
                'pcgamer.com', 'rockpapershotgun.com', 'steampowered.com',
-               'steamcommunity.com', 'epicgames.com', 'itch.io',
+               'steamcommunity.com', 'itch.io',
                'moddb.com', 'nexusmods.com', 'gamefaqs.gamespot.com'],
     tag: '游戏', color: '#7c4dff' },
 
@@ -150,17 +150,17 @@ const DOMAIN_RULES = [
     tag: '法律', color: '#5d4037' },
 
   // 摄影
-  { domains: ['flickr.com', '500px.com', 'instagram.com', 'vsco.co',
+  { domains: ['flickr.com', '500px.com', 'vsco.co',
                'shutterstock.com', 'istockphoto.com', 'gettyimages.com',
-               'adobe.com/stock', 'tuchong.com', 'huaban.com',
+               'tuchong.com', 'huaban.com',
                'petal.com', 'stocksnap.io', 'rawpixel.com'],
     tag: '摄影', color: '#e040fb' },
 
   // 社交
-  { domains: ['facebook.com', 'instagram.com', 'linkedin.com', 'tiktok.com',
+  { domains: ['facebook.com', 'instagram.com', 'linkedin.com',
                'snapchat.com', 'pinterest.com', 'tumblr.com', 'discord.com',
                'slack.com', 'telegram.org', 'web.telegram.org', 'whatsapp.com',
-               'wechat.com', 'douban.com', 'xiaohongshu.com', 'zhihu.com',
+               'wechat.com', 'xiaohongshu.com', 'zhihu.com',
                'twitter.com', 'x.com'],
     tag: '社交', color: '#2196f3' },
 
@@ -206,7 +206,7 @@ const DOMAIN_RULES = [
   // 体育
   { domains: ['espn.com', 'nba.com', 'fifa.com', 'uefa.com',
                'espncricinfo.com', 'goal.com', 'transfermarkt.com',
-               'sohu.com/sports', 'sports.sina.com.cn', 'hupu.com',
+               'sports.sina.com.cn', 'hupu.com',
                'dongqiudi.com', 'liveScore.com', 'flashscore.com'],
     tag: '体育', color: '#2e7d32' },
 
@@ -302,7 +302,7 @@ function cleanTitle(title) {
 function normalizeFolderName(name) {
   if (!name) return name;
   const key = name.toLowerCase().trim();
-  return FOLDER_SYNONYM_MAP.get(key) || name;
+  return canonicalizeTagName(FOLDER_SYNONYM_MAP.get(key) || name);
 }
 
 // ===== 信号基础权重（便于统一调参） =====
@@ -376,7 +376,7 @@ const KEYWORD_TAG_MAP = {
            'vulnerability', 'pentest', '安全', '加密', '漏洞', '渗透',
            'firewall', 'ssl', 'tls', 'xss', 'csrf', '注入', 'sql注入',
            'rbac', '零信任', 'waf', 'ddos', '钓鱼', '社工',
-           'cve', 'cwe', 'owasp', '等保', '合规', '审计'],
+           'cve', 'cwe', 'owasp', '等保', '审计'],
   '产品': ['product', 'roadmap', 'agile', 'scrum',
            '需求', '产品', '用户', '运营', '增长', '竞品', 'mvp', 'okr',
            '用户画像', '用户旅程', '北极星指标', '留存', '转化', '裂变',
@@ -395,8 +395,8 @@ const KEYWORD_TAG_MAP = {
            '运动', '健身', '营养', '饮食', '睡眠', '心理', '冥想',
            'yoga', '跑步', '卡路里', 'bmi', '体检', '中医', '养生',
            '康复', '疫苗', '症状', '诊断', '处方'],
-  '法律': ['law', 'legal', 'regulation', 'compliance', '法律', '法规',
-           '合规', '合同', '知识产权', '专利', '商标', '版权',
+  '法律': ['law', 'legal', 'regulation', '法律', '法规',
+           '合同', '知识产权', '专利', '商标', '版权',
            '隐私', 'gdpr', '数据保护', '诉讼', '仲裁', '劳动法',
            '公司法', '证券法', '反垄断', '牌照'],
   '摄影': ['photo', 'photography', 'camera', 'lens', '摄影', '相机',
@@ -425,7 +425,24 @@ const KEYWORD_TAG_MAP = {
   '社交': ['social', 'community', 'forum', 'chat', '社交', '社区',
            '论坛', '聊天', '群组', '粉丝', '关注', '互动',
            '直播', '短视频', 'vlog', '内容创作', '自媒体', 'kol',
-           '私域', '公域', '流量', '涨粉', '变现']
+           '私域', '公域', '流量', '涨粉', '变现'],
+  '文章': ['article', 'blog post', 'longform', '专栏文章', '技术文章', '深度报道'],
+  '项目': ['repository', 'source code', 'open source project', '代码仓库', '开源项目', '项目主页'],
+  'API': ['api reference', 'sdk reference', 'endpoint', '接口文档', '开发接口', 'webhook'],
+  '学习': ['course', 'lesson', 'curriculum', '学习', '课程', '课堂', '练习题', '在线教育'],
+  '教程': ['tutorial', 'how to', 'getting started', 'quickstart', '教程', '入门指南', '操作步骤'],
+  '文档': ['documentation', 'manual', 'reference guide', '文档', '手册', '知识库', '帮助中心'],
+  '工具': ['online tool', 'converter', 'generator', 'calculator', '在线工具', '转换器', '生成器'],
+  '视频': ['video', 'movie', 'streaming', '视频', '影视', '直播回放', '播放列表'],
+  '阅读': ['reading', 'book review', 'essay', '阅读', '读书', '书评', '随笔'],
+  '资讯': ['news', 'breaking news', 'press release', '新闻', '资讯', '快讯', '行业动态'],
+  '购物': ['shopping', 'product detail', 'coupon', '购物', '商品详情', '优惠券', '比价'],
+  '美食': ['food', 'recipe', 'restaurant', '美食', '菜谱', '餐厅', '烹饪'],
+  '汽车': ['automotive', 'car review', 'vehicle', '汽车', '车型', '购车', '试驾'],
+  '房产': ['real estate', 'property listing', '房产', '楼盘', '租房', '买房'],
+  '政务': ['government', 'public service', '政务', '政府公报', '办事指南', '行政许可'],
+  '体育': ['sports', 'football', 'basketball', '体育', '足球', '篮球', '赛事'],
+  '其他': ['uncategorized', 'miscellaneous', '未分类内容']
 };
 
 // ===== 标签原型语义文档（用于 BM25 文档级匹配） =====
@@ -434,12 +451,12 @@ const TAG_PROTOTYPES = {
   'AI': `人工智能、机器学习与深度学习、大语言模型 LLM 与 GPT、神经网络与 Transformer、计算机视觉与图像生成、自然语言处理 NLP、RAG 检索增强生成、Agent 智能体、模型训练与微调、Stable Diffusion 与 Midjourney、文生图与文生视频、AI 应用与工具平台`,
   '设计': `UI UX 设计、界面设计与视觉设计、设计系统与组件库、Figma Sketch 原型工具、图标字体配色排版、交互设计与用户体验、品牌与平面设计、动画与动效、图片素材与摄影资源`,
   '数据': `数据分析与数据科学、数据库与数据仓库、数据可视化与报表、统计与机器学习、大数据与实时计算、数据治理与 ETL、SQL 查询与 BI 工具、数据集与基准测试`,
-  '安全': `网络安全与信息安全、加密与认证授权、漏洞扫描与渗透测试、Web 安全与代码审计、零信任与合规、防火墙 WAF 与 DDoS 防护、安全运营与事件响应`,
+  '安全': `网络安全与信息安全、加密与认证授权、漏洞扫描与渗透测试、Web 安全与代码审计、零信任、防火墙 WAF 与 DDoS 防护、安全运营与事件响应`,
   '产品': `产品管理与产品设计、需求分析与用户研究、敏捷开发与 Scrum、增长运营与 A/B 测试、竞品分析与路线图、用户画像与旅程地图、MVP 与 OKR`,
   'DevOps': `CI/CD 持续集成与交付、容器与 Kubernetes 编排、监控告警与可观测性、基础设施即代码、SRE 站点可靠性工程、日志追踪与自动化运维`,
   '游戏': `电子游戏与独立游戏、Unity Unreal 游戏引擎、3D 建模与渲染、游戏设计与关卡设计、Steam 主机与手游、物理引擎与 AI 行为树、像素艺术与 Shader`,
   '健康': `健康医疗与健身、运动锻炼与营养饮食、心理健康与冥想、疾病症状与诊疗、疫苗体检与中医养生、睡眠与康复、医疗资讯与健康管理`,
-  '法律': `法律法规与合规、合同协议与知识产权、专利商标与版权、隐私保护 GDPR、诉讼仲裁与劳动法、公司法证券法反垄断、牌照许可与监管`,
+  '法律': `法律法规与监管要求、合同协议与知识产权、专利商标与版权、隐私保护 GDPR、诉讼仲裁与劳动法、公司法证券法反垄断、牌照许可与监管`,
   '摄影': `摄影与拍摄、相机镜头与曝光、人像风光与街拍、构图与后期修图、Lightroom Photoshop、RAW 处理与滤镜、延时全景与 HDR、胶片与视频创作`,
   '区块链': `区块链与 Web3、加密货币与 DeFi、智能合约与 Solidity、以太坊比特币与跨链、NFT DAO 与 Layer2、零知识证明与 zk、空投质押与流动性挖矿`,
   '学术': `学术论文与期刊、学位论文与毕业论文、文献综述与引用、实验研究与数据集、arXiv 预印本、DOI 与影响因子、同行评审 peer review、SCI 核心期刊与研究方法`,
@@ -459,8 +476,61 @@ const TAG_PROTOTYPES = {
   '资讯': `科技新闻与行业动态、产品发布与更新公告、公司融资与收购并购、政策法规与监管、市场分析与趋势预测、热点事件与突发事件报道、媒体报道与专访`,
   '社交': `社交与社区、论坛与聊天、内容创作与自媒体、粉丝关注与互动、直播短视频与 KOL、私域流量与社群运营`,
   '购物': `购物与电商、商品详情与价格、淘宝京东亚马逊、优惠券与比价、数码家电与服装、海淘与跨境电商`,
+  '文章': `文章、博客、专栏与长文，技术文章、观点评论、深度报道、知识分享、原创内容与专题写作`,
+  '项目': `软件项目、代码仓库与开源项目，项目主页、源码、提交记录、问题追踪、版本发布与协作开发`,
+  'API': `API 接口与 SDK 参考，端点、请求响应、认证、Webhook、OpenAPI Swagger 与开发者接口文档`,
+  '学习': `在线学习、课程与课堂，教学大纲、练习题、培训、教育平台、学习路径与技能提升`,
   '其他': ` miscellaneous 其他未分类内容、个人笔记与随笔、生活记录与杂项、无法明确归类的网页`
 };
+
+const CATEGORY_ID_BY_LABEL = Object.freeze({
+  '开发': 'development', 'AI': 'ai', '设计': 'design', '数据': 'data', '安全': 'security',
+  '产品': 'product', 'DevOps': 'devops', '游戏': 'gaming', '健康': 'health', '法律': 'legal',
+  '摄影': 'photography', '区块链': 'blockchain', '学术': 'academic', '金融': 'finance',
+  '旅行': 'travel', '美食': 'food', '汽车': 'automotive', '房产': 'real_estate',
+  '政务': 'government', '体育': 'sports', '教程': 'tutorial', '文档': 'documentation',
+  '工具': 'tools', '视频': 'video', '音乐': 'music', '阅读': 'reading', '资讯': 'news',
+  '社交': 'social', '购物': 'shopping', '文章': 'article', '项目': 'project', 'API': 'api',
+  '学习': 'learning', '其他': 'other',
+});
+
+const CATEGORY_ALIASES = Object.freeze({
+  '人工智能': 'AI', '机器学习': 'AI', '大模型': 'AI',
+  '编程': '开发', '前端': '开发', '后端': '开发', '代码': '开发',
+  '运维': 'DevOps', '数据科学': '数据', '数据库': '数据',
+  '投资': '金融', '理财': '金融', '新闻': '资讯', '博客': '文章',
+  '课程': '学习', '教育': '学习', '说明书': '文档', '接口': 'API',
+});
+
+const CATEGORY_TAXONOMY = Object.freeze(Object.fromEntries(
+  Object.keys(TAG_PROTOTYPES).map(label => [CATEGORY_ID_BY_LABEL[label], {
+    id: CATEGORY_ID_BY_LABEL[label],
+    label,
+    aliases: Object.entries(CATEGORY_ALIASES).filter(([, target]) => target === label).map(([alias]) => alias),
+  }])
+));
+
+function canonicalizeTagName(value) {
+  const tag = String(value || '').trim();
+  return CATEGORY_ALIASES[tag] || tag;
+}
+
+function isCanonicalCategoryTag(value) {
+  return Object.prototype.hasOwnProperty.call(CATEGORY_ID_BY_LABEL, canonicalizeTagName(value));
+}
+
+function getSmartTaggerRuleAudit() {
+  const core = typeof globalThis !== 'undefined' ? globalThis.BookmarkRecommendationCore : null;
+  if (!core?.auditRuleSet) return { valid: false, errors: [{ code: 'recommendation_core_unavailable' }] };
+  return core.auditRuleSet({
+    domainRules: DOMAIN_RULES,
+    urlPathRules: URL_PATH_RULES,
+    keywordMap: KEYWORD_TAG_MAP,
+    prototypes: TAG_PROTOTYPES,
+    taxonomy: CATEGORY_TAXONOMY,
+    aliases: CATEGORY_ALIASES,
+  });
+}
 
 // ===== 关键词权重覆盖（泛词低权，专属词高权） =====
 const KEYWORD_WEIGHT_OVERRIDES = {
@@ -512,11 +582,32 @@ function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const CHINESE_WORD_SEGMENTER = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+  ? new Intl.Segmenter('zh', { granularity: 'word' })
+  : null;
+
+function segmentChineseWords(text) {
+  const value = String(text || '');
+  if (CHINESE_WORD_SEGMENTER) {
+    return [...CHINESE_WORD_SEGMENTER.segment(value)]
+      .filter(item => item.isWordLike && /[\u4e00-\u9fa5]/.test(item.segment))
+      .map(item => item.segment.toLowerCase());
+  }
+  const words = [];
+  for (const segment of value.match(/[\u4e00-\u9fa5]+/g) || []) {
+    if (segment.length === 1) words.push(segment);
+    else for (let index = 0; index < segment.length - 1; index++) words.push(segment.slice(index, index + 2));
+  }
+  return words;
+}
+
 // 英文关键词要求整词匹配，避免 node → notes 这类子串误命中
 function keywordMatchesWhole(kw, textLower) {
   const lowerKw = kw.toLowerCase();
-  // 含中文或多词短语仍用子串匹配
-  if (/[\u4e00-\u9fa5]/.test(lowerKw) || lowerKw.includes(' ')) {
+  if (/[\u4e00-\u9fa5]/.test(lowerKw)) {
+    return segmentChineseWords(textLower).includes(lowerKw);
+  }
+  if (lowerKw.includes(' ')) {
     return textLower.includes(lowerKw);
   }
   const re = new RegExp(`\\b${escapeRegex(lowerKw)}\\b`, 'i');
@@ -540,6 +631,8 @@ const TITLE_REGEX_RULES = [
   { regex: /(spark|flink|kafka)[\s\-_]*(流式|实时|批处理|数据管道|etl)/i, tag: '数据', score: 2 },
   // 安全组合
   { regex: /(xss|csrf|sql.?注入|漏洞|渗透)[\s\-_]*(攻击|防御|修复|检测|防护)/i, tag: '安全', score: 2 },
+  { regex: /((网络|信息|数据|云|系统)安全|等保|零信任).{0,10}(合规|compliance)|(合规|compliance).{0,10}((网络|信息|数据|云|系统)安全|等保|零信任)/i, tag: '安全', score: 3 },
+  { regex: /(法律|法规|监管|隐私|gdpr|合同).{0,10}(合规|compliance)|(合规|compliance).{0,10}(法律|法规|监管|隐私|gdpr|合同)/i, tag: '法律', score: 3 },
   // 产品组合
   { regex: /(用户|user)[\s\-_]*(增长|留存|转化|画像|旅程|研究|调研)/i, tag: '产品', score: 2 },
   // 金融组合
@@ -556,7 +649,7 @@ const TITLE_REGEX_RULES = [
   { regex: /(教程|指南|guide|tutorial)[\s\-_]*(入门|实战|详解|系列|合集)/i, tag: '教程', score: 2 },
   { regex: /(在线|网页|免费)[\s\-_]*(工具|转换|格式化|压缩|生成|计算器)/i, tag: '工具', score: 3 },
   { regex: /(json|regex|markdown|yaml|sql|图片|pdf|base64)[\s\-_]*(格式化|转换|压缩|美化|工具)/i, tag: '工具', score: 3 },
-  { regex: /(隐私政策|用户协议|服务条款|法律声明|版权声明|合规|gdpr|license agreement|terms of service)/i, tag: '法律', score: 3 },
+  { regex: /(隐私政策|用户协议|服务条款|法律声明|版权声明|gdpr|license agreement|terms of service)/i, tag: '法律', score: 3 },
   { regex: /(github|gitlab|bitbucket|gitea)[\s\-_]*(仓库|项目|repository|project)/i, tag: '项目', score: 2 },
   { regex: /(博客|专栏|长文|随笔|读后感|原创文章|blog post|article)/i, tag: '文章', score: 2 }
 ];
@@ -720,7 +813,7 @@ function stemEnglish(word) {
 
 // ===== TF-IDF 计算 =====
 
-// 分词：中英文混合分词 + 中文单字/2-gram/3-gram + 英文词干
+// 分词：中英文混合分词，中文优先使用 Intl.Segmenter，不可用时回退双字组合。
 function tokenize(text) {
   if (!text) return [];
   const lowerText = text.toLowerCase();
@@ -729,17 +822,7 @@ function tokenize(text) {
   const englishWords = lowerText.match(/[a-z][a-z0-9._-]*/g) || [];
   const englishTokens = englishWords.map(stemEnglish).filter(w => w.length > 1);
 
-  // 中文：提取连续中文字符
-  const chineseSegments = text.match(/[\u4e00-\u9fa5]+/g) || [];
-  const chineseTokens = [];
-  for (const segment of chineseSegments) {
-    if (segment.length <= 4) chineseTokens.push(segment); // 短段整体保留
-    for (let i = 0; i < segment.length; i++) {
-      chineseTokens.push(segment[i]); // 单字
-      if (i < segment.length - 1) chineseTokens.push(segment.substring(i, i + 2)); // 2-gram
-      if (i < segment.length - 2) chineseTokens.push(segment.substring(i, i + 3)); // 3-gram
-    }
-  }
+  const chineseTokens = segmentChineseWords(text);
 
   const tokens = [...englishTokens, ...chineseTokens];
 
@@ -1419,6 +1502,7 @@ function extractTagsFromTitle(title) {
   const signals = {}; // tag -> string[] 信号来源追踪
 
   function addScore(tag, score, signal) {
+    tag = canonicalizeTagName(tag);
     scores[tag] = (scores[tag] || 0) + score;
     if (!signals[tag]) signals[tag] = [];
     signals[tag].push(signal);
@@ -1509,7 +1593,15 @@ const COMBINATION_RULES = [
   { domainIncludes: 'huggingface.co', pathIncludes: ['models', 'datasets', 'papers', 'spaces'], tag: 'AI', score: 15 },
   { domainIncludes: 'zhihu.com', pathIncludes: ['question', 'answer', 'zhuanlan'], tag: '社交', score: 10 },
   { domainIncludes: 'juejin.cn', pathIncludes: ['post'], tag: '阅读', score: 10 },
-  { domainIncludes: 'csdn.net', pathIncludes: ['article', 'blog'], tag: '阅读', score: 8 }
+  { domainIncludes: 'csdn.net', pathIncludes: ['article', 'blog'], tag: '阅读', score: 8 },
+  { domainIncludes: 'linkedin.com', pathIncludes: ['learning'], tag: '学习', score: 30 },
+  { domainIncludes: 'yahoo.com', pathIncludes: ['finance'], tag: '金融', score: 30 },
+  { domainIncludes: 'google.com', pathIncludes: ['maps'], tag: '旅行', score: 30 },
+  { domainIncludes: 'microsoft.com', pathIncludes: ['ai'], tag: 'AI', score: 30 },
+  { domainIncludes: 'adobe.com', pathIncludes: ['stock'], tag: '摄影', score: 30 },
+  { domainIncludes: 'sohu.com', pathIncludes: ['sports'], tag: '体育', score: 30 },
+  { domainIncludes: 'bloomberg.com', pathIncludes: ['markets', 'economics', 'finance'], tag: '金融', score: 24 },
+  { domainIncludes: 'twitch.tv', pathIncludes: ['directory', 'game'], tag: '游戏', score: 18 }
 ];
 
 function extractUrlFeatures(url) {
@@ -1570,7 +1662,11 @@ function matchCombinationRules(features) {
   if (!features) return [];
   const hits = [];
   for (const rule of COMBINATION_RULES) {
-    if (!features.effectiveDomain.includes(rule.domainIncludes)) continue;
+    const recommendationCore = typeof globalThis !== 'undefined' ? globalThis.BookmarkRecommendationCore : null;
+    const domainMatches = recommendationCore?.hostnameMatchesRule
+      ? recommendationCore.hostnameMatchesRule(features.effectiveDomain, rule.domainIncludes)
+      : features.effectiveDomain === rule.domainIncludes || features.effectiveDomain.endsWith('.' + rule.domainIncludes);
+    if (!domainMatches) continue;
     if (rule.pathIncludes.some(p =>
       features.path.includes('/' + p + '/') || features.path.endsWith('/' + p)
     )) {
@@ -1588,6 +1684,10 @@ function matchDomainTag(domain) {
   const matchesDomain = ruleDomain => {
     const candidate = String(ruleDomain || '').toLowerCase().replace(/\.$/, '');
     if (!candidate || candidate.includes('/')) return false;
+    const recommendationCore = typeof globalThis !== 'undefined' ? globalThis.BookmarkRecommendationCore : null;
+    if (recommendationCore?.hostnameMatchesRule) {
+      return recommendationCore.hostnameMatchesRule(lowerDomain, candidate);
+    }
     return lowerDomain === candidate || lowerDomain.endsWith('.' + candidate);
   };
 
@@ -1698,12 +1798,13 @@ async function getTagColor(tag) {
 }
 
 // ===== 主分类函数（5 层信号融合 + 置信度评分） =====
-async function autoTagBookmark(bookmark) {
+async function autoTagBookmark(bookmark, options = {}) {
   const scores = {};   // tag -> total score
   const signals = {};  // tag -> string[] 信号来源
   const tagColors = {};
 
   function addScore(tag, score, signal) {
+    tag = canonicalizeTagName(tag);
     scores[tag] = (scores[tag] || 0) + score;
     if (!signals[tag]) signals[tag] = [];
     signals[tag].push(signal);
@@ -1845,7 +1946,7 @@ async function autoTagBookmark(bookmark) {
 
   // Layer 4.9: 云端 AI 分类增强（仅对低置信样本触发）
   // AI 结果作为独立信号加入排序，不替代规则引擎
-  if (typeof classifyWithAI === 'function') {
+  if (options.skipAI !== true && typeof classifyWithAI === 'function') {
     const preAiTopTags = Object.entries(scores)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
@@ -2212,6 +2313,10 @@ async function loadDynamicRules() {
 async function saveDynamicRules(rules) {
   _dynamicRulesCache = rules;
   await chrome.storage.local.set({ [DYNAMIC_RULES_KEY]: rules });
+}
+
+function setDynamicRulesSnapshot(rules) {
+  _dynamicRulesCache = rules && typeof rules === 'object' ? rules : null;
 }
 
 // 判断域名是否已被系统见过（用于主动学习的 new_domain 触发）
@@ -2675,17 +2780,6 @@ async function onUserConfirmTag(queueItem, confirmedTags, action) {
 
   // 更新贝叶斯标签语料（文档频率已在书签入库时更新，避免同一文档重复计数）
   await updateTagCorpus(text, tags);
-
-  // 学习域名→标签映射（只要确认了有效标签就学，不限于修改）
-  if (queueItem.domain) {
-    await learnDomainTag(queueItem.domain, tags[0]);
-  }
-
-  // 学习关键词 + URL 路径规则
-  for (const tag of tags) {
-    await learnKeywords(text, tag);
-    if (queueItem.url) await learnPathRule(queueItem.url, tag);
-  }
 
   // 更新学习统计
   await updateLearningStats(queueItem.suggestedTags || [], tags, action);

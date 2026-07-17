@@ -1172,6 +1172,28 @@
           </div>
         </div>
 
+        <div class="setting-card">
+          <div class="setting-row recommendation-learning-toolbar">
+            <div class="setting-main">
+              <div class="setting-label">推荐学习规则</div>
+              <div class="setting-desc">自动规则需两个不同书签的一致确认才会启用；冲突规则不会参与推荐。</div>
+            </div>
+            <div class="setting-control recommendation-learning-actions">
+              <button id="undoRecommendationLearningBtn" class="btn btn-secondary btn-sm" type="button">撤销最近学习</button>
+              <button id="rebuildRecommendationLearningBtn" class="btn btn-secondary btn-sm" type="button">重建规则</button>
+              <button id="reevaluateBookmarksBtn" class="btn btn-primary btn-sm" type="button">重新评估已有书签</button>
+            </div>
+          </div>
+          <div id="recommendationRuleTabs" class="recommendation-rule-tabs" role="tablist" aria-label="推荐规则状态">
+            <button class="is-active" type="button" role="tab" aria-selected="true" data-state="candidate">候选</button>
+            <button type="button" role="tab" aria-selected="false" data-state="active">已激活</button>
+            <button type="button" role="tab" aria-selected="false" data-state="conflicted">冲突</button>
+            <button type="button" role="tab" aria-selected="false" data-state="disabled">停用</button>
+          </div>
+          <div id="recommendationRulesList" class="tagrule-list" aria-live="polite"></div>
+          <div id="reevaluationResults" class="reevaluation-results" aria-live="polite"></div>
+        </div>
+
         <!-- 待确认列表 -->
         <div class="setting-card">
           <div class="tagrule-card-row">

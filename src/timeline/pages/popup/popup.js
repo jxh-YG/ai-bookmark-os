@@ -1533,12 +1533,24 @@ let editingTags = [];
 let editingFolderId = null;     // 当前书签所在文件夹 ID
 let editingSelectedFolderId = null; // 用户在树中选择的文件夹 ID
 let allFolderTree = [];         // 缓存所有文件夹列表
+let editingRecommendationId = '';
+let editingRecommendationTouched = false;
+let editingRecommendationOriginal = null;
+let editingRecommendationFolders = [];
+
+function makeClientOperationId(prefix) {
+  return `${prefix}_${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`}`;
+}
 
 function openEditModal(id, title, url, tags = [], bookmarkData = null) {
   editingBookmarkId = id;
   editingTags = [...tags];
   editingFolderId = null;
   editingSelectedFolderId = null;
+  editingRecommendationId = '';
+  editingRecommendationTouched = false;
+  editingRecommendationOriginal = null;
+  editingRecommendationFolders = [];
   editTitle.value = title || '';
   editUrl.value = url || '';
   renderEditTags();
@@ -1557,45 +1569,73 @@ function openEditModal(id, title, url, tags = [], bookmarkData = null) {
 async function loadFolderSuggestion(url, title) {
   try {
     const res = await chrome.runtime.sendMessage({ action: 'suggestFolder', url, title });
-    if (res && res.success && res.folder) {
-      showFolderSuggestion(res.folder);
+    if (res && res.success) {
+      editingRecommendationId = res.recommendationId || '';
+      showFolderSuggestions(res.folders || (res.folder ? [res.folder] : []), res.tags || []);
     }
   } catch (e) {
     // 静默处理
   }
 }
 
-function showFolderSuggestion(folder) {
+function showFolderSuggestions(folders, tags = []) {
   // 移除已有建议
   const existing = document.getElementById('folderSuggestion');
   if (existing) existing.remove();
 
-  if (!folder || !folder.path) return;
+  const candidates = (Array.isArray(folders) ? folders : [])
+    .filter(folder => folder && (folder.path || folder.folderPath) && (folder.id || folder.folderId))
+    .slice(0, 3);
+  editingRecommendationFolders = candidates;
+  editingRecommendationOriginal = {
+    folderPath: candidates[0]?.folderPath || candidates[0]?.path || '',
+    tags: (Array.isArray(tags) ? tags : []).map(item => typeof item === 'string' ? item : item?.tag).filter(Boolean),
+  };
+  if (candidates.length === 0) return;
 
   const suggestion = document.createElement('div');
   suggestion.id = 'folderSuggestion';
   suggestion.className = 'folder-suggestion';
   suggestion.innerHTML = `
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-    </svg>
-    <span class="folder-suggestion-text">${i18n('suggestedFolder') || '建议目录'}: <strong>${escapeHtml(folder.path)}</strong></span>
-    <button class="folder-suggestion-apply">${i18n('apply') || '应用'}</button>
-    <button class="folder-suggestion-dismiss">×</button>
+    <div class="folder-suggestion-header"><strong>${i18n('suggestedFolder') || '建议目录'}</strong><button class="folder-suggestion-dismiss" aria-label="${i18n('ignore') || '不采用建议'}" title="${i18n('ignore') || '不采用建议'}">×</button></div>
+    <div class="folder-suggestion-list">
+      ${candidates.map((folder, index) => {
+        const path = folder.folderPath || folder.path || '';
+        const confidence = folder.confidence === 'high' ? '高' : folder.confidence === 'medium' ? '中' : '低';
+        const reason = (folder.reasons || []).slice(0, 1).join('');
+        return `<div class="folder-suggestion-row"><span class="folder-suggestion-text"><strong>${escapeHtml(path)}</strong><small>${escapeHtml(reason || `候选 ${index + 1}`)} · ${confidence}置信</small></span><button class="folder-suggestion-apply" data-index="${index}">${i18n('apply') || '应用'}</button></div>`;
+      }).join('')}
+    </div>
   `;
 
-  suggestion.querySelector('.folder-suggestion-apply').addEventListener('click', async () => {
-    if (folder.id) {
-      editingSelectedFolderId = folder.id;
-      renderFolderPath(folder.id);
-      renderFolderTree(folder.id);
+  suggestion.querySelectorAll('.folder-suggestion-apply').forEach(button => button.addEventListener('click', async () => {
+    const folder = candidates[Number(button.dataset.index) || 0];
+    const folderId = folder.id || folder.folderId;
+    const path = folder.folderPath || folder.path || '';
+    if (folderId) {
+      editingRecommendationTouched = true;
+      editingSelectedFolderId = folderId;
+      renderFolderPath(folderId);
+      renderFolderTree(folderId);
       editFolderTree.style.display = 'none';
-      showToast(`${i18n('editLocation')}: ${folder.path}`, 'success');
+      showToast(`${i18n('editLocation')}: ${path}`, 'success');
     }
     suggestion.remove();
-  });
+  }));
 
-  suggestion.querySelector('.folder-suggestion-dismiss').addEventListener('click', () => {
+  suggestion.querySelector('.folder-suggestion-dismiss').addEventListener('click', async () => {
+    if (editingRecommendationId) {
+      await chrome.runtime.sendMessage({
+        action: 'submitBookmarkRecommendationFeedback',
+        operationId: makeClientOperationId('edit_reject'),
+        recommendationId: editingRecommendationId,
+        bookmarkId: editingBookmarkId,
+        outcome: 'rejected',
+        changedFields: [],
+        selection: {}
+      }).catch(() => null);
+      editingRecommendationId = '';
+    }
     suggestion.remove();
   });
 
@@ -1609,6 +1649,10 @@ function closeEditModal() {
   editingTags = [];
   editingFolderId = null;
   editingSelectedFolderId = null;
+  editingRecommendationId = '';
+  editingRecommendationTouched = false;
+  editingRecommendationOriginal = null;
+  editingRecommendationFolders = [];
   editTagInput.value = '';
   editTagSuggestions.classList.remove('show');
   editFolderTree.style.display = 'none';
@@ -1625,28 +1669,33 @@ async function loadFolderTree(bookmarkId) {
     const currentNode = nodes && nodes[0];
     const currentParentId = currentNode ? currentNode.parentId : null;
     editingFolderId = currentParentId;
-    editingSelectedFolderId = currentParentId;
+    if (!editingRecommendationTouched) editingSelectedFolderId = currentParentId;
 
     // 获取完整书签树
     const tree = await chrome.bookmarks.getTree();
     allFolderTree = [];
     flattenFolderTree(tree, '');
 
-    renderFolderPath(currentParentId);
-    renderFolderTree(currentParentId);
+    const selectedFolderId = editingSelectedFolderId || currentParentId;
+    renderFolderPath(selectedFolderId);
+    renderFolderTree(selectedFolderId);
   } catch (err) {
     console.error('加载文件夹树失败:', err);
     editFolderPath.textContent = i18n('loadFailed');
   }
 }
 
-function flattenFolderTree(nodes, parentPath) {
+function flattenFolderTree(nodes, parentPath, recommendationParentPath = '') {
   for (const node of nodes) {
     if (!node.children) continue; // 跳过叶子节点（书签）
     const currentPath = parentPath ? `${parentPath} / ${node.title}` : node.title;
-    allFolderTree.push({ id: node.id, title: node.title, path: currentPath });
+    const isBrowserRoot = node.id === '0' || node.parentId === '0';
+    const recommendationPath = isBrowserRoot
+      ? recommendationParentPath
+      : (recommendationParentPath ? `${recommendationParentPath}/${node.title}` : node.title);
+    allFolderTree.push({ id: node.id, title: node.title, path: currentPath, recommendationPath });
     if (node.children && node.children.length > 0) {
-      flattenFolderTree(node.children, currentPath);
+      flattenFolderTree(node.children, currentPath, recommendationPath);
     }
   }
 }
@@ -1670,6 +1719,7 @@ function renderFolderTree(selectedId) {
     `;
     item.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (editingRecommendationId) editingRecommendationTouched = true;
       editingSelectedFolderId = folder.id;
       renderFolderPath(folder.id);
       renderFolderTree(folder.id);
@@ -1696,6 +1746,7 @@ async function handleEditSave() {
   if (!url) { showToast(i18n('editFailed'), 'error'); return; }
   try {
     const targetFolderId = editingSelectedFolderId || editingFolderId;
+    let moveSucceeded = true;
     const result = await chrome.runtime.sendMessage({
       action: 'updateBookmark',
       id: editingBookmarkId,
@@ -1711,12 +1762,36 @@ async function handleEditSave() {
         await chrome.bookmarks.move(editingBookmarkId, { parentId: targetFolderId });
         showToast(i18n('editAndMoveSuccess'), 'success');
       } catch (moveErr) {
+        moveSucceeded = false;
         console.error('移动文件夹失败:', moveErr);
         showToast(i18n('editSuccess'), 'success');
         showToast(i18n('moveFailed'), 'error');
       }
     } else {
       showToast(i18n('editSuccess'), 'success');
+    }
+    if (editingRecommendationId && editingRecommendationTouched && moveSucceeded) {
+      const targetFolder = allFolderTree.find(folder => folder.id === targetFolderId);
+      const targetCandidate = editingRecommendationFolders.find(folder => (folder.id || folder.folderId) === targetFolderId);
+      const finalFolderPath = targetCandidate?.folderPath || targetCandidate?.path || targetFolder?.recommendationPath || '';
+      const originalFolderPath = editingRecommendationOriginal?.folderPath || '';
+      const originalTags = (editingRecommendationOriginal?.tags || []).map(tag => tag.toLowerCase()).join('\u0000');
+      const finalTags = editingTags.map(tag => tag.toLowerCase()).join('\u0000');
+      const changedFields = [];
+      if (originalFolderPath !== finalFolderPath) changedFields.push('folder');
+      if (originalTags !== finalTags) changedFields.push('tags');
+      await chrome.runtime.sendMessage({
+        action: 'submitBookmarkRecommendationFeedback',
+        operationId: makeClientOperationId('edit_save'),
+        recommendationId: editingRecommendationId,
+        bookmarkId: editingBookmarkId,
+        outcome: changedFields.length > 0 ? 'modified' : 'accepted',
+        changedFields,
+        selection: {
+          folderPath: finalFolderPath,
+          tags: editingTags
+        }
+      }).catch(() => null);
     }
     closeEditModal();
     loadBookmarks();
@@ -1927,7 +2002,7 @@ async function handleQuickBookmarkClick() {
   try {
     const result = await chrome.runtime.sendMessage({ action: 'quickBookmark' });
     if (result?.pending) {
-      showToast(i18n('quickBookmarkOpened') || '已打开 AI 分类建议，请在当前页面确认收藏', 'success');
+      showToast(i18n('quickBookmarkOpened') || '已打开智能分类建议，请在当前页面确认收藏', 'success');
       window.close();
       return;
     }

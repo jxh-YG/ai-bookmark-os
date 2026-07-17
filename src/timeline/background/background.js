@@ -5,6 +5,7 @@ if (!self.AiProbeCore) {
 }
 
 // 引入 AI 增强层（需在 smart-tagger.js 之前加载，供其调用 classifyWithAI）
+importScripts('../shared/recommendation-core.js');
 importScripts('../shared/ai-tagger.js');
 importScripts('bookmark-data.js');
 // 引入 AI 辅助分类日志
@@ -352,6 +353,14 @@ const STORAGE_KEY_SETTINGS = 'app_settings';
 const STORAGE_KEY_IMPORT_OPERATIONS = 'bookmark_import_operations';
 const STORAGE_KEY_OPERATION_RESULTS = 'destructive_operation_results';
 const STORAGE_KEY_HEALTH_UNDO = 'healthRemovedBookmarksUndo';
+const RECOMMENDATION_STORE_KEY = 'bookmark_recommendation_store_v2';
+const RECOMMENDATION_STORE_VERSION = 2;
+const RECOMMENDATION_SNAPSHOT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const RECOMMENDATION_FEEDBACK_TTL_MS = 180 * 24 * 60 * 60 * 1000;
+const RECOMMENDATION_MAX_SNAPSHOTS = 200;
+const RECOMMENDATION_MAX_FEEDBACK = 5000;
+const RECOMMENDATION_MAX_REVIEWS = 200;
+const programmaticBookmarkMoves = new Map();
 const LABEL_CACHE_KEY = 'labelCache';
 const LABEL_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LABEL_CACHE_MAX_ENTRIES = 1000;
@@ -383,6 +392,745 @@ async function mutateStoredBookmarks(mutation) {
 
 async function mutateTombstones(mutation) {
   return mutateStorageResource(STORAGE_KEY_TOMBSTONES, (current) => mutation(Array.isArray(current) ? current : []));
+}
+
+function stableRecommendationId(prefix, value) {
+  let hash = 2166136261;
+  const text = String(value || '');
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${prefix}_${(hash >>> 0).toString(36)}`;
+}
+
+function makeRecommendationId(prefix = 'rec') {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}_${crypto.randomUUID()}`;
+  }
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeRecommendationUrl(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    parsed.hash = '';
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (/^(utm_|fbclid$|gclid$|spm$)/i.test(key)) parsed.searchParams.delete(key);
+    }
+    parsed.hostname = parsed.hostname.toLowerCase();
+    if (parsed.pathname.length > 1) parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+    return parsed.toString();
+  } catch {
+    return String(url || '').trim();
+  }
+}
+
+function recommendationUrlFingerprint(url) {
+  return stableRecommendationId('url', normalizeRecommendationUrl(url));
+}
+
+function markProgrammaticBookmarkMove(bookmarkId, parentId) {
+  programmaticBookmarkMoves.set(String(bookmarkId), {
+    parentId: String(parentId || ''),
+    expiresAt: Date.now() + 30 * 1000,
+  });
+}
+
+function consumeProgrammaticBookmarkMove(bookmarkId, parentId) {
+  const key = String(bookmarkId);
+  const entry = programmaticBookmarkMoves.get(key);
+  if (!entry) return false;
+  programmaticBookmarkMoves.delete(key);
+  return entry.expiresAt >= Date.now() && entry.parentId === String(parentId || '');
+}
+
+function emptyRecommendationStore(now = Date.now()) {
+  return {
+    version: RECOMMENDATION_STORE_VERSION,
+    migratedAt: now,
+    rules: [],
+    stopWords: [],
+    feedback: [],
+    snapshots: [],
+    reviewQueue: [],
+    stats: {
+      total: 0,
+      accepted: 0,
+      modified: 0,
+      rejected: 0,
+      cancelled: 0,
+      lastFeedbackAt: 0,
+    },
+    history: [],
+  };
+}
+
+function normalizeRecommendationRule(rule, now = Date.now()) {
+  if (!rule || typeof rule !== 'object') return null;
+  const kind = String(rule.kind || '').trim();
+  const pattern = String(rule.pattern || '').trim().toLowerCase();
+  const target = String(rule.target || '').trim();
+  if (!kind || !pattern || !target) return null;
+  const source = ['user', 'learned', 'legacy'].includes(rule.source) ? rule.source : 'learned';
+  const state = ['candidate', 'active', 'conflicted', 'disabled', 'deleted'].includes(rule.state)
+    ? rule.state
+    : (source === 'user' ? 'active' : 'candidate');
+  return {
+    id: String(rule.id || stableRecommendationId('rule', `${kind}|${pattern}|${target}|${source}`)),
+    kind,
+    pattern,
+    target,
+    source,
+    state,
+    positiveFingerprints: [...new Set((rule.positiveFingerprints || []).map(String))].slice(-100),
+    negativeFingerprints: [...new Set((rule.negativeFingerprints || []).map(String))].slice(-100),
+    legacyCount: Math.max(0, Number(rule.legacyCount) || 0),
+    createdAt: Number(rule.createdAt) || now,
+    updatedAt: Number(rule.updatedAt) || now,
+    disabledAt: Number(rule.disabledAt) || 0,
+  };
+}
+
+function normalizeRecommendationReviewItem(item, now = Date.now()) {
+  if (!item || typeof item !== 'object') return null;
+  if (item.legacy) return { ...item, legacy: true };
+  const type = ['bookmark_recommendation', 'move_observation'].includes(item.type) ? item.type : '';
+  const id = String(item.id || '').trim();
+  const bookmarkId = String(item.bookmarkId || '').trim();
+  const recommendationId = String(item.recommendationId || '').trim();
+  const createdAt = Number(item.createdAt) || now;
+  if (!type || !id || !bookmarkId || !recommendationId) return null;
+  if (now - createdAt > RECOMMENDATION_SNAPSHOT_TTL_MS) return null;
+  return {
+    id,
+    type,
+    bookmarkId,
+    recommendationId,
+    title: String(item.title || '').slice(0, 512),
+    urlFingerprint: String(item.urlFingerprint || ''),
+    fromFolderPath: normalizeBookmarkFolderPath(item.fromFolderPath || ''),
+    toFolderId: String(item.toFolderId || ''),
+    toFolderPath: normalizeBookmarkFolderPath(item.toFolderPath || ''),
+    sourceParentId: String(item.sourceParentId || ''),
+    sourceTags: normalizeTagList(item.sourceTags || []),
+    confidence: ['high', 'medium', 'low', 'none'].includes(item.confidence) ? item.confidence : 'none',
+    aiTriggered: item.aiTriggered === true,
+    createdAt,
+    updatedAt: Number(item.updatedAt) || createdAt,
+  };
+}
+
+function normalizeRecommendationStore(raw, now = Date.now()) {
+  const base = emptyRecommendationStore(now);
+  if (!raw || raw.version !== RECOMMENDATION_STORE_VERSION) return base;
+  const cutoffSnapshots = now - RECOMMENDATION_SNAPSHOT_TTL_MS;
+  const cutoffFeedback = now - RECOMMENDATION_FEEDBACK_TTL_MS;
+  return {
+    ...base,
+    ...raw,
+    version: RECOMMENDATION_STORE_VERSION,
+    rules: (raw.rules || []).map(rule => normalizeRecommendationRule(rule, now)).filter(Boolean),
+    stopWords: [...new Set((raw.stopWords || []).map(word => String(word || '').trim()).filter(Boolean))].slice(0, 500),
+    feedback: (raw.feedback || []).filter(item => item && Number(item.createdAt) >= cutoffFeedback).slice(-RECOMMENDATION_MAX_FEEDBACK),
+    snapshots: (raw.snapshots || []).filter(item => item && Number(item.createdAt) >= cutoffSnapshots).slice(-RECOMMENDATION_MAX_SNAPSHOTS),
+    reviewQueue: (raw.reviewQueue || [])
+      .map(item => normalizeRecommendationReviewItem(item, now))
+      .filter(Boolean)
+      .slice(-RECOMMENDATION_MAX_REVIEWS),
+    stats: { ...base.stats, ...(raw.stats || {}) },
+    history: Array.isArray(raw.history) ? raw.history.slice(-200) : [],
+  };
+}
+
+function migrateLegacyRecommendationStore(dynamicRules, reviewQueue, learningStats, now = Date.now()) {
+  const store = emptyRecommendationStore(now);
+  const dynamic = dynamicRules && typeof dynamicRules === 'object' ? dynamicRules : {};
+  for (const rule of dynamic.domainRules || []) {
+    for (const rawDomain of rule?.domains || []) {
+      const domain = String(rawDomain || '').trim().toLowerCase();
+      if (!domain) continue;
+      const slashIndex = domain.indexOf('/');
+      if (slashIndex > 0) {
+        const hostname = domain.slice(0, slashIndex).replace(/^www\./, '');
+        const path = `/${domain.slice(slashIndex + 1).replace(/^\/+|\/+$/g, '')}`;
+        if (self.BookmarkRecommendationCore?.isValidDomainPattern(hostname) && path.length > 1) {
+          store.rules.push(normalizeRecommendationRule({
+            kind: 'domain_path_tag', pattern: `${hostname}${path}`, target: rule.tag,
+            source: 'user', state: 'active', createdAt: now,
+          }, now));
+        }
+        continue;
+      }
+      store.rules.push(normalizeRecommendationRule({
+        kind: 'domain_tag', pattern: domain, target: rule.tag, source: 'user', state: 'active', createdAt: now,
+      }, now));
+    }
+  }
+  for (const rule of dynamic.urlPathRules || []) {
+    for (const rawPattern of rule?.patterns || []) {
+      const pattern = String(rawPattern || '').trim().toLowerCase();
+      if (!pattern || !pattern.includes('/')) continue;
+      store.rules.push(normalizeRecommendationRule({
+        kind: 'path_tag', pattern, target: rule.tag, source: 'user', state: 'active', createdAt: now,
+      }, now));
+    }
+  }
+  for (const [tag, keywords] of Object.entries(dynamic.keywordRules || {})) {
+    for (const rawKeyword of keywords || []) {
+      const keyword = String(rawKeyword || '').trim().toLowerCase();
+      if (!keyword) continue;
+      store.rules.push(normalizeRecommendationRule({
+        kind: 'keyword_tag', pattern: keyword, target: tag, source: 'user', state: 'active', createdAt: now,
+      }, now));
+    }
+  }
+  for (const [domain, info] of Object.entries(dynamic.learnedDomainTag || {})) {
+    const target = typeof info === 'object' ? info?.tag : info;
+    if (!domain || !target) continue;
+    store.rules.push(normalizeRecommendationRule({
+      kind: 'domain_tag', pattern: domain, target, source: 'legacy', state: 'candidate',
+      legacyCount: typeof info === 'object' ? info?.count : 1, createdAt: now,
+    }, now));
+  }
+  store.stopWords = [...new Set((dynamic.stopWords || []).map(String).filter(Boolean))].slice(0, 500);
+  store.reviewQueue = (Array.isArray(reviewQueue) ? reviewQueue : []).slice(0, 200).map(item => ({ ...item, legacy: true }));
+  if (learningStats && typeof learningStats === 'object') {
+    store.stats.total = Number(learningStats.totalReviewed) || 0;
+    store.stats.accepted = Number(learningStats.totalAccepted) || 0;
+    store.stats.modified = Number(learningStats.totalModified) || 0;
+    store.stats.rejected = Number(learningStats.totalIgnored) || 0;
+  }
+  store.rules = store.rules.filter(Boolean);
+  return normalizeRecommendationStore(store, now);
+}
+
+async function ensureRecommendationStore() {
+  return mutateStorageResource(RECOMMENDATION_STORE_KEY, async (current) => {
+    if (current?.version === RECOMMENDATION_STORE_VERSION) return normalizeRecommendationStore(current);
+    const legacy = await chrome.storage.local.get(['tag_dynamic_rules', 'tag_review_queue', 'tag_learning_stats']);
+    return migrateLegacyRecommendationStore(
+      legacy.tag_dynamic_rules,
+      legacy.tag_review_queue,
+      legacy.tag_learning_stats,
+    );
+  });
+}
+
+function recomputeLearnedRuleStates(rules, kind, pattern, now = Date.now()) {
+  const group = rules.filter(rule => rule.source !== 'user'
+    && rule.kind === kind
+    && rule.pattern === pattern
+    && !['disabled', 'deleted'].includes(rule.state));
+  const supportedTargets = group.filter(rule => rule.positiveFingerprints.length > 0);
+  const hasCompetition = new Set(supportedTargets.map(rule => rule.target.toLowerCase())).size > 1;
+  for (const rule of group) {
+    if (hasCompetition) rule.state = 'conflicted';
+    else if (rule.positiveFingerprints.length >= 2) rule.state = 'active';
+    else rule.state = 'candidate';
+    rule.updatedAt = now;
+  }
+}
+
+function recordRecommendationRuleEvidence(store, descriptor, fingerprint, direction, now = Date.now()) {
+  if (!descriptor?.kind || !descriptor?.pattern || !descriptor?.target || !fingerprint) return;
+  const kind = String(descriptor.kind);
+  const pattern = String(descriptor.pattern).trim().toLowerCase();
+  const target = String(descriptor.target).trim();
+  if (!pattern || !target) return;
+  let rule = store.rules.find(item => item.source === 'learned'
+    && item.kind === kind && item.pattern === pattern && item.target.toLowerCase() === target.toLowerCase());
+  if (!rule) {
+    rule = normalizeRecommendationRule({ kind, pattern, target, source: 'learned', state: 'candidate', createdAt: now }, now);
+    store.rules.push(rule);
+  }
+  if (direction === 'negative') {
+    if (rule.state === 'active') rule.positiveFingerprints = [];
+    if (!rule.negativeFingerprints.includes(fingerprint)) rule.negativeFingerprints.push(fingerprint);
+    rule.positiveFingerprints = rule.positiveFingerprints.filter(item => item !== fingerprint);
+  } else {
+    if (!rule.positiveFingerprints.includes(fingerprint)) rule.positiveFingerprints.push(fingerprint);
+    rule.negativeFingerprints = rule.negativeFingerprints.filter(item => item !== fingerprint);
+  }
+  rule.positiveFingerprints = rule.positiveFingerprints.slice(-100);
+  rule.negativeFingerprints = rule.negativeFingerprints.slice(-100);
+  recomputeLearnedRuleStates(store.rules, kind, pattern, now);
+}
+
+function recommendationDescriptors(snapshot, selection) {
+  const domain = String(snapshot?.domain || '').trim().toLowerCase();
+  if (!domain) return [];
+  const descriptors = [];
+  const folderPath = normalizeBookmarkFolderPath(selection?.folderPath || '');
+  if (folderPath) descriptors.push({ kind: 'domain_folder', pattern: domain, target: folderPath });
+  for (const tag of normalizeTagList(selection?.tags || [])) {
+    descriptors.push({ kind: 'domain_tag', pattern: domain, target: tag });
+  }
+  return descriptors;
+}
+
+function applyRecommendationFeedbackToStore(store, feedback, snapshot) {
+  if (feedback.outcome === 'cancelled') return;
+  const original = {
+    folderPath: snapshot?.selectedFolderPath
+      || snapshot?.folders?.find(item => item.confidence === 'high')?.folderPath
+      || '',
+    tags: Array.isArray(snapshot?.selectedTags)
+      ? snapshot.selectedTags
+      : (snapshot?.tags || []).filter(item => item.confidence === 'high').slice(0, 1).map(item => item.tag).filter(Boolean),
+  };
+  const finalSelection = feedback.selection || {};
+  const changedFields = new Set(feedback.changedFields || []);
+  if (feedback.outcome === 'rejected') {
+    for (const descriptor of recommendationDescriptors(snapshot, original)) {
+      recordRecommendationRuleEvidence(store, descriptor, feedback.urlFingerprint, 'negative', feedback.createdAt);
+    }
+    return;
+  }
+  if (feedback.outcome === 'modified') {
+    const originalForChangedFields = {
+      folderPath: changedFields.has('folder') ? original.folderPath : '',
+      tags: changedFields.has('tags') ? original.tags : [],
+    };
+    for (const descriptor of recommendationDescriptors(snapshot, originalForChangedFields)) {
+      recordRecommendationRuleEvidence(store, descriptor, feedback.urlFingerprint, 'negative', feedback.createdAt);
+    }
+  }
+  for (const descriptor of recommendationDescriptors(snapshot, finalSelection)) {
+    recordRecommendationRuleEvidence(store, descriptor, feedback.urlFingerprint, 'positive', feedback.createdAt);
+  }
+}
+
+function rebuildRecommendationRulesFromFeedback(store) {
+  store.rules = store.rules.filter(rule => rule.source !== 'learned');
+  for (const feedback of store.feedback.filter(item => !item.undone).sort((a, b) => a.createdAt - b.createdAt)) {
+    const snapshot = store.snapshots.find(item => item.recommendationId === feedback.recommendationId) || feedback.snapshot;
+    if (snapshot) applyRecommendationFeedbackToStore(store, feedback, snapshot);
+  }
+  return store;
+}
+
+async function persistRecommendationSnapshot(recommendation, bookmark) {
+  const now = Date.now();
+  const url = normalizeRecommendationUrl(bookmark?.url || '');
+  let pathSegments = [];
+  try {
+    pathSegments = new URL(url).pathname.split('/').map(segment => segment.trim().toLowerCase()).filter(Boolean).slice(0, 8);
+  } catch {}
+  const snapshot = {
+    recommendationId: recommendation.recommendationId,
+    ruleVersion: recommendation.ruleVersion,
+    urlFingerprint: recommendationUrlFingerprint(url),
+    domain: String(bookmark?.domain || extractDomain(url) || '').toLowerCase(),
+    pathSegments,
+    tags: (recommendation.tags || []).map(item => ({ tag: item.tag, support: item.support, confidence: item.confidence })),
+    folders: (recommendation.folders || []).map(item => ({
+      id: item.id || item.folderId || '', folderPath: item.folderPath || item.path || '', existing: !!item.exists,
+      support: item.support, confidence: item.confidence,
+    })),
+    selectedTags: normalizeTagList(recommendation.selectedTags || (
+      recommendation.tags?.[0]?.confidence === 'high' ? [recommendation.tags[0].tag] : []
+    )),
+    selectedFolderPath: normalizeBookmarkFolderPath(recommendation.selectedFolderPath || ''),
+    createdAt: now,
+  };
+  await mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+    const store = normalizeRecommendationStore(current, now);
+    store.snapshots = [...store.snapshots.filter(item => item.recommendationId !== snapshot.recommendationId), snapshot]
+      .slice(-RECOMMENDATION_MAX_SNAPSHOTS);
+    return store;
+  });
+  return snapshot;
+}
+
+async function submitRecommendationFeedback(payload = {}) {
+  const operationId = String(payload.operationId || '').trim();
+  if (!operationId) return { success: false, error: 'missing_operation_id' };
+  let removedReviews = 0;
+  return runIdempotentOperation('recommendation_feedback', operationId, () => mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+    const now = Date.now();
+    const store = normalizeRecommendationStore(current, now);
+    const existing = store.feedback.find(item => item.operationId === operationId);
+    if (existing) return store;
+    const snapshot = store.snapshots.find(item => item.recommendationId === payload.recommendationId);
+    if (!snapshot) return store;
+    const outcome = ['accepted', 'modified', 'rejected', 'cancelled'].includes(payload.outcome)
+      ? payload.outcome
+      : 'cancelled';
+    const feedback = {
+      id: makeRecommendationId('feedback'),
+      operationId,
+      recommendationId: snapshot.recommendationId,
+      urlFingerprint: snapshot.urlFingerprint,
+      outcome,
+      changedFields: [...new Set((payload.changedFields || []).filter(field => field === 'folder' || field === 'tags'))],
+      selection: {
+        folderPath: normalizeBookmarkFolderPath(payload.selection?.folderPath || ''),
+        tags: normalizeTagList(payload.selection?.tags || []),
+      },
+      snapshot,
+      createdAt: now,
+    };
+    const bookmarkId = String(payload.bookmarkId || '').trim();
+    if (bookmarkId) {
+      const remaining = store.reviewQueue.filter(item => item.bookmarkId !== bookmarkId);
+      removedReviews = store.reviewQueue.length - remaining.length;
+      store.reviewQueue = remaining;
+    }
+    store.feedback.push(feedback);
+    store.feedback = store.feedback.slice(-RECOMMENDATION_MAX_FEEDBACK);
+    store.stats.total += 1;
+    store.stats[outcome] = (store.stats[outcome] || 0) + 1;
+    store.stats.lastFeedbackAt = now;
+    applyRecommendationFeedbackToStore(store, feedback, snapshot);
+    store.history.push({ id: feedback.id, type: 'feedback', outcome, createdAt: now });
+    store.history = store.history.slice(-200);
+    return store;
+  }).then((store) => {
+    if (removedReviews > 0) {
+      chrome.runtime.sendMessage({ action: 'recommendationReviewQueueChanged', count: store.reviewQueue.length }).catch(() => {});
+    }
+    const found = store.feedback.find(item => item.operationId === operationId);
+    return found ? { success: true, feedbackId: found.id, outcome: found.outcome } : { success: false, error: 'recommendation_not_found' };
+  }));
+}
+
+async function submitLegacyTagReviewFeedback(queueItem, confirmedTags, reviewAction, operationId) {
+  if (!queueItem || (!queueItem.id && !queueItem.url)) return { success: false, error: 'review_item_not_found' };
+  const recommendationId = stableRecommendationId('legacy_review', queueItem.id || queueItem.url);
+  const suggestedTags = normalizeTagList(queueItem.suggestedTags || []);
+  const selectedTags = normalizeTagList(confirmedTags || []);
+  const recommendation = {
+    version: 2,
+    recommendationId,
+    ruleVersion: self.BookmarkRecommendationCore?.RULE_VERSION || 'bookmark-recommendation-v2',
+    tags: suggestedTags.map((tag, index) => ({
+      tag,
+      support: Math.max(0.35, Number(queueItem.confidence) || 0.35),
+      confidence: queueItem.confidence >= 0.78 ? 'high' : (queueItem.confidence >= 0.58 ? 'medium' : 'low'),
+      rank: index + 1,
+    })),
+    folders: [],
+  };
+  await persistRecommendationSnapshot(recommendation, {
+    url: queueItem.url || '',
+    domain: queueItem.domain || extractDomain(queueItem.url || ''),
+  });
+  const sameTags = suggestedTags.map(tag => tag.toLowerCase()).join('\u0000')
+    === selectedTags.map(tag => tag.toLowerCase()).join('\u0000');
+  const outcome = reviewAction === 'ignored'
+    ? 'rejected'
+    : (reviewAction === 'accepted' && sameTags ? 'accepted' : 'modified');
+  const result = await submitRecommendationFeedback({
+    operationId,
+    recommendationId,
+    outcome,
+    changedFields: outcome === 'modified' ? ['tags'] : [],
+    selection: { tags: selectedTags },
+  });
+  if (result.success && queueItem.id) await discardRecommendationReviewItem(queueItem.id);
+  return result;
+}
+
+async function getRecommendationLearningState() {
+  const store = await ensureRecommendationStore();
+  const snapshots = new Map(store.snapshots.map(item => [item.recommendationId, item]));
+  return {
+    version: store.version,
+    rules: store.rules.filter(rule => rule.state !== 'deleted'),
+    stats: store.stats,
+    reviewQueue: store.reviewQueue.map((item) => {
+      if (item.legacy) return item;
+      const snapshot = snapshots.get(item.recommendationId);
+      return {
+        ...item,
+        recommendation: snapshot ? {
+          recommendationId: snapshot.recommendationId,
+          ruleVersion: snapshot.ruleVersion,
+          tags: snapshot.tags || [],
+          folders: snapshot.folders || [],
+          selectedTags: snapshot.selectedTags || [],
+          selectedFolderPath: snapshot.selectedFolderPath || '',
+        } : null,
+      };
+    }),
+    recentFeedback: store.feedback.slice(-100).reverse(),
+  };
+}
+
+async function enqueueRecommendationReviewItem(item) {
+  const now = Date.now();
+  let review = null;
+  const store = await mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+    const next = normalizeRecommendationStore(current, now);
+    review = normalizeRecommendationReviewItem({ ...item, createdAt: item.createdAt || now, updatedAt: now }, now);
+    if (!review) return next;
+    next.reviewQueue = next.reviewQueue.filter(existing => existing.id !== review.id
+      && !(existing.type === review.type && existing.bookmarkId === review.bookmarkId));
+    next.reviewQueue.push(review);
+    next.reviewQueue = next.reviewQueue.slice(-RECOMMENDATION_MAX_REVIEWS);
+    return next;
+  });
+  if (review) {
+    chrome.runtime.sendMessage({ action: 'recommendationReviewQueueChanged', count: store.reviewQueue.length }).catch(() => {});
+  }
+  return review;
+}
+
+async function discardRecommendationReviewItem(reviewId) {
+  const id = String(reviewId || '').trim();
+  if (!id) return false;
+  let removed = false;
+  const store = await mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+    const next = normalizeRecommendationStore(current);
+    const remaining = next.reviewQueue.filter(item => item.id !== id);
+    removed = remaining.length !== next.reviewQueue.length;
+    next.reviewQueue = remaining;
+    return next;
+  });
+  if (removed) {
+    chrome.runtime.sendMessage({ action: 'recommendationReviewQueueChanged', count: store.reviewQueue.length }).catch(() => {});
+  }
+  return removed;
+}
+
+async function clearRecommendationReviewQueue(operationId) {
+  const id = String(operationId || '').trim() || makeRecommendationId('clear_reviews');
+  return runIdempotentOperation('recommendation_review_clear', id, async () => {
+    await mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+      const store = normalizeRecommendationStore(current);
+      store.reviewQueue = [];
+      return store;
+    });
+    chrome.runtime.sendMessage({ action: 'recommendationReviewQueueChanged', count: 0 }).catch(() => {});
+    return { success: true };
+  });
+}
+
+async function resolveRecommendationReview(payload = {}) {
+  const operationId = String(payload.operationId || '').trim();
+  const reviewId = String(payload.reviewId || '').trim();
+  const decision = String(payload.decision || '').trim();
+  if (!operationId) return { success: false, error: 'missing_operation_id' };
+  if (!reviewId || !['accept', 'reject', 'ignore'].includes(decision)) {
+    return { success: false, error: 'invalid_review_resolution' };
+  }
+  return runIdempotentOperation('recommendation_review', operationId, async () => {
+    const store = await ensureRecommendationStore();
+    const review = store.reviewQueue.find(item => item.id === reviewId && !item.legacy);
+    if (!review) return { success: false, error: 'review_item_not_found' };
+    const snapshot = store.snapshots.find(item => item.recommendationId === review.recommendationId);
+
+    if (decision === 'ignore') {
+      await discardRecommendationReviewItem(review.id);
+      return { success: true, decision };
+    }
+    if (!snapshot) return { success: false, error: 'recommendation_not_found' };
+
+    if (review.type === 'move_observation') {
+      if (decision !== 'accept') {
+        await discardRecommendationReviewItem(review.id);
+        return { success: true, decision: 'ignore' };
+      }
+      const feedback = await submitRecommendationFeedback({
+        operationId: `${operationId}:feedback`,
+        recommendationId: review.recommendationId,
+        bookmarkId: review.bookmarkId,
+        outcome: 'accepted',
+        changedFields: [],
+        selection: { folderPath: review.toFolderPath, tags: [] },
+      });
+      return feedback.success ? { success: true, decision } : feedback;
+    }
+
+    const [nativeBookmark] = await chrome.bookmarks.get(review.bookmarkId).catch(() => []);
+    if (!nativeBookmark?.url || recommendationUrlFingerprint(nativeBookmark.url) !== snapshot.urlFingerprint) {
+      return { success: false, error: 'bookmark_changed' };
+    }
+
+    if (decision === 'reject') {
+      const feedback = await submitRecommendationFeedback({
+        operationId: `${operationId}:feedback`,
+        recommendationId: review.recommendationId,
+        bookmarkId: review.bookmarkId,
+        outcome: 'rejected',
+        changedFields: [],
+        selection: {},
+      });
+      return feedback.success ? { success: true, decision } : feedback;
+    }
+
+    const storedBookmarks = await getStoredBookmarks();
+    const storedBookmark = storedBookmarks.find(item => item.id === review.bookmarkId);
+    if (!storedBookmark) return { success: false, error: 'bookmark_not_found' };
+    const currentTags = normalizeTagList(storedBookmark.tags || []);
+    const sourceTags = normalizeTagList(review.sourceTags || []);
+    if ((review.sourceParentId && nativeBookmark.parentId !== review.sourceParentId)
+      || currentTags.join('\u0000').toLowerCase() !== sourceTags.join('\u0000').toLowerCase()) {
+      return { success: false, error: 'bookmark_changed' };
+    }
+
+    const folderCandidate = snapshot.folders?.[0];
+    const tagCandidate = snapshot.tags?.[0];
+    let targetFolder = null;
+    if (folderCandidate?.existing && folderCandidate.id) {
+      const folderOptions = await loadBookmarkFolderOptions().catch(() => []);
+      targetFolder = folderOptions.find(item => item.id === folderCandidate.id) || null;
+      if (!targetFolder || normalizeBookmarkFolderPath(targetFolder.path) !== normalizeBookmarkFolderPath(folderCandidate.folderPath)) {
+        return { success: false, error: 'folder_selection_mismatch' };
+      }
+    }
+    const recommendedTags = normalizeTagList(tagCandidate?.tag ? [tagCandidate.tag] : []);
+    const finalTags = normalizeTagList([...(storedBookmark.tags || []), ...recommendedTags]);
+    if (!targetFolder && recommendedTags.length === 0) return { success: false, error: 'no_applicable_candidate' };
+
+    let moved = false;
+    try {
+      if (targetFolder && nativeBookmark.parentId !== targetFolder.id) {
+        markProgrammaticBookmarkMove(review.bookmarkId, targetFolder.id);
+        await chrome.bookmarks.move(review.bookmarkId, { parentId: targetFolder.id });
+        moved = true;
+      }
+      await mutateStoredBookmarks((bookmarks) => bookmarks.map(item => item.id !== review.bookmarkId ? item : {
+        ...item,
+        parentId: targetFolder?.id || item.parentId,
+        folderName: targetFolder?.title || item.folderName,
+        folderPath: targetFolder?.path || item.folderPath,
+        tags: finalTags,
+        tagsAuto: finalTags,
+      }));
+
+      const finalFolderPath = targetFolder?.path || normalizeBookmarkFolderPath(storedBookmark.folderPath || '');
+      const originalFolderPath = normalizeBookmarkFolderPath(snapshot.selectedFolderPath || '');
+      const originalTags = normalizeTagList(snapshot.selectedTags || []);
+      const changedFields = [];
+      if (originalFolderPath !== finalFolderPath) changedFields.push('folder');
+      if (originalTags.join('\u0000').toLowerCase() !== finalTags.join('\u0000').toLowerCase()) changedFields.push('tags');
+      const feedback = await submitRecommendationFeedback({
+        operationId: `${operationId}:feedback`,
+        recommendationId: review.recommendationId,
+        bookmarkId: review.bookmarkId,
+        outcome: changedFields.length > 0 ? 'modified' : 'accepted',
+        changedFields,
+        selection: { folderPath: finalFolderPath, tags: finalTags },
+      });
+      if (!feedback.success) throw new Error(feedback.error || 'feedback_failed');
+      chrome.runtime.sendMessage({ action: 'bookmarksUpdated', ids: [review.bookmarkId] }).catch(() => {});
+      return { success: true, decision, moved, tags: finalTags, folderPath: finalFolderPath };
+    } catch (error) {
+      programmaticBookmarkMoves.delete(review.bookmarkId);
+      if (moved && nativeBookmark.parentId) {
+        markProgrammaticBookmarkMove(review.bookmarkId, nativeBookmark.parentId);
+        await chrome.bookmarks.move(review.bookmarkId, { parentId: nativeBookmark.parentId }).catch(() => {});
+      }
+      await mutateStoredBookmarks((bookmarks) => bookmarks.map(item => item.id !== review.bookmarkId ? item : storedBookmark)).catch(() => {});
+      return { success: false, error: error?.message || 'review_apply_failed' };
+    }
+  });
+}
+
+async function mutateRecommendationRule(payload = {}) {
+  const operationId = String(payload.operationId || '').trim();
+  if (!operationId) return { success: false, error: 'missing_operation_id' };
+  return runIdempotentOperation('recommendation_rule', operationId, () => mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+    const now = Date.now();
+    const store = normalizeRecommendationStore(current, now);
+    if (store.history.some(item => item.id === operationId)) return store;
+    if (payload.mutation === 'undo_last') {
+      const feedback = [...store.feedback].reverse().find(item => !item.undone && item.outcome !== 'cancelled');
+      if (feedback) {
+        feedback.undone = true;
+        store.stats.total = Math.max(0, (store.stats.total || 0) - 1);
+        store.stats[feedback.outcome] = Math.max(0, (store.stats[feedback.outcome] || 0) - 1);
+        store.stats.lastFeedbackAt = Math.max(0, ...store.feedback
+          .filter(item => !item.undone)
+          .map(item => Number(item.createdAt) || 0));
+      }
+      rebuildRecommendationRulesFromFeedback(store);
+      store.history.push({ id: operationId, type: 'undo', feedbackId: feedback?.id || '', createdAt: now });
+      return store;
+    }
+    const rule = store.rules.find(item => item.id === payload.ruleId);
+    if (!rule) return store;
+    if (payload.mutation === 'disable') {
+      rule.state = 'disabled';
+      rule.disabledAt = now;
+    } else if (payload.mutation === 'restore') {
+      rule.disabledAt = 0;
+      recomputeLearnedRuleStates(store.rules, rule.kind, rule.pattern, now);
+      if (rule.source === 'user') rule.state = 'active';
+    } else if (payload.mutation === 'delete') {
+      rule.state = 'deleted';
+    }
+    rule.updatedAt = now;
+    store.history.push({ id: operationId, type: 'rule_mutation', ruleId: rule.id, mutation: payload.mutation, createdAt: now });
+    return store;
+  }).then(store => ({ success: true, rules: store.rules.filter(rule => rule.state !== 'deleted') })));
+}
+
+async function rebuildRecommendationLearning(operationId) {
+  const id = String(operationId || '').trim();
+  if (!id) return { success: false, error: 'missing_operation_id' };
+  return runIdempotentOperation('recommendation_rebuild', id, () => mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+    const store = normalizeRecommendationStore(current);
+    if (store.history.some(item => item.id === id)) return store;
+    rebuildRecommendationRulesFromFeedback(store);
+    store.history.push({ id, type: 'rebuild', createdAt: Date.now() });
+    return store;
+  }).then(store => ({ success: true, rules: store.rules.filter(rule => rule.state !== 'deleted') })));
+}
+
+function normalizeLegacyDynamicRules(raw) {
+  const value = raw && typeof raw === 'object' ? raw : {};
+  return {
+    ...value,
+    domainRules: Array.isArray(value.domainRules) ? value.domainRules : [],
+    urlPathRules: Array.isArray(value.urlPathRules) ? value.urlPathRules : [],
+    keywordRules: value.keywordRules && typeof value.keywordRules === 'object' ? value.keywordRules : {},
+    stopWords: Array.isArray(value.stopWords) ? value.stopWords : [],
+    learnedDomainTag: value.learnedDomainTag && typeof value.learnedDomainTag === 'object' ? value.learnedDomainTag : {},
+    seenDomains: Array.isArray(value.seenDomains) ? value.seenDomains : [],
+  };
+}
+
+async function mutateLegacyDynamicRules(mutation) {
+  const next = await mutateStorageResource('tag_dynamic_rules', (current) => mutation(normalizeLegacyDynamicRules(current)));
+  if (typeof setDynamicRulesSnapshot === 'function') setDynamicRulesSnapshot(next);
+  return next;
+}
+
+async function addRecommendationUserRule(kind, pattern, target) {
+  return mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+    const store = normalizeRecommendationStore(current);
+    const rule = normalizeRecommendationRule({ kind, pattern, target, source: 'user', state: 'active' });
+    const existing = store.rules.find(item => item.source === 'user'
+      && item.kind === rule.kind && item.pattern === rule.pattern && item.target.toLowerCase() === rule.target.toLowerCase());
+    if (!existing) store.rules.push(rule);
+    else existing.state = 'active';
+    return store;
+  });
+}
+
+async function deleteRecommendationUserRules(predicate) {
+  return mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+    const store = normalizeRecommendationStore(current);
+    for (const rule of store.rules) {
+      if (rule.source === 'user' && predicate(rule)) rule.state = 'deleted';
+    }
+    return store;
+  });
+}
+
+async function syncRecommendationUserRulesFromLegacy(rawRules) {
+  const dynamic = normalizeLegacyDynamicRules(rawRules);
+  return mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+    const store = normalizeRecommendationStore(current);
+    store.rules = store.rules.filter(rule => rule.source !== 'user');
+    const migrated = migrateLegacyRecommendationStore(dynamic, [], null);
+    store.rules.push(...migrated.rules.filter(rule => rule.source === 'user'));
+    store.stopWords = [...dynamic.stopWords];
+    return store;
+  });
 }
 
 const inFlightOperations = new Map();
@@ -471,6 +1219,9 @@ function hasValidStringList(value, maxItems = 50, maxLength = 120) {
 function validateRuntimeMessage(message) {
   if (message.action !== undefined && typeof message.action !== 'string') return 'invalid_action';
   if (message.id !== undefined && (typeof message.id !== 'string' || message.id.length > 256)) return 'invalid_id';
+  if (message.bookmarkId !== undefined && (typeof message.bookmarkId !== 'string' || message.bookmarkId.length > 256)) return 'invalid_bookmark_id';
+  if (message.reviewId !== undefined && (typeof message.reviewId !== 'string' || message.reviewId.length > 256)) return 'invalid_review_id';
+  if (message.decision !== undefined && !['accept', 'reject', 'ignore'].includes(message.decision)) return 'invalid_review_decision';
   if (message.feedId !== undefined && (typeof message.feedId !== 'string' || message.feedId.length > 256)) return 'invalid_feed_id';
   if (message.operationId !== undefined && (typeof message.operationId !== 'string' || message.operationId.length > 256)) return 'invalid_operation_id';
   if (message.requestId !== undefined && (typeof message.requestId !== 'string' || message.requestId.length > 256)) return 'invalid_request_id';
@@ -1287,16 +2038,8 @@ async function syncAllBookmarksOnce() {
       return next;
     });
 
-    // 为没有标签的书签自动打标签（并发池，仅更新通用文档频率，避免污染标签语料）
-    const needsTag = merged.filter(item => !item.tags || item.tags.length === 0);
-    const taggedResults = await autoTagBookmarks(needsTag, 10);
-    let taggedCount = 0;
-    taggedResults.forEach((res, i) => {
-      const tags = res.tags || [];
-      needsTag[i].tags = tags;
-      needsTag[i].tagsAuto = tags;
-      taggedCount++;
-    });
+    // 历史镜像只同步现状；分类建议必须由用户主动重新评估后确认。
+    const taggedCount = 0;
 
     // 从 Chrome 历史记录获取真实点击次数
     await enrichClickCounts(merged, 10);
@@ -1650,14 +2393,23 @@ function buildFolderProfiles(storedBookmarks, folderOptions = []) {
 function scoreFolderProfileCandidates(storedBookmarks, folderOptions, bookmark, suggestedTags, aiSuggestion) {
   const bookmarkTokens = collectBookmarkTokenWeights(bookmark, suggestedTags, aiSuggestion);
   const candidates = [];
-  for (const profile of buildFolderProfiles(storedBookmarks, folderOptions).values()) {
+  const profiles = [...buildFolderProfiles(storedBookmarks, folderOptions).values()];
+  const domainFolderCount = bookmarkTokens.domain
+    ? profiles.filter(profile => (profile.domains.get(bookmarkTokens.domain) || 0) > 0).length
+    : 0;
+  for (const profile of profiles) {
     const strongOverlap = weightedTokenOverlap(profile.strong, bookmarkTokens.strong);
     const weakOverlap = weightedTokenOverlap(profile.weak, bookmarkTokens.weak);
     const tagToContentOverlap = weightedTokenOverlap(profile.weak, bookmarkTokens.strong);
     const sameDomainCount = bookmarkTokens.domain ? (profile.domains.get(bookmarkTokens.domain) || 0) : 0;
     const hasReliableSimilarity = sameDomainCount > 0 || strongOverlap.count >= 2;
     if (!hasReliableSimilarity) continue;
-    const score = sameDomainCount * 45 + strongOverlap.score * 8 + weakOverlap.score * 4 + tagToContentOverlap.score * 3 + Math.min(profile.count, 8);
+    const ambiguityDamp = domainFolderCount > 1 ? 1 / domainFolderCount : 1;
+    const domainScore = sameDomainCount > 0 ? Math.min(42, Math.log2(sameDomainCount + 1) * 28) * ambiguityDamp : 0;
+    const contentScore = Math.min(42, strongOverlap.score * 5 + tagToContentOverlap.score * 2);
+    const tagScore = Math.min(20, weakOverlap.score * 3);
+    const sizeDamp = 1 + Math.max(0, Math.log2(profile.count + 1) - 2) * 0.08;
+    const score = (domainScore + contentScore + tagScore) / sizeDamp;
     if (score <= 0) continue;
     candidates.push({
       id: profile.id,
@@ -1815,6 +2567,353 @@ function chooseAISuggestedFolder(aiFolderPath, folderOptions, bookmark, ruleTags
   return { path: matched.path, id: matched.id || '', exists: true, score: evidence.score, reasons: evidence.reasons };
 }
 
+function recommendationEvidenceFromTagResult(result) {
+  const evidence = [];
+  for (const signal of result?.signals || []) {
+    const value = String(signal || '');
+    let family = 'title_metadata';
+    if (value.startsWith('user-override')) family = 'user_rule';
+    else if (value === 'folder' || value.startsWith('sibling-') || value.startsWith('temporal-') || value.startsWith('domain-cooccurrence')) family = 'history_profile';
+    else if (value === 'domain+path' || value.startsWith('url-path') || value === 'extension' || value === 'query-param') family = 'domain_path';
+    else if (value === 'domain' || value === 'subdomain') family = 'domain';
+    else if (value.startsWith('ai:')) family = 'ai';
+    else if (value.startsWith('content-') || value.startsWith('prototype-') || value.startsWith('tfidf:') || value.startsWith('bayesian:')) family = 'content_semantic';
+    evidence.push({ family, strength: 1, reason: value, source: 'local-rule' });
+  }
+  return evidence;
+}
+
+function recommendationEvidenceFromFolderCandidate(candidate, source) {
+  const evidence = [];
+  const normalizedScore = Math.min(1, Math.max(0.35, Number(candidate?.score || 0) / 100));
+  if (source === 'history' || source === 'profile') {
+    evidence.push({ family: 'history_profile', strength: normalizedScore, reason: source === 'profile' ? 'folder-profile' : 'confirmed-folder-history', source });
+  }
+  for (const reason of candidate?.reasons || []) {
+    const value = String(reason || '');
+    if (value.startsWith('domain-history:')) {
+      evidence.push({ family: 'history_profile', strength: 1, reason: value, source });
+    } else if (value.startsWith('profile-content:') || value.startsWith('content:')) {
+      evidence.push({ family: 'content_semantic', strength: normalizedScore, reason: value, source });
+    } else if (value.startsWith('local-tag:') || value.startsWith('profile-tag:')) {
+      evidence.push({ family: 'title_metadata', strength: normalizedScore, reason: value, source });
+    } else if (value.startsWith('ai-tag:')) {
+      evidence.push({ family: 'ai', strength: normalizedScore, reason: value, source });
+    }
+  }
+  if (evidence.length === 0) evidence.push({ family: 'title_metadata', strength: normalizedScore, reason: source, source });
+  return evidence;
+}
+
+function withRecommendationEvidence(candidate, source) {
+  return {
+    ...candidate,
+    kind: 'folder',
+    source,
+    evidence: recommendationEvidenceFromFolderCandidate(candidate, source),
+  };
+}
+
+function activeRecommendationRuleCandidates(store, bookmark, folderOptions) {
+  const core = self.BookmarkRecommendationCore;
+  const hostname = String(bookmark?.domain || extractDomain(bookmark?.url || '') || '').toLowerCase();
+  let pathname = '';
+  try { pathname = new URL(bookmark?.url || '').pathname.toLowerCase(); } catch {}
+  const searchableText = [bookmark?.title, bookmark?.url, bookmark?.metaDesc, bookmark?.excerpt]
+    .filter(Boolean).join(' ').toLowerCase();
+  const tagCandidates = [];
+  const folderCandidates = [];
+  for (const rule of store?.rules || []) {
+    if (rule.state !== 'active') continue;
+    const domainRule = rule.kind === 'domain_tag' || rule.kind === 'domain_folder';
+    const domainPathRule = rule.kind === 'domain_path_tag';
+    const pathRule = rule.kind === 'path_tag';
+    const keywordRule = rule.kind === 'keyword_tag';
+    if (!domainRule && !domainPathRule && !pathRule && !keywordRule) continue;
+    if (domainRule && !core?.hostnameMatchesRule(hostname, rule.pattern)) continue;
+    if (domainPathRule) {
+      const slashIndex = rule.pattern.indexOf('/');
+      const ruleDomain = slashIndex > 0 ? rule.pattern.slice(0, slashIndex) : '';
+      const rulePath = slashIndex > 0 ? `/${rule.pattern.slice(slashIndex + 1).replace(/^\/+|\/+$/g, '')}` : '';
+      if (!ruleDomain || !rulePath || !core?.hostnameMatchesRule(hostname, ruleDomain)
+        || !(pathname === rulePath || pathname.startsWith(`${rulePath}/`))) continue;
+    }
+    if (pathRule) {
+      const rulePath = `/${rule.pattern.replace(/^\/+|\/+$/g, '')}`;
+      if (!rulePath || !(pathname === rulePath || pathname.startsWith(`${rulePath}/`) || pathname.includes(`${rulePath}/`))) continue;
+    }
+    if (keywordRule) {
+      const matched = typeof keywordMatchesWhole === 'function'
+        ? keywordMatchesWhole(rule.pattern, searchableText)
+        : searchableText.includes(rule.pattern);
+      if (!matched) continue;
+    }
+    const family = rule.source === 'user' ? 'user_rule' : 'learned_rule';
+    const evidence = [{ family, strength: 1, reason: `${rule.kind}:${rule.pattern}`, source: rule.source }];
+    if (rule.kind === 'domain_tag' || rule.kind === 'domain_path_tag' || rule.kind === 'path_tag' || rule.kind === 'keyword_tag') {
+      tagCandidates.push({ kind: 'tag', tag: rule.target, label: rule.target, evidence, source: rule.source });
+      continue;
+    }
+    const existing = matchBookmarkFolderOption(folderOptions, rule.target);
+    folderCandidates.push({
+      kind: 'folder', id: existing?.id || '', folderId: existing?.id || '',
+      title: existing?.title || rule.target.split('/').slice(-1)[0] || '',
+      folderName: existing?.title || rule.target.split('/').slice(-1)[0] || '',
+      path: existing?.path || rule.target, folderPath: existing?.path || rule.target,
+      exists: !!existing, evidence, source: rule.source,
+    });
+  }
+  return { tagCandidates, folderCandidates };
+}
+
+async function buildBookmarkRecommendation(bookmark, options = {}) {
+  const core = self.BookmarkRecommendationCore;
+  if (!core) throw new Error('recommendation_core_unavailable');
+  const store = options.store || await ensureRecommendationStore();
+  if (options.preloaded !== true && typeof preloadSmartTaggerCaches === 'function') await preloadSmartTaggerCaches();
+  const folderOptions = options.folderOptions || await loadBookmarkFolderOptions().catch(() => []);
+  const storedBookmarks = options.storedBookmarks || await getStoredBookmarks().catch(() => []);
+  const ruleTags = typeof autoTagBookmark === 'function'
+    ? await autoTagBookmark(bookmark, { skipAI: true })
+    : [];
+
+  const tagCandidates = ruleTags
+    .filter(item => item?.tag
+      && item.tag !== '其他'
+      && (typeof isCanonicalCategoryTag !== 'function'
+        || isCanonicalCategoryTag(item.tag)
+        || item.signals?.some(signal => String(signal).startsWith('user-override'))))
+    .map(item => ({
+      kind: 'tag', tag: canonicalizeTagName(item.tag), label: canonicalizeTagName(item.tag), source: 'local-rule',
+      evidence: recommendationEvidenceFromTagResult(item),
+    }));
+  const learned = activeRecommendationRuleCandidates(store, bookmark, folderOptions);
+  tagCandidates.push(...learned.tagCandidates);
+  const localTags = core.rankCandidates(tagCandidates);
+  const tagNames = localTags.map(item => item.tag);
+  const aiCandidateTags = localTags.map(item => ({
+    tag: item.tag,
+    score: Math.round(item.support * 100),
+    confidence: item.support,
+    signals: item.reasons || [],
+  }));
+
+  const historyCandidates = scoreHistoricalFolderCandidates(storedBookmarks, tagNames, bookmark, null, folderOptions)
+    .map(item => withRecommendationEvidence(item, 'history'));
+  const existingCandidates = scoreExistingFolderCandidates(folderOptions, tagNames, bookmark, null)
+    .map(item => withRecommendationEvidence(item, 'existing'));
+  const profileCandidates = scoreFolderProfileCandidates(storedBookmarks, folderOptions, bookmark, tagNames, null)
+    .map(item => withRecommendationEvidence(item, 'profile'));
+  let folderCandidates = [...learned.folderCandidates, ...historyCandidates, ...existingCandidates, ...profileCandidates];
+  let summary = core.summarizeRecommendation(tagCandidates, folderCandidates);
+  const signalConflict = summary.tags.length > 1 && summary.tags[0].margin < core.CONFIDENCE_THRESHOLDS.mediumMargin;
+  const needsNewFolder = !summary.folders.some(item => item.support >= core.CONFIDENCE_THRESHOLDS.medium) && summary.tags.length > 0;
+  const gate = core.shouldTriggerAI(summary, { signalConflict, needsNewFolder });
+  let aiSuggestion = null;
+  let aiError = '';
+  let aiAttempted = false;
+
+  let aiEnabled = false;
+  if (options.allowAI !== false && gate.trigger && typeof getAIConfig === 'function') {
+    const config = await getAIConfig().catch(() => null);
+    aiEnabled = !!(config?.enabled && config?.apiKey && config?.assistClassificationEnabled !== false);
+  }
+  if (aiEnabled && typeof suggestBookmarkWithAI === 'function') {
+    aiAttempted = true;
+    try {
+      aiSuggestion = await suggestBookmarkWithAI(bookmark, aiCandidateTags, { folderOptions });
+    } catch (error) {
+      aiError = error?.message || String(error || 'AI request failed');
+    }
+  }
+
+  if (aiSuggestion) {
+    for (const item of aiSuggestion.tags || []) {
+      if (!item?.tag || item.tag === '其他') continue;
+      tagCandidates.push({
+        kind: 'tag', tag: item.tag, label: item.tag, source: 'ai',
+        evidence: [{ family: 'ai', strength: item.confidence ?? 1, reason: `ai-tag:${item.tag}`, source: 'ai' }],
+      });
+    }
+    const aiPath = normalizeBookmarkFolderPath(aiSuggestion.folderPath);
+    if (aiPath) {
+      const matched = matchBookmarkFolderOption(folderOptions, aiPath);
+      const pathEvidence = scoreFolderPathEvidence(aiPath, bookmark, aiCandidateTags, aiSuggestion);
+      const evidence = [{ family: 'ai', strength: 1, reason: 'ai-folder', source: 'ai' }];
+      if (pathEvidence.reasons.some(reason => reason.startsWith('local-tag:'))) {
+        evidence.push({ family: 'domain_path', strength: 1, reason: 'local-tag-folder-alignment', source: 'local-rule' });
+      }
+      if (pathEvidence.reasons.some(reason => reason.startsWith('content:'))) {
+        evidence.push({ family: 'content_semantic', strength: 1, reason: 'content-folder-alignment', source: 'local-rule' });
+      }
+      if (matched) {
+        folderCandidates.push({
+          kind: 'folder', id: matched.id || '', folderId: matched.id || '', title: matched.title || '',
+          folderName: matched.title || '', path: matched.path, folderPath: matched.path,
+          exists: true, evidence, source: 'ai',
+        });
+      } else {
+        const validation = core.validateNewFolderPath(aiPath, folderOptions);
+        if (validation.valid) {
+          folderCandidates.push({
+            kind: 'folder', id: '', folderId: '', title: aiPath.split('/').slice(-1)[0] || '',
+            folderName: aiPath.split('/').slice(-1)[0] || '', path: aiPath, folderPath: aiPath,
+            exists: false, evidence, source: 'ai',
+          });
+        }
+      }
+    }
+    summary = core.summarizeRecommendation(tagCandidates, folderCandidates);
+  }
+
+  summary.folders = summary.folders.filter((candidate) => candidate.exists || (
+    candidate.confidence === 'high'
+    && candidate.positiveFamilies?.includes('ai')
+    && candidate.positiveFamilies.some(family => family !== 'ai')
+  ));
+  const top = summary.folders[0] || summary.tags[0] || null;
+  summary.confidence = top?.confidence || 'none';
+  summary.abstained = !top || top.confidence === 'none';
+  summary.selectedFolderPath = summary.folders[0]?.confidence === 'high'
+    ? (summary.folders[0].folderPath || summary.folders[0].path || '')
+    : '';
+
+  const recommendation = {
+    version: 2,
+    recommendationId: makeRecommendationId(),
+    ruleVersion: core.RULE_VERSION,
+    createdAt: Date.now(),
+    tags: summary.tags,
+    folders: summary.folders,
+    confidence: summary.confidence,
+    abstained: summary.abstained,
+    selectedFolderPath: summary.selectedFolderPath,
+    ai: {
+      triggered: aiAttempted,
+      reason: gate.reason,
+      status: aiSuggestion ? 'succeeded' : (aiAttempted ? (aiError ? 'failed' : 'unavailable') : (gate.trigger ? 'disabled' : 'skipped')),
+      error: aiError,
+    },
+    ruleTags: aiCandidateTags,
+    aiSuggestion,
+  };
+  if (options.persist !== false) await persistRecommendationSnapshot(recommendation, bookmark);
+  return recommendation;
+}
+
+async function queueNewBookmarkRecommendation(bookmark) {
+  const recommendation = await buildBookmarkRecommendation(bookmark);
+  if ((recommendation.tags || []).length === 0 && (recommendation.folders || []).length === 0) return null;
+  return enqueueRecommendationReviewItem({
+    id: makeRecommendationId('review'),
+    type: 'bookmark_recommendation',
+    bookmarkId: bookmark.id,
+    recommendationId: recommendation.recommendationId,
+    title: bookmark.title || bookmark.url || '',
+    urlFingerprint: recommendationUrlFingerprint(bookmark.url),
+    confidence: recommendation.confidence,
+    aiTriggered: recommendation.ai?.triggered === true,
+    sourceParentId: bookmark.parentId || '',
+    sourceTags: bookmark.tags || [],
+  });
+}
+
+async function queueBookmarkMoveObservation(bookmark, fromFolderPath, toFolderId, toFolderPath) {
+  const normalizedTarget = normalizeBookmarkFolderPath(toFolderPath);
+  if (!bookmark?.id || !bookmark?.url || !normalizedTarget) return null;
+  const recommendation = {
+    version: 2,
+    recommendationId: makeRecommendationId('move_observation'),
+    ruleVersion: self.BookmarkRecommendationCore?.RULE_VERSION || 'bookmark-recommendation-v2',
+    tags: [],
+    folders: [{
+      id: String(toFolderId || ''),
+      folderId: String(toFolderId || ''),
+      folderPath: normalizedTarget,
+      path: normalizedTarget,
+      exists: true,
+      support: 1,
+      confidence: 'high',
+    }],
+    selectedTags: [],
+    selectedFolderPath: normalizedTarget,
+  };
+  await persistRecommendationSnapshot(recommendation, bookmark);
+  return enqueueRecommendationReviewItem({
+    id: makeRecommendationId('move_review'),
+    type: 'move_observation',
+    bookmarkId: bookmark.id,
+    recommendationId: recommendation.recommendationId,
+    title: bookmark.title || bookmark.url || '',
+    urlFingerprint: recommendationUrlFingerprint(bookmark.url),
+    fromFolderPath,
+    toFolderId,
+    toFolderPath: normalizedTarget,
+    confidence: 'high',
+  });
+}
+
+async function reevaluateBookmarkRecommendations(ids, options = {}) {
+  const requestedIds = new Set((Array.isArray(ids) ? ids : []).slice(0, 100));
+  const storedBookmarks = await getStoredBookmarks();
+  const targets = requestedIds.size > 0
+    ? storedBookmarks.filter(item => requestedIds.has(item.id))
+    : storedBookmarks.slice(0, Math.min(100, Math.max(1, Number(options.limit) || 50)));
+  const folderOptions = await loadBookmarkFolderOptions().catch(() => []);
+  const items = [];
+  for (const bookmark of targets) {
+    try {
+      const recommendation = await buildBookmarkRecommendation(bookmark, {
+        folderOptions,
+        storedBookmarks,
+        allowAI: options.allowAI === true,
+      });
+      items.push({ id: bookmark.id, status: 'succeeded', recommendation });
+    } catch (error) {
+      items.push({ id: bookmark.id, status: 'failed', reason: error?.message || 'recommendation_failed' });
+    }
+  }
+  return makeBatchResult(items);
+}
+
+async function recommendTagsForBookmarks(bookmarks, concurrency = 3) {
+  const items = Array.isArray(bookmarks) ? bookmarks : [];
+  if (items.length === 0) return [];
+  if (typeof preloadSmartTaggerCaches === 'function') await preloadSmartTaggerCaches();
+  const [folderOptions, storedBookmarks, store] = await Promise.all([
+    loadBookmarkFolderOptions().catch(() => []),
+    getStoredBookmarks().catch(() => []),
+    ensureRecommendationStore(),
+  ]);
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const runners = Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      const bookmark = items[index];
+      try {
+        const recommendation = await buildBookmarkRecommendation(bookmark, {
+          folderOptions,
+          storedBookmarks,
+          store,
+          preloaded: true,
+          persist: false,
+        });
+        const topTag = recommendation.tags?.[0];
+        const tags = !recommendation.abstained && topTag?.confidence === 'high' && topTag.tag
+          ? [topTag.tag]
+          : [];
+        results[index] = { ...bookmark, tags, tagsAuto: tags };
+      } catch {
+        results[index] = { ...bookmark, tags: [], tagsAuto: [] };
+      }
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
 async function loadBookmarkFolderOptions() {
   const tree = await chrome.bookmarks.getTree();
   const options = [];
@@ -1907,60 +3006,43 @@ async function prepareBookmarkSuggestion(tab) {
     excerpt: contentData?.excerpt || contentData?.metaDesc || ''
   };
 
-  const ruleTags = typeof autoTagBookmarkSync === 'function' ? autoTagBookmarkSync(tempItem) : [];
-  const tagNames = normalizeTagList(ruleTags);
   const folderOptions = await loadBookmarkFolderOptions().catch(() => []);
-  const suggestedFolder = await suggestBookmarkFolderReadOnly(tab.url, tab.title, tagNames, tempItem);
-  let aiSuggestion = null;
-  let aiError = '';
-  try {
-    if (typeof suggestBookmarkWithAI === 'function') {
-      aiSuggestion = await suggestBookmarkWithAI(tempItem, ruleTags, { folderOptions });
-    }
-  } catch (err) {
-    aiError = err?.message || String(err || 'AI request failed');
-  }
-
-  const draft = buildLocalBookmarkSuggestion(tempItem, ruleTags, suggestedFolder, aiSuggestion, aiError);
   const storedBookmarks = await getStoredBookmarks().catch(() => []);
-  const aiFolderPath = normalizeBookmarkFolderPath(aiSuggestion?.folderPath);
-  const acceptedAiFolder = chooseAISuggestedFolder(aiFolderPath, folderOptions, tempItem, ruleTags, aiSuggestion);
-  const localFolder = suggestedFolder ? {
-    id: suggestedFolder.id || '',
-    title: suggestedFolder.title || '',
-    folderName: suggestedFolder.title || '',
-    path: suggestedFolder.path || '',
-    folderPath: suggestedFolder.path || '',
-    exists: !!suggestedFolder.id,
-    score: scoreFolderPathEvidence(suggestedFolder.path, tempItem, ruleTags, aiSuggestion).score,
-    reasons: []
-  } : null;
-  const folderScoringTags = draft.tags.length ? draft.tags : tagNames;
-  const historyCandidates = scoreHistoricalFolderCandidates(storedBookmarks, folderScoringTags, tempItem, aiSuggestion, folderOptions);
-  const existingCandidates = scoreExistingFolderCandidates(folderOptions, folderScoringTags, tempItem, aiSuggestion);
-  const profileCandidates = scoreFolderProfileCandidates(storedBookmarks, folderOptions, tempItem, folderScoringTags, aiSuggestion);
-  const bestFolder = chooseBestBookmarkFolderCandidate([localFolder, acceptedAiFolder, ...historyCandidates, ...existingCandidates, ...profileCandidates]);
-  if (bestFolder) {
-    draft.folderPath = bestFolder.folderPath || bestFolder.path || '';
-    draft.folderId = bestFolder.id || '';
-    draft.folderName = draft.folderPath.split('/').filter(Boolean).slice(-1)[0] || bestFolder.folderName || bestFolder.title || draft.folderName;
-    draft.recommendedFolderPath = draft.folderPath;
-    draft.recommendedFolderExists = !!bestFolder.exists;
-  } else {
-    draft.recommendedFolderPath = '';
-    draft.recommendedFolderExists = false;
-  }
+  const recommendation = await buildBookmarkRecommendation(tempItem, { folderOptions, storedBookmarks });
+  const selectedFolder = recommendation.folders[0]?.confidence === 'high' ? recommendation.folders[0] : null;
+  const aiSuggestion = recommendation.aiSuggestion;
+  const draft = buildLocalBookmarkSuggestion(
+    tempItem,
+    recommendation.ruleTags,
+    selectedFolder ? {
+      id: selectedFolder.id || selectedFolder.folderId || '',
+      title: selectedFolder.title || selectedFolder.folderName || '',
+      path: selectedFolder.folderPath || selectedFolder.path || '',
+    } : null,
+    aiSuggestion,
+    recommendation.ai.error,
+  );
+  draft.tags = recommendation.tags[0]?.confidence === 'high'
+    ? [recommendation.tags[0].tag]
+    : [];
+  draft.recommendationId = recommendation.recommendationId;
+  draft.ruleVersion = recommendation.ruleVersion;
+  draft.recommendationConfidence = recommendation.confidence;
+  draft.abstained = recommendation.abstained;
+  draft.tagCandidates = recommendation.tags;
+  draft.folderCandidates = recommendation.folders;
+  draft.ai = recommendation.ai;
+  draft.aiAvailable = recommendation.ai.status === 'succeeded';
+  draft.aiTriggered = recommendation.ai.triggered;
+  draft.recommendedFolderPath = selectedFolder?.folderPath || selectedFolder?.path || '';
+  draft.recommendedFolderExists = !!selectedFolder?.exists;
+  draft.folderPath = draft.recommendedFolderPath;
+  draft.folderId = selectedFolder?.id || selectedFolder?.folderId || '';
+  draft.folderName = selectedFolder?.folderName || selectedFolder?.title || draft.folderName;
+  draft.reason = aiSuggestion?.reason
+    || selectedFolder?.reasons?.join('；')
+    || (recommendation.abstained ? '当前证据不足，暂不自动推荐分类。' : '根据本地规则与已有目录画像生成建议。');
   draft.folderOptions = folderOptions;
-  if (!draft.folderPath && draft.tags.length) {
-    const fallbackFolder = await suggestBookmarkFolderReadOnly(tab.url, tab.title, draft.tags, tempItem);
-    if (fallbackFolder) {
-      draft.folderId = fallbackFolder.id || '';
-      draft.folderName = fallbackFolder.title || draft.folderName;
-      draft.folderPath = fallbackFolder.path || '';
-      draft.recommendedFolderPath = normalizeBookmarkFolderPath(fallbackFolder.path || draft.recommendedFolderPath);
-      draft.recommendedFolderExists = !!fallbackFolder.id;
-    }
-  }
   const existing = await chrome.bookmarks.search({ url: tempItem.url });
   const duplicate = existing[0];
   if (duplicate) {
@@ -1975,6 +3057,17 @@ async function prepareBookmarkSuggestion(tab) {
 
 async function saveConfirmedBookmark(draft) {
   if (!draft || !draft.url) return { success: false, error: 'missing_url' };
+  if (!isSafeExternalUrl(draft.url)) return { success: false, error: 'invalid_url' };
+
+  let feedbackSnapshot = null;
+  if (draft.recommendationId) {
+    const store = await ensureRecommendationStore();
+    feedbackSnapshot = store.snapshots.find(item => item.recommendationId === draft.recommendationId) || null;
+    if (!feedbackSnapshot) return { success: false, error: 'recommendation_not_found' };
+    if (feedbackSnapshot.urlFingerprint !== recommendationUrlFingerprint(draft.url)) {
+      return { success: false, error: 'recommendation_url_mismatch' };
+    }
+  }
 
   const existing = await chrome.bookmarks.search({ url: draft.url });
   const duplicate = existing[0];
@@ -1994,12 +3087,37 @@ async function saveConfirmedBookmark(draft) {
   let parentId = draft.folderId || '';
   let folderName = draft.folderName || '';
   let folderPath = normalizeBookmarkFolderPath(draft.folderPath || '');
+  const folderOptions = await loadBookmarkFolderOptions().catch(() => []);
 
   // The editable path is authoritative. Never keep a stale folder id after the
   // user changes the recommendation in the confirmation drawer.
   if (draft.folderMode === 'new') parentId = '';
 
   if (draft.folderMode === 'new' && folderPath) {
+    const exactFolder = matchBookmarkFolderOption(folderOptions, folderPath);
+    if (exactFolder) {
+      parentId = exactFolder.id || '';
+      folderPath = exactFolder.path || folderPath;
+      folderName = exactFolder.title || folderName;
+    } else {
+      const validation = self.BookmarkRecommendationCore?.validateNewFolderPath(folderPath, folderOptions);
+      if (validation && !validation.valid) {
+        return { success: false, error: `invalid_folder_path:${validation.reason}` };
+      }
+    }
+  }
+
+  if (parentId && draft.folderMode !== 'new') {
+    const selectedFolder = folderOptions.find(folder => folder.id === parentId);
+    if (!selectedFolder) return { success: false, error: 'folder_not_found' };
+    if (folderPath && normalizeBookmarkFolderPath(selectedFolder.path) !== folderPath) {
+      return { success: false, error: 'folder_selection_mismatch' };
+    }
+    folderPath = selectedFolder.path;
+    folderName = selectedFolder.title || folderName;
+  }
+
+  if (draft.folderMode === 'new' && folderPath && !parentId) {
     const folder = await findOrCreateFolderPath(folderPath);
     if (folder) {
       parentId = folder.id;
@@ -2052,13 +3170,19 @@ async function saveConfirmedBookmark(draft) {
   });
 
   const createOpts = {
-    title: draft.title || draft.url,
+    title: String(draft.title || draft.url).slice(0, 512),
     url: draft.url
   };
   if (parentId) createOpts.parentId = parentId;
   let createdBookmark;
   if (duplicate && draft.duplicateAction === 'move') {
-    createdBookmark = await chrome.bookmarks.move(duplicate.id, parentId ? { parentId } : {});
+    markProgrammaticBookmarkMove(duplicate.id, parentId || duplicate.parentId || '');
+    try {
+      createdBookmark = await chrome.bookmarks.move(duplicate.id, parentId ? { parentId } : {});
+    } catch (error) {
+      programmaticBookmarkMoves.delete(duplicate.id);
+      throw error;
+    }
     pendingQuickBookmarks.delete(draft.url);
 
     // Moving does not emit onCreated, so update the mirrored record ourselves.
@@ -2085,13 +3209,45 @@ async function saveConfirmedBookmark(draft) {
 
   const dfText = `${draft.title || ''} ${(draft.contentText || '').slice(0, 1000)} ${draft.url || ''}`;
   if (typeof updateDocFrequency === 'function') {
-    updateDocFrequency(dfText, draft.url);
+    await runSerializedOperationDomain('legacy_recommendation_corpus', () => updateDocFrequency(dfText, draft.url)).catch(() => {});
   }
-  if (typeof markDomainSeen === 'function' && draft.domain) {
-    markDomainSeen(draft.domain).catch(() => {});
+  if (draft.url) {
+    const domain = String(extractDomain(draft.url) || '').trim().toLowerCase();
+    if (domain) {
+      await mutateLegacyDynamicRules((rules) => ({
+        ...rules,
+        seenDomains: [...new Set([...(rules.seenDomains || []), domain])],
+      })).catch(() => {});
+    }
   }
 
-  return { success: true, bookmarkId: createdBookmark.id, tags: finalTags, folderName, folderPath, moved: !!duplicate && draft.duplicateAction === 'move', copied: !!duplicate && draft.duplicateAction === 'copy' };
+  let feedback = null;
+  if (draft.recommendationId && feedbackSnapshot) {
+      const originalFolder = normalizeBookmarkFolderPath(feedbackSnapshot.selectedFolderPath || '');
+      const originalTags = normalizeTagList(feedbackSnapshot.selectedTags || []);
+      const changedFields = [];
+      if (originalFolder !== folderPath) changedFields.push('folder');
+      if (originalTags.join('\u0000').toLowerCase() !== finalTags.join('\u0000').toLowerCase()) changedFields.push('tags');
+      feedback = await submitRecommendationFeedback({
+        operationId: draft.operationId || makeRecommendationId('save'),
+        recommendationId: draft.recommendationId,
+        bookmarkId: createdBookmark.id,
+        outcome: changedFields.length > 0 ? 'modified' : 'accepted',
+        changedFields,
+        selection: { folderPath, tags: finalTags },
+      });
+  }
+
+  return {
+    success: true,
+    bookmarkId: createdBookmark.id,
+    tags: finalTags,
+    folderName,
+    folderPath,
+    moved: !!duplicate && draft.duplicateAction === 'move',
+    copied: !!duplicate && draft.duplicateAction === 'copy',
+    feedback,
+  };
 }
 
 async function injectBookmarkConfirmPanel(tabId, state) {
@@ -2111,11 +3267,12 @@ async function injectBookmarkConfirmPanel(tabId, state) {
       root.id = ROOT_ID;
       const tags = Array.isArray(panelState.tags) ? panelState.tags : [];
       const folderOptions = Array.isArray(panelState.folderOptions) ? panelState.folderOptions : [];
+      const folderCandidates = Array.isArray(panelState.folderCandidates) ? panelState.folderCandidates.slice(0, 3) : [];
       const isChinese = String(panelState.panelLanguage || '').toLowerCase().startsWith('zh');
       const copy = isChinese ? {
-        title: '收藏前确认 AI 分类建议', analyzingPage: '正在分析当前页面', loading: '正在理解页面并生成分类建议...', cancel: '取消', titleLabel: '标题', aiCategory: 'AI 推荐分类', existingCategory: '匹配已有分类', newCategory: '推荐新建分类', newPrefix: '新建：', newCategoryLabel: '新建分类', searchCategory: '搜索已有分类，例如 公司 / 项目 / 文档', matchingCategories: '匹配的已有分类', selectCategory: '选择书签分类', useExisting: '沿用已有：', selectExisting: '选择已有分类...', manualPath: '手动输入路径...', pathExample: '例如：工作/公司/项目', categoryHint: '选择已有分类会直接收藏进去；选择新建分类会自动创建对应文件夹后收藏。', tags: '标签', tagHint: '用逗号分隔', recommendedPath: '推荐路径', summary: '摘要说明', summaryHint: '可手动补充摘要', reason: '归类理由', reasonHint: '可手动补充归类理由', aiReady: 'AI 已生成建议，你可以直接确认，也可以修改分类、标签和说明后再收藏。', localReady: '当前使用本地规则作为兜底建议，你仍可手动修改后继续收藏。', retry: '重试 AI', confirm: '确认收藏', duplicateTitle: '该页面已收藏', duplicateNote: '该页面已收藏在“$1”（$2）。请选择将它移动到当前目标，或在当前目标保留一份副本。', copy: '保留副本', move: '移动到此处', saving: '正在收藏...', saved: '已收藏', duplicateError: '该页面已经在书签中。', saveFailed: '收藏失败：', unknown: '未知错误', searchMatches: '匹配 $1 个已有分类，可点击结果或按 Enter 选中', searchHint: '可直接下拉选择，也可搜索 $1 个已有分类'
+        title: '智能分类建议', analyzingPage: '正在分析当前页面', loading: '正在分析页面并生成分类建议...', cancel: '取消收藏', titleLabel: '标题', aiCategory: '目录候选', existingCategory: '已有目录', newCategory: '新目录候选', newPrefix: '新建：', newCategoryLabel: '新建分类', searchCategory: '搜索已有分类，例如 公司 / 项目 / 文档', matchingCategories: '匹配的已有分类', selectCategory: '选择书签分类', useExisting: '沿用已有：', selectExisting: '选择已有分类...', manualPath: '手动输入路径...', pathExample: '例如：工作/公司/项目', categoryHint: '仅高置信建议会预选；也可以搜索已有目录或输入新路径。', tags: '标签', tagHint: '用逗号分隔', recommendedPath: '推荐路径', summary: '摘要说明', summaryHint: '可手动补充摘要', reason: '归类理由', reasonHint: '可手动补充归类理由', aiReady: 'AI 已在低置信或冲突时参与校验，你可以继续确认或修改。', localReady: '当前建议由本地规则与目录画像生成。', noRecommendation: '当前证据不足，暂不预选分类。', retry: '重新分析', reject: '不采用建议', rejected: '已记录拒绝，请手动选择分类或直接收藏。', high: '高置信', medium: '中置信', low: '低置信', confirm: '确认收藏', duplicateTitle: '该页面已收藏', duplicateNote: '该页面已收藏在“$1”（$2）。请选择将它移动到当前目标，或在当前目标保留一份副本。', copy: '保留副本', move: '移动到此处', saving: '正在收藏...', saved: '已收藏', duplicateError: '该页面已经在书签中。', saveFailed: '收藏失败：', unknown: '未知错误', searchMatches: '匹配 $1 个已有分类，可点击结果或按 Enter 选中', searchHint: '可直接下拉选择，也可搜索 $1 个已有分类'
       } : {
-        title: 'Review AI bookmark suggestion', analyzingPage: 'Analyzing the current page', loading: 'Understanding the page and preparing a suggestion...', cancel: 'Cancel', titleLabel: 'Title', aiCategory: 'AI suggested folder', existingCategory: 'Existing folder found', newCategory: 'New folder suggested', newPrefix: 'Create: ', newCategoryLabel: 'Create new folder', searchCategory: 'Search folders, e.g. Work / Projects / Docs', matchingCategories: 'Matching folders', selectCategory: 'Choose bookmark folder', useExisting: 'Use existing: ', selectExisting: 'Choose an existing folder...', manualPath: 'Enter a path manually...', pathExample: 'Example: Work/Company/Project', categoryHint: 'An existing folder is used directly. A new path creates its folders before saving.', tags: 'Tags', tagHint: 'Separate with commas', recommendedPath: 'Suggested path', summary: 'Summary', summaryHint: 'Add a summary', reason: 'Why this folder', reasonHint: 'Add a reason', aiReady: 'AI has prepared a suggestion. You can confirm it or edit the folder, tags, and details first.', localReady: 'A local-rule suggestion is being used. You can edit it before saving.', retry: 'Retry AI', confirm: 'Save bookmark', duplicateTitle: 'This page is already bookmarked', duplicateNote: 'This page is already in “$1” ($2). Move it to the current destination or keep a copy there.', copy: 'Keep a copy', move: 'Move here', saving: 'Saving...', saved: 'Saved', duplicateError: 'This page is already bookmarked.', saveFailed: 'Could not save: ', unknown: 'Unknown error', searchMatches: '$1 matching folders. Click a result or press Enter to select it.', searchHint: 'Choose from the list or search $1 existing folders'
+        title: 'Smart folder suggestion', analyzingPage: 'Analyzing the current page', loading: 'Analyzing the page and preparing suggestions...', cancel: 'Cancel bookmark', titleLabel: 'Title', aiCategory: 'Folder candidates', existingCategory: 'Existing folder', newCategory: 'New folder candidate', newPrefix: 'Create: ', newCategoryLabel: 'Create new folder', searchCategory: 'Search folders, e.g. Work / Projects / Docs', matchingCategories: 'Matching folders', selectCategory: 'Choose bookmark folder', useExisting: 'Use existing: ', selectExisting: 'Choose an existing folder...', manualPath: 'Enter a path manually...', pathExample: 'Example: Work/Company/Project', categoryHint: 'Only high-confidence suggestions are preselected. You can search or enter another path.', tags: 'Tags', tagHint: 'Separate with commas', recommendedPath: 'Suggested path', summary: 'Summary', summaryHint: 'Add a summary', reason: 'Why this folder', reasonHint: 'Add a reason', aiReady: 'AI was used to verify a low-confidence or conflicting result.', localReady: 'Suggestions are based on local rules and folder profiles.', noRecommendation: 'Evidence is insufficient, so no folder was preselected.', retry: 'Analyze again', reject: 'Reject suggestion', rejected: 'Rejection recorded. Choose a folder manually or save without one.', high: 'High', medium: 'Medium', low: 'Low', confirm: 'Save bookmark', duplicateTitle: 'This page is already bookmarked', duplicateNote: 'This page is already in “$1” ($2). Move it to the current destination or keep a copy there.', copy: 'Keep a copy', move: 'Move here', saving: 'Saving...', saved: 'Saved', duplicateError: 'This page is already bookmarked.', saveFailed: 'Could not save: ', unknown: 'Unknown error', searchMatches: '$1 matching folders. Click a result or press Enter to select it.', searchHint: 'Choose from the list or search $1 existing folders'
       };
       const format = (text, ...values) => values.reduce((result, value, index) => result.replace(`$${index + 1}`, value), text);
       const localizeRootPath = (path) => {
@@ -2137,6 +3294,14 @@ async function injectBookmarkConfirmPanel(tabId, state) {
         return `<option value="${esc(folder.path)}" data-id="${esc(folder.id)}" data-display-path="${esc(displayPath)}"${selected}>${esc(displayPath)}</option>`;
       }).join('');
       const newOptionLabel = recommendedPath ? `${copy.newPrefix}${recommendedPath}` : copy.newCategoryLabel;
+      const confidenceText = value => copy[value] || copy.low;
+      const candidateHtml = folderCandidates.length > 0
+        ? folderCandidates.map(candidate => {
+          const path = localizeRootPath(candidate.folderPath || candidate.path || '');
+          const reasons = (candidate.reasons || []).slice(0, 2).join(' · ');
+          return `<button type="button" class="ab-candidate${path === recommendedPath ? ' is-selected' : ''}" data-candidate-path="${esc(path)}" data-candidate-id="${esc(candidate.id || candidate.folderId || '')}" data-candidate-existing="${candidate.exists ? 'true' : 'false'}"><span><strong>${esc(path)}</strong>${reasons ? `<small>${esc(reasons)}</small>` : ''}</span><em class="is-${esc(candidate.confidence || 'low')}">${esc(confidenceText(candidate.confidence))}</em></button>`;
+        }).join('')
+        : `<div class="ab-abstain">${copy.noRecommendation}</div>`;
       root.innerHTML = `
         <style>
           #${ROOT_ID}{position:fixed;inset:0;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;color:#1d1d1f;pointer-events:none;display:flex;align-items:stretch;justify-content:flex-end;box-sizing:border-box}
@@ -2162,6 +3327,15 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           #${ROOT_ID} .ab-folder-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}
           #${ROOT_ID} .ab-folder-title{font-size:12px;font-weight:700;color:#1d1d1f}
           #${ROOT_ID} .ab-folder-badge{font-size:11px;color:${recommendedExists ? '#188038' : '#0756a8'};background:${recommendedExists ? 'rgba(52,199,89,.13)' : 'rgba(10,132,255,.12)'};padding:3px 8px;border-radius:999px;white-space:nowrap}
+          #${ROOT_ID} .ab-candidates{display:grid;gap:6px;margin-bottom:10px}
+          #${ROOT_ID} .ab-candidate{width:100%;min-height:50px;padding:8px 9px;border:1px solid rgba(0,0,0,.08);border-radius:7px;background:#fff;color:#1d1d1f;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;box-shadow:none}
+          #${ROOT_ID} .ab-candidate:hover,#${ROOT_ID} .ab-candidate.is-selected{border-color:#0a84ff;background:rgba(10,132,255,.07);transform:none}
+          #${ROOT_ID} .ab-candidate span{min-width:0;display:grid;gap:3px}
+          #${ROOT_ID} .ab-candidate strong{font-size:12px;overflow-wrap:anywhere}
+          #${ROOT_ID} .ab-candidate small{font-size:10px;color:#6e6e73;overflow-wrap:anywhere}
+          #${ROOT_ID} .ab-candidate em{flex:0 0 auto;font-size:10px;font-style:normal;font-weight:700;color:#6e6e73}
+          #${ROOT_ID} .ab-candidate em.is-high{color:#188038} #${ROOT_ID} .ab-candidate em.is-medium{color:#9a6700}
+          #${ROOT_ID} .ab-abstain{padding:9px 10px;border-left:3px solid #8e8e93;background:rgba(118,118,128,.08);font-size:11px;color:#6e6e73}
           #${ROOT_ID} .ab-folder-row{display:grid;grid-template-columns:1fr;gap:8px}
           #${ROOT_ID} .ab-folder-search-row{position:relative}
           #${ROOT_ID} .ab-folder-combobox{position:relative}
@@ -2191,7 +3365,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           @media(max-width:560px){#${ROOT_ID} .ab-card{width:100vw;padding:16px}#${ROOT_ID} .ab-grid{grid-template-columns:1fr}#${ROOT_ID} .ab-actions{flex-wrap:wrap}#${ROOT_ID} button{flex:1}}
         </style>
         <section class="ab-card" role="dialog" aria-modal="false" aria-labelledby="abTitle">
-          <div class="ab-head"><div class="ab-icon">AI</div><div class="ab-head-copy"><h2 id="abTitle">${copy.title}</h2><div class="ab-sub">${esc(panelState.title || copy.analyzingPage)}<br>${esc(panelState.url || '')}</div></div><button class="ab-close" data-act="cancel" aria-label="${isChinese ? String.fromCharCode(0x5173, 0x95ed) : 'Close'}" title="${isChinese ? String.fromCharCode(0x5173, 0x95ed) : 'Close'}">&times;</button></div>
+          <div class="ab-head"><div class="ab-icon">${panelState.aiTriggered ? 'AI' : 'A'}</div><div class="ab-head-copy"><h2 id="abTitle">${copy.title}</h2><div class="ab-sub">${esc(panelState.title || copy.analyzingPage)}<br>${esc(panelState.url || '')}</div></div><button class="ab-close" data-act="cancel" aria-label="${isChinese ? String.fromCharCode(0x5173, 0x95ed) : 'Close'}" title="${isChinese ? String.fromCharCode(0x5173, 0x95ed) : 'Close'}">&times;</button></div>
           ${panelState.status === 'loading' ? `
             <div class="ab-loading"><span class="ab-dot"></span><span class="ab-dot"></span><span class="ab-dot"></span><span>${copy.loading}</span></div>
             <div class="ab-actions"><button class="ab-secondary" data-act="cancel">${copy.cancel}</button></div>
@@ -2199,6 +3373,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
             <label>${copy.titleLabel}</label><input id="abTitleInput" value="${esc(panelState.title)}">
             <div class="ab-folder-card">
               <div class="ab-folder-head"><div class="ab-folder-title">${copy.aiCategory}</div><div class="ab-folder-badge">${recommendedExists ? copy.existingCategory : copy.newCategory}</div></div>
+              <div class="ab-candidates" role="listbox" aria-label="${copy.aiCategory}">${candidateHtml}</div>
               <div class="ab-folder-row">
                 <div class="ab-folder-search-row ab-folder-combobox">
                   <input id="abFolderSearch" class="ab-folder-search" value="" placeholder="${copy.searchCategory}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="abFolderResults">
@@ -2221,8 +3396,8 @@ async function injectBookmarkConfirmPanel(tabId, state) {
             <div class="ab-grid"><div><label>${copy.tags}</label><input id="abTagsInput" value="${esc(tags.join(', '))}" placeholder="${copy.tagHint}"></div><div><label>${copy.recommendedPath}</label><input value="${esc(recommendedPath)}" disabled></div></div>
             <label>${copy.summary}</label><textarea id="abSummaryInput" placeholder="${copy.summaryHint}">${esc(panelState.summary || '')}</textarea>
             <label>${copy.reason}</label><textarea id="abReasonInput" placeholder="${copy.reasonHint}">${esc(panelState.reason || '')}</textarea>
-            <div class="ab-note">${esc(panelState.aiError || (panelState.aiAvailable ? copy.aiReady : copy.localReady))}</div>
-            <div class="ab-actions"><button class="ab-secondary" data-act="retry">${copy.retry}</button><button class="ab-secondary" data-act="cancel">${copy.cancel}</button><button class="ab-primary" data-act="confirm">${copy.confirm}</button></div>
+            <div class="ab-note">${esc(panelState.aiError || (panelState.aiAvailable ? copy.aiReady : (panelState.abstained ? copy.noRecommendation : copy.localReady)))}</div>
+            <div class="ab-actions"><button class="ab-secondary" data-act="retry">${copy.retry}</button><button class="ab-secondary" data-act="reject">${copy.reject}</button><button class="ab-secondary" data-act="cancel">${copy.cancel}</button><button class="ab-primary" data-act="confirm">${copy.confirm}</button></div>
           `}
         </section>`;
       document.documentElement.appendChild(root);
@@ -2261,6 +3436,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
       let activeFolderResult = 0;
       let folderDropdownOpen = false;
       let folderBlurTimer = null;
+      const makeOperationId = prefix => `${prefix}_${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`}`;
       const updateDestination = () => {
         if (!destination || !folderSearch) return;
         const enteredPath = folderSearch.value.trim();
@@ -2319,6 +3495,24 @@ async function injectBookmarkConfirmPanel(tabId, state) {
         }
         updateDestination();
       };
+      root.querySelectorAll('.ab-candidate').forEach(candidateButton => {
+        candidateButton.addEventListener('click', () => {
+          const path = candidateButton.dataset.candidatePath || '';
+          const option = getExistingFolderOptions().find(item =>
+            (item.dataset?.displayPath || item.value) === path || item.value === path
+          );
+          root.querySelectorAll('.ab-candidate').forEach(item => item.classList.toggle('is-selected', item === candidateButton));
+          if (option) {
+            selectExistingFolder(option);
+          } else if (folderSearch) {
+            selectedExistingFolder = null;
+            folderSearch.value = path;
+            folderSearch.dataset.userSearching = path ? 'true' : '';
+            filterFolderOptions();
+            updateDestination();
+          }
+        });
+      });
       const setFolderDropdownOpen = (open, showAll = false) => {
         folderDropdownOpen = open;
         if (folderSearch) folderSearch.dataset.showAll = showAll ? 'true' : '';
@@ -2452,8 +3646,35 @@ async function injectBookmarkConfirmPanel(tabId, state) {
         if (!btn) return;
         const act = btn.dataset.act;
         if (act === 'cancel') {
-          chrome.runtime.sendMessage({ action: 'cancelQuickBookmarkSuggestion', url: panelState.url }).catch(() => {});
+          chrome.runtime.sendMessage({
+            action: 'cancelQuickBookmarkSuggestion',
+            url: panelState.url,
+            recommendationId: panelState.recommendationId || '',
+            operationId: makeOperationId('cancel')
+          }).catch(() => {});
           close();
+          return;
+        }
+        if (act === 'reject') {
+          if (panelState.recommendationId) {
+            await chrome.runtime.sendMessage({
+              action: 'submitBookmarkRecommendationFeedback',
+              recommendationId: panelState.recommendationId,
+              operationId: makeOperationId('reject'),
+              outcome: 'rejected',
+              changedFields: [],
+              selection: {}
+            }).catch(() => null);
+          }
+          panelState.recommendationId = '';
+          selectedExistingFolder = null;
+          if (folderSearch) folderSearch.value = '';
+          const tagsInput = root.querySelector('#abTagsInput');
+          if (tagsInput) tagsInput.value = '';
+          root.querySelectorAll('.ab-candidate').forEach(item => item.classList.remove('is-selected'));
+          const note = root.querySelector('.ab-note');
+          if (note) note.textContent = copy.rejected;
+          updateDestination();
           return;
         }
         if (act === 'retry') {
@@ -2482,6 +3703,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           const folderPath = selectedExisting?.path || folderSearchValue || panelState.folderPath;
           const draft = {
             ...panelState,
+            operationId: makeOperationId('save'),
             title: root.querySelector('#abTitleInput')?.value?.trim() || panelState.title,
             folderMode,
             folderId: folderMode === 'existing' ? selectedExisting.id : '',
@@ -2492,7 +3714,13 @@ async function injectBookmarkConfirmPanel(tabId, state) {
             reason: root.querySelector('#abReasonInput')?.value?.trim() || '',
             duplicateAction: act === 'move' || act === 'copy' ? act : ''
           };
-          const resp = await chrome.runtime.sendMessage({ action: 'confirmQuickBookmarkSuggestion', draft }).catch(err => ({ success:false, error: err?.message || String(err) }));
+          const resp = await chrome.runtime.sendMessage({
+            action: 'confirmQuickBookmarkSuggestion',
+            operationId: draft.operationId,
+            recommendationId: panelState.recommendationId || '',
+            selection: { folderId: draft.folderId, folderPath: draft.folderPath, folderMode: draft.folderMode, tags: draft.tags },
+            draft
+          }).catch(err => ({ success:false, error: err?.message || String(err) }));
           if (resp && resp.success) {
             btn.textContent = copy.saved;
             setTimeout(close, 450);
@@ -2584,11 +3812,6 @@ async function addSingleBookmark(id) {
       }).catch(err => console.warn('Bookmark content backfill failed:', err));
     }
 
-    // AI 异步回填：对规则引擎不确定的快速收藏书签，在保存后调用云端 AI
-    if (pending && !pending.finalConfirmed && typeof getAIConfig === 'function' && typeof classifyWithAI === 'function') {
-      maybeBackfillAIForItem(item, pending).catch(() => {});
-    }
-
     // 桌面通知：一键收藏成功后，根据用户设置弹出系统通知
     if (pending) {
       const settings = await chrome.storage.local.get(['notificationEnabled']);
@@ -2604,148 +3827,10 @@ async function addSingleBookmark(id) {
       }
     }
 
-    return item;
+    return { item, hadPending: !!pending };
   } catch (err) {
     console.error('增量同步失败:', err);
     return null;
-  }
-}
-
-// ===== AI 异步回填 =====
-// 在书签已保存后，对低置信样本调用云端 AI，将结果与规则标签融合并更新存储
-async function maybeBackfillAIForItem(item, context) {
-  const startTime = Date.now();
-  _logIfReady({
-    type: 'backfill_start',
-    provider: 'unknown',
-    url: item?.url,
-    success: true,
-    details: { title: item?.title }
-  });
-  try {
-    const config = await getAIConfig();
-    if (!config.enabled || !config.apiKey) return;
-
-    const bookmark = {
-      title: item.title,
-      url: item.url,
-      domain: item.domain,
-      contentText: context?.contentText || '',
-      metaDesc: context?.metaDesc || '',
-      excerpt: context?.excerpt || ''
-    };
-
-    const ruleTags = context?.ruleTags || [];
-    const candidateTags = ruleTags.slice(0, 5).map(t => ({
-      tag: t.tag,
-      score: t.score,
-      signals: t.signals || []
-    }));
-    const signals = {};
-    for (const t of ruleTags) {
-      signals[t.tag] = t.signals || [];
-    }
-
-    const aiTags = await classifyWithAI(bookmark, candidateTags, signals, {});
-    if (!aiTags || aiTags.length === 0) {
-      _logIfReady({
-        type: 'backfill_skip',
-        provider: config.provider,
-        url: item.url,
-        duration: Date.now() - startTime,
-        success: true,
-        details: { reason: 'no_ai_result' }
-      });
-      return;
-    }
-
-    const merged = mergeAITags(ruleTags, aiTags, 3).map(t => t.tag);
-    if (JSON.stringify(merged) === JSON.stringify(item.tags || [])) {
-      _logIfReady({
-        type: 'backfill_skip',
-        provider: config.provider,
-        url: item.url,
-        duration: Date.now() - startTime,
-        success: true,
-        details: { reason: 'no_change' }
-      });
-      return;
-    }
-
-    let storedFound = false;
-    await mutateStoredBookmarks((bookmarks) => bookmarks.map((stored) => {
-      if (stored.id !== item.id && (stored.url !== item.url || stored.dateAdded !== item.dateAdded)) return stored;
-      storedFound = true;
-      return { ...stored, tags: merged, tagsAuto: merged };
-    }));
-    if (!storedFound) {
-      _logIfReady({
-        type: 'backfill_fail',
-        provider: config.provider,
-        url: item.url,
-        duration: Date.now() - startTime,
-        success: false,
-        error: 'Stored bookmark not found'
-      });
-      return;
-    }
-
-    _logIfReady({
-      type: 'backfill_success',
-      provider: config.provider,
-      url: item.url,
-      duration: Date.now() - startTime,
-      success: true,
-      details: {
-        beforeTags: item.tags || [],
-        afterTags: merged,
-        aiTags: aiTags.map(t => t.tag)
-      }
-    });
-
-    // 将 AI 辅助分类结果加入主动学习待确认队列
-    // 由于 handleQuickBookmark 可能已提前把低置信度规则项加入队列，
-    // 这里强制移除同 URL 的规则项，确保 AI 项覆盖旧项。
-    if (typeof loadReviewQueue === 'function' && typeof saveReviewQueue === 'function') {
-      const avgConfidence = aiTags.length > 0
-        ? aiTags.reduce((sum, t) => sum + (t.confidence || 0), 0) / aiTags.length
-        : 0.7;
-      const avgScore = aiTags.length > 0
-        ? (aiTags.reduce((sum, t) => sum + (t.confidence || 0), 0) / aiTags.length) * 100
-        : 70;
-      const queue = await loadReviewQueue();
-      const filtered = queue.filter(q => q.url !== item.url);
-      filtered.unshift({
-        id: `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        url: item.url,
-        title: item.title,
-        domain: item.domain,
-        suggestedTags: merged,
-        confidence: avgConfidence,
-        score: avgScore,
-        reason: 'ai_assisted',
-        source: 'ai',
-        excerpt: context?.excerpt || item.excerpt || '',
-        createdAt: Date.now()
-      });
-      if (filtered.length > 50) filtered.pop();
-      await saveReviewQueue(filtered);
-    }
-
-    chrome.runtime.sendMessage({
-      action: 'tagsUpdated',
-      bookmarkId: stored.id,
-      tags: merged
-    }).catch(() => {});
-  } catch (err) {
-    console.warn('AI backfill failed:', err);
-    _logIfReady({
-      type: 'backfill_fail',
-      url: item?.url,
-      duration: Date.now() - startTime,
-      success: false,
-      error: err.message || 'Unknown error'
-    });
   }
 }
 
@@ -2839,24 +3924,22 @@ async function saveRssArticleAsBookmark(item, feed, settings) {
       } catch { /* 忽略 */ }
     }
 
-    // 3. 智能标签：构建临时 item 调用 autoTagBookmarkSync
+    // 3. 智能标签：复用统一异步推荐内核，证据不足时允许不打标签。
     let tagNames = [];
-    if (typeof autoTagBookmarkSync === 'function') {
-      const tempItem = {
-        url: item.link,
-        title: item.title || '',
-        domain: extractDomain(item.link),
-        folderName,
-        folderPath,
-        contentText: item.contentSnippet || item.summary || '',
-        metaDesc: item.summary || '',
-        excerpt: item.summary || ''
-      };
-      try {
-        const tags = autoTagBookmarkSync(tempItem);
-        tagNames = (tags || []).map(t => t.tag).filter(Boolean);
-      } catch { /* 标签失败不阻塞保存 */ }
-    }
+    const tempItem = {
+      url: item.link,
+      title: item.title || '',
+      domain: extractDomain(item.link),
+      folderName,
+      folderPath,
+      contentText: item.contentSnippet || item.summary || '',
+      metaDesc: item.summary || '',
+      excerpt: item.summary || ''
+    };
+    try {
+      const [recommended] = await recommendTagsForBookmarks([tempItem], 1);
+      tagNames = recommended?.tags || [];
+    } catch { /* 标签失败不阻塞保存 */ }
 
     // 4. 通过 pendingQuickBookmarks 将标签和文件夹信息传递给 onCreated → addSingleBookmark
     pendingQuickBookmarks.set(item.link, {
@@ -3550,10 +4633,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         const { url, title } = message;
         const tempItem = { url: url || '', title: title || '', domain: extractDomain(url || '') };
-        const tagResults = autoTagBookmarkSync(tempItem);
-        const tags = tagResults.map(t => t.tag);
-        const result = await suggestBookmarkFolder(url, title, tags, tempItem);
-        sendResponse({ success: true, folder: result });
+        const result = await buildBookmarkRecommendation(tempItem);
+        const folder = result.folders[0]?.confidence === 'high' ? result.folders[0] : null;
+        sendResponse({
+          success: true,
+          folder: folder ? { id: folder.id || folder.folderId || '', title: folder.title || folder.folderName || '', path: folder.folderPath || folder.path || '' } : null,
+          folders: result.folders,
+          tags: result.tags,
+          recommendationId: result.recommendationId,
+          confidence: result.confidence,
+          abstained: result.abstained,
+          ai: result.ai,
+        });
+      })();
+      return true;
+    }
+
+    case 'getBookmarkRecommendation': {
+      (async () => {
+        try {
+          const bookmark = message.bookmark && typeof message.bookmark === 'object'
+            ? message.bookmark
+            : { id: message.id || '', url: message.url || '', title: message.title || '' };
+          if (!isSafeExternalUrl(bookmark.url)) {
+            sendResponse({ success: false, error: 'invalid_url' });
+            return;
+          }
+          const recommendation = await buildBookmarkRecommendation({
+            ...bookmark,
+            domain: bookmark.domain || extractDomain(bookmark.url),
+          }, { allowAI: message.allowAI !== false });
+          sendResponse({ success: true, recommendation });
+        } catch (error) {
+          sendResponse({ success: false, error: error?.message || 'recommendation_failed' });
+        }
       })();
       return true;
     }
@@ -3569,7 +4682,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'confirmQuickBookmarkSuggestion': {
       (async () => {
         try {
-          const result = await saveConfirmedBookmark(message.draft || {});
+          const draft = { ...(message.draft || {}) };
+          draft.operationId = message.operationId || draft.operationId || makeRecommendationId('save');
+          draft.recommendationId = message.recommendationId || draft.recommendationId || '';
+          if (message.selection && typeof message.selection === 'object') {
+            draft.folderId = message.selection.folderId || draft.folderId || '';
+            draft.folderPath = message.selection.folderPath ?? draft.folderPath;
+            draft.folderMode = message.selection.folderMode || draft.folderMode;
+            draft.tags = message.selection.tags || draft.tags;
+          }
+          const result = await runIdempotentOperation(
+            'confirm_quick_bookmark',
+            draft.operationId,
+            () => saveConfirmedBookmark(draft),
+          );
           sendResponse(result);
         } catch (err) {
           sendResponse({ success: false, error: err?.message || String(err) });
@@ -3580,8 +4706,72 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'cancelQuickBookmarkSuggestion': {
       (async () => {
+        const recommendationId = String(message.recommendationId || '').trim();
+        if (recommendationId) {
+          await submitRecommendationFeedback({
+            operationId: message.operationId || makeRecommendationId('cancel'),
+            recommendationId,
+            outcome: 'cancelled',
+            changedFields: [],
+            selection: {},
+          });
+        }
         sendResponse({ success: true, cancelled: true });
       })();
+      return true;
+    }
+
+    case 'submitBookmarkRecommendationFeedback': {
+      (async () => {
+        try {
+          const result = await submitRecommendationFeedback({
+            operationId: message.operationId,
+            recommendationId: message.recommendationId,
+            bookmarkId: message.bookmarkId,
+            outcome: message.outcome,
+            changedFields: message.changedFields,
+            selection: message.selection,
+          });
+          sendResponse(result);
+        } catch (error) {
+          sendResponse({ success: false, error: error?.message || 'feedback_failed' });
+        }
+      })();
+      return true;
+    }
+
+    case 'getRecommendationLearningState': {
+      getRecommendationLearningState()
+        .then(state => sendResponse({ success: true, state }))
+        .catch(error => sendResponse({ success: false, error: error?.message || 'learning_state_failed' }));
+      return true;
+    }
+
+    case 'mutateRecommendationRule': {
+      mutateRecommendationRule(message)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: error?.message || 'rule_mutation_failed' }));
+      return true;
+    }
+
+    case 'rebuildRecommendationLearning': {
+      rebuildRecommendationLearning(message.operationId)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: error?.message || 'learning_rebuild_failed' }));
+      return true;
+    }
+
+    case 'reevaluateBookmarks': {
+      reevaluateBookmarkRecommendations(message.ids, { limit: message.limit, allowAI: message.allowAI === true })
+        .then(result => sendResponse({ success: true, ...result }))
+        .catch(error => sendResponse({ success: false, error: error?.message || 'reevaluate_failed' }));
+      return true;
+    }
+
+    case 'resolveRecommendationReview': {
+      resolveRecommendationReview(message)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: error?.message || 'review_resolution_failed' }));
       return true;
     }
 
@@ -3616,9 +4806,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         try {
           const { domains, tag, color } = message;
-          if (typeof addDynamicDomainRule === 'function') {
-            await addDynamicDomainRule(domains, tag, color);
+          const normalizedDomains = [...new Set((domains || []).map(domain => String(domain || '').trim().toLowerCase()).filter(Boolean))];
+          if (!tag || normalizedDomains.length === 0 || normalizedDomains.some(domain => !self.BookmarkRecommendationCore?.isValidDomainPattern(domain))) {
+            sendResponse({ success: false, error: 'invalid_domain_rule' });
+            return;
           }
+          await runSerializedOperationDomain('recommendation_rule_compat', async () => {
+            await mutateLegacyDynamicRules((rules) => ({
+              ...rules,
+              domainRules: [...rules.domainRules, { domains: normalizedDomains, tag: String(tag).trim(), color: color || '#607d8b' }],
+            }));
+            for (const domain of normalizedDomains) await addRecommendationUserRule('domain_tag', domain, String(tag).trim());
+          });
           sendResponse({ success: true });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
@@ -3631,9 +4830,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         try {
           const { tag, keyword } = message;
-          if (typeof addDynamicKeyword === 'function') {
-            await addDynamicKeyword(tag, keyword);
-          }
+          const normalizedTag = String(tag || '').trim();
+          const normalizedKeyword = String(keyword || '').trim().toLowerCase();
+          if (!normalizedTag || !normalizedKeyword) throw new Error('invalid_keyword_rule');
+          await runSerializedOperationDomain('recommendation_rule_compat', async () => {
+            await mutateLegacyDynamicRules((rules) => ({
+              ...rules,
+              keywordRules: {
+                ...rules.keywordRules,
+                [normalizedTag]: [...new Set([...(rules.keywordRules[normalizedTag] || []), normalizedKeyword])],
+              },
+            }));
+            await addRecommendationUserRule('keyword_tag', normalizedKeyword, normalizedTag);
+          });
           sendResponse({ success: true });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
@@ -3646,9 +4855,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         try {
           const { word } = message;
-          if (typeof addDynamicStopWord === 'function') {
-            await addDynamicStopWord(word);
-          }
+          const normalizedWord = String(word || '').trim().toLowerCase();
+          if (!normalizedWord) throw new Error('invalid_stop_word');
+          await runSerializedOperationDomain('recommendation_rule_compat', async () => {
+            await mutateLegacyDynamicRules((rules) => ({ ...rules, stopWords: [...new Set([...rules.stopWords, normalizedWord])] }));
+            await mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+              const store = normalizeRecommendationStore(current);
+              store.stopWords = [...new Set([...store.stopWords, normalizedWord])];
+              return store;
+            });
+          });
           sendResponse({ success: true });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
@@ -3661,9 +4877,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         try {
           const { tag } = message;
-          if (typeof removeDynamicDomainRule === 'function') {
-            await removeDynamicDomainRule(tag);
-          }
+          await runSerializedOperationDomain('recommendation_rule_compat', async () => {
+            await mutateLegacyDynamicRules((rules) => ({
+              ...rules,
+              domainRules: rules.domainRules.filter(rule => rule.tag !== tag),
+            }));
+            await deleteRecommendationUserRules(rule => rule.kind === 'domain_tag' && rule.target === tag);
+          });
           sendResponse({ success: true });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
@@ -3675,9 +4895,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'clearLearnedDomainTags': {
       (async () => {
         try {
-          if (typeof clearLearnedDomainTags === 'function') {
-            await clearLearnedDomainTags();
-          }
+          await runSerializedOperationDomain('recommendation_rule_compat', async () => {
+            await mutateLegacyDynamicRules((rules) => ({ ...rules, learnedDomainTag: {} }));
+            await mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+              const store = normalizeRecommendationStore(current);
+              store.rules = store.rules.filter(rule => rule.source !== 'legacy');
+              return store;
+            });
+          });
           sendResponse({ success: true });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
@@ -3689,13 +4914,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'saveDynamicRules': {
       (async () => {
         try {
-          const { rules } = message;
-          if (typeof saveDynamicRules === 'function') {
-            await saveDynamicRules(rules);
-          }
+          const rules = normalizeLegacyDynamicRules(message.rules);
+          await runSerializedOperationDomain('recommendation_rule_compat', async () => {
+            await mutateLegacyDynamicRules(() => rules);
+            await syncRecommendationUserRulesFromLegacy(rules);
+          });
           sendResponse({ success: true });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
+        }
+      })();
+      return true;
+    }
+
+    case 'removeDynamicStopWord': {
+      (async () => {
+        try {
+          const word = String(message.word || '').trim().toLowerCase();
+          await runSerializedOperationDomain('recommendation_rule_compat', async () => {
+            await mutateLegacyDynamicRules((rules) => ({ ...rules, stopWords: rules.stopWords.filter(item => item !== word) }));
+            await mutateStorageResource(RECOMMENDATION_STORE_KEY, (current) => {
+              const store = normalizeRecommendationStore(current);
+              store.stopWords = store.stopWords.filter(item => item !== word);
+              return store;
+            });
+          });
+          sendResponse({ success: true });
+        } catch (error) {
+          sendResponse({ success: false, error: error?.message || 'remove_stop_word_failed' });
         }
       })();
       return true;
@@ -3720,31 +4966,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         try {
           const { queueItem, confirmedTags, reviewAction } = message;
-          if (typeof onUserConfirmTag === 'function') {
-            await onUserConfirmTag(queueItem, confirmedTags, reviewAction);
-          }
-
-          // 同步更新已保存书签的 tags，确保插件主页显示最新标签
-          if (queueItem && queueItem.url && confirmedTags && confirmedTags.length > 0) {
-            try {
-              let updated = false;
-              const stored = await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
-                if (!item.url || item.url !== queueItem.url) return item;
-                updated = true;
-                return { ...item, tags: [...confirmedTags], tagsAuto: [...confirmedTags] };
-              }));
-              if (updated) {
-                chrome.runtime.sendMessage({
-                  action: 'bookmarksUpdated',
-                  bookmarks: stored
-                }).catch(() => {});
+          const operationId = message.operationId || stableRecommendationId(
+            'legacy_review',
+            `${queueItem?.id || queueItem?.url || ''}|${reviewAction || ''}|${normalizeTagList(confirmedTags).join('|')}`,
+          );
+          const result = await runIdempotentOperation('legacy_tag_review', operationId, () => runSerializedOperationDomain(
+            'legacy_recommendation_learning',
+            async () => {
+              await submitLegacyTagReviewFeedback(queueItem, confirmedTags, reviewAction, operationId);
+              if (typeof updateLearningStats === 'function') {
+                await updateLearningStats(queueItem?.suggestedTags || [], confirmedTags || [], reviewAction);
               }
-            } catch (e) {
-              // 静默失败，不影响确认流程
-            }
-          }
-
-          sendResponse({ success: true });
+              if (typeof removeFromReviewQueue === 'function') await removeFromReviewQueue(queueItem?.id);
+              if (queueItem?.url && confirmedTags?.length > 0) {
+                let updated = false;
+                const stored = await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
+                  if (!item.url || item.url !== queueItem.url) return item;
+                  updated = true;
+                  return { ...item, tags: [...confirmedTags], tagsAuto: [...confirmedTags] };
+                }));
+                if (updated) chrome.runtime.sendMessage({ action: 'bookmarksUpdated', bookmarks: stored }).catch(() => {});
+              }
+              return { success: true };
+            },
+          ));
+          sendResponse(result);
         } catch (err) {
           sendResponse({ success: false, error: err.message });
         }
@@ -3756,10 +5002,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         try {
           const { queueItem } = message;
-          if (typeof onUserConfirmTag === 'function') {
-            await onUserConfirmTag(queueItem, [], 'ignored');
-          }
-          sendResponse({ success: true });
+          const operationId = message.operationId || stableRecommendationId('legacy_ignore', queueItem?.id || queueItem?.url || '');
+          const result = await runIdempotentOperation('legacy_tag_review', operationId, () => runSerializedOperationDomain(
+            'legacy_recommendation_learning',
+            async () => {
+              await submitLegacyTagReviewFeedback(queueItem, [], 'ignored', operationId);
+              if (typeof updateLearningStats === 'function') {
+                await updateLearningStats(queueItem?.suggestedTags || [], [], 'ignored');
+              }
+              if (typeof removeFromReviewQueue === 'function') await removeFromReviewQueue(queueItem?.id);
+              return { success: true };
+            },
+          ));
+          sendResponse(result);
         } catch (err) {
           sendResponse({ success: false, error: err.message });
         }
@@ -3835,9 +5090,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         try {
           if (typeof clearReviewQueue === 'function') {
-            await clearReviewQueue();
+            await runSerializedOperationDomain('legacy_recommendation_learning', () => clearReviewQueue());
           }
-          sendResponse({ success: true });
+          sendResponse(await clearRecommendationReviewQueue(message.operationId));
         } catch (err) {
           sendResponse({ success: false, error: err.message });
         }
@@ -4082,13 +5337,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ===== 书签事件监听 =====
 chrome.bookmarks.onCreated.addListener((id, bookmark) => {
   if (bookmark.url) {
-    addSingleBookmark(id).then((item) => {
-      if (item) {
+    addSingleBookmark(id).then((result) => {
+      if (result?.item) {
         chrome.runtime.sendMessage({
           action: 'bookmarkAdded',
-          bookmark: item
+          bookmark: result.item
         }).catch(() => {}); // popup 可能未打开
-        enqueueIncrementalClassification(id, bookmark).catch(() => {});
+        if (!result.hadPending) {
+          queueNewBookmarkRecommendation(result.item).catch(() => {});
+          enqueueIncrementalClassification(id, bookmark).catch(() => {});
+        }
       }
     });
   }
@@ -4100,7 +5358,7 @@ chrome.bookmarks.onChanged.addListener((id, changeInfo) => {
 
 let bookmarkMoveUpdateQueue = Promise.resolve();
 
-// 监听书签移动：同步本地镜像，并学习"域名→目录名(标签)"映射
+// 监听书签移动：同步本地镜像；来源不可信的移动仅进入待复核观察。
 chrome.bookmarks.onMoved.addListener((id, moveInfo) => {
   bookmarkMoveUpdateQueue = bookmarkMoveUpdateQueue.then(async () => {
     try {
@@ -4115,9 +5373,11 @@ chrome.bookmarks.onMoved.addListener((id, moveInfo) => {
       const folderPath = folderOptions.find((folder) => folder.id === moveInfo.parentId)?.path || '';
 
       let updated = false;
+      let previousFolderPath = '';
       await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
         if (item.id !== id) return item;
         updated = true;
+        previousFolderPath = item.folderPath || '';
         return { ...item, parentId: moveInfo.parentId, folderName, folderPath };
       }));
       if (updated) {
@@ -4127,9 +5387,9 @@ chrome.bookmarks.onMoved.addListener((id, moveInfo) => {
         }).catch(() => {});
       }
 
-      const domain = extractDomain(b.url);
-      if (folderName && domain && typeof learnDomainTag === 'function') {
-        await learnDomainTag(domain, folderName);
+      if (updated && !consumeProgrammaticBookmarkMove(id, moveInfo.parentId)
+        && normalizeBookmarkFolderPath(previousFolderPath) !== normalizeBookmarkFolderPath(folderPath)) {
+        await queueBookmarkMoveObservation({ ...b, id }, previousFolderPath, moveInfo.parentId, folderPath);
       }
     } catch (e) {
       // 静默失败，不影响书签移动

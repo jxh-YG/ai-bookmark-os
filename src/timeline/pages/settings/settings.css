@@ -1400,6 +1400,7 @@ body.theme-dark .conflict-details .conflict-item kbd {
 
 .review-meta {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   font-size: 12px;
   color: var(--text-tertiary);
@@ -1637,6 +1638,182 @@ body.theme-dark .ai-hint-card {
 
 #panel-ai .ai-tree-subhead {
   margin-top: 16px;
+}
+
+.review-candidates {
+  display: grid;
+  gap: 6px;
+}
+
+.review-candidate,
+.review-folder-change {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.review-candidate {
+  padding: 6px 8px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+}
+
+.review-candidate b {
+  flex: 0 0 18px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.review-candidate small {
+  margin-left: auto;
+  color: var(--text-tertiary);
+}
+
+.review-candidate-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-folder-change span,
+.review-folder-change strong,
+.review-candidate {
+  overflow-wrap: anywhere;
+}
+
+.recommendation-learning-toolbar {
+  align-items: flex-start;
+}
+
+.recommendation-learning-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.recommendation-rule-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 10px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.recommendation-rule-tabs button {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.recommendation-rule-tabs button.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.recommendation-rule-item {
+  gap: 10px;
+}
+
+.recommendation-rule-item .tagrule-item-text {
+  display: grid;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+.recommendation-rule-item .tagrule-item-text small {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.recommendation-rule-buttons {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.reevaluation-results {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.reevaluation-progress {
+  min-height: 28px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.reevaluation-batch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+}
+
+.reevaluation-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-light);
+}
+
+.reevaluation-select,
+.reevaluation-select-spacer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  margin: 0;
+}
+
+.reevaluation-select input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.reevaluation-item > span:not(.reevaluation-select-spacer) {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+.reevaluation-item small {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+@media (max-width: 720px) {
+  .recommendation-learning-actions {
+    justify-content: flex-start;
+  }
+
+  .recommendation-rule-item,
+  .reevaluation-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .reevaluation-batch {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .import-operation-card {

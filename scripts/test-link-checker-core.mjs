@@ -354,7 +354,7 @@ for (const body of [
       runtime: {
         onMessage: { addListener: (listener) => { messageListener = listener; } },
         onInstalled: { addListener: () => {} },
-        getManifest: () => ({ version: '1.0.1' }),
+        getManifest: () => ({ version: '1.0.2' }),
       },
       commands: { onCommand: { addListener: () => {} } },
       storage: { local: { remove: () => Promise.resolve() } },

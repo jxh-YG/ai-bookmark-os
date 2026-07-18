@@ -173,7 +173,7 @@ for (const loc of ['en', 'zh_CN']) {
 const manifest = {
   manifest_version: 3,
   name: '__MSG_extName__',
-  version: '1.0.1',
+  version: '1.0.2',
   homepage_url: 'https://github.com/jxh-YG/ai-bookmark-os',
   default_locale: 'zh_CN',
   description: '__MSG_extDescription__',

@@ -85,6 +85,13 @@ function extractDomain(url) {
   }
 }
 
+function visibleTags(tags) {
+  return (Array.isArray(tags) ? tags : []).filter(tag => {
+    const value = String(tag || '').trim();
+    return value && !/^\d+(?:[._:/-]\d+)*$/.test(value);
+  });
+}
+
 // URL 归一化：用于重复检测
 function normalizeUrl(url) {
   if (!url) return '';
@@ -365,14 +372,12 @@ async function refreshBookmarkData({ keepFilter = true } = {}) {
 async function collectAllTags() {
   allTags.clear();
   for (const item of allBookmarks) {
-    if (item.tags && item.tags.length > 0) {
-      for (const tag of item.tags) {
+    for (const tag of visibleTags(item.tags)) {
         if (!allTags.has(tag)) {
           const color = await getTagColor(tag);
           allTags.set(tag, { count: 0, color });
         }
         allTags.get(tag).count++;
-      }
     }
   }
 }
@@ -418,8 +423,7 @@ tagBarScroll.addEventListener('click', handleTagClick);
 function filterByTags(bookmarks) {
   if (selectedTags.size === 0) return bookmarks;
   return bookmarks.filter(item => {
-    if (!item.tags || item.tags.length === 0) return false;
-    return item.tags.some(tag => selectedTags.has(tag));
+    return visibleTags(item.tags).some(tag => selectedTags.has(tag));
   });
 }
 
@@ -639,12 +643,13 @@ function createBookmarkElement(item, groupLabel, highlightRanges) {
 
   // 标签
   let tagsHtml = '';
-  if (item.tags && item.tags.length > 0) {
-    const tagChips = item.tags.slice(0, 2).map(tag => {
+  const visibleItemTags = visibleTags(item.tags);
+  if (visibleItemTags.length > 0) {
+    const tagChips = visibleItemTags.slice(0, 2).map(tag => {
       const color = allTags.get(tag)?.color || '#9aa0a6';
       return `<span class="bookmark-tag" style="background:${color}20;color:${color}"><span class="bookmark-tag-dot" style="background:${color}"></span>${escapeHtml(tag)}</span>`;
     }).join('');
-    const extra = item.tags.length > 2 ? `<span class="bookmark-tag" style="background:#9aa0a620;color:#9aa0a6">+${item.tags.length - 2}</span>` : '';
+    const extra = visibleItemTags.length > 2 ? `<span class="bookmark-tag" style="background:#9aa0a620;color:#9aa0a6">+${visibleItemTags.length - 2}</span>` : '';
     tagsHtml = `<div class="bookmark-tags">${tagChips}${extra}</div>`;
   }
 
@@ -1544,7 +1549,7 @@ function makeClientOperationId(prefix) {
 
 function openEditModal(id, title, url, tags = [], bookmarkData = null) {
   editingBookmarkId = id;
-  editingTags = [...tags];
+  editingTags = visibleTags(tags);
   editingFolderId = null;
   editingSelectedFolderId = null;
   editingRecommendationId = '';

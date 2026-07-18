@@ -60,6 +60,7 @@ const parsedClassification = parseAIClassification(
   ['AI', '开发'],
 );
 assert.deepEqual([...parsedClassification].map(item => item.tag), ['AI']);
+assert.equal(parseAIClassification('[{"tag":"其他","confidence":0.99}]', ['AI']), null);
 
 const parsedSuggestion = parseBookmarkSuggestion(JSON.stringify({
   tags: [
@@ -169,6 +170,7 @@ const {
 } = context.helpers;
 
 assert.deepEqual([...normalizeTagList([' docs ', { tag: 'docs' }, { tag: 'AI' }])], ['docs', 'AI']);
+assert.deepEqual([...normalizeTagList(['24', '40', '企业协同', '1.2.3'])], ['企业协同']);
 assert.equal(normalizeBookmarkFolderPath('Bookmarks bar/Work / Project'), 'Work/Project');
 assert.equal(normalizeBookmarkFolderPath('Other bookmarks/Work/Project'), 'Work/Project');
 assert.deepEqual(
@@ -205,7 +207,7 @@ const acceptedAiFolder = chooseAISuggestedFolder(
 assert.equal(acceptedAiFolder.path, '工具/插件/Notion');
 assert.equal(acceptedAiFolder.id, 'notion-folder');
 assert.equal(acceptedAiFolder.exists, true);
-assert.equal(acceptedAiFolder.score, 66);
+assert.equal(acceptedAiFolder.score, 49);
 assert.deepEqual([...acceptedAiFolder.reasons], ['local-tag:插件', 'ai-tag:插件', 'content:notion']);
 assert.deepEqual(scoreExistingFolderCandidates(
   folderOptions,
@@ -308,6 +310,28 @@ assert.equal(chooseBestBookmarkFolderCandidate([
   ...scoreExistingFolderCandidates(aiRelayFolders, ['AI', '开发', '工具'], aiRelayBookmark, aiRelaySuggestion),
 ])?.folderPath, 'AI 整理/人工智能/API中转');
 
+const apiRelayEvidenceFolders = [
+  { id: 'ai-coding-folder', title: 'AI coding', path: 'AI/\u4eba\u5de5\u667a\u80fd/AI\u7f16\u7a0b' },
+  { id: 'api-relay-folder', title: 'API relay', path: 'AI/\u4eba\u5de5\u667a\u80fd/\u63a5\u53e3\u4e2d\u8f6c' },
+];
+const apiRelayEvidenceCandidates = scoreExistingFolderCandidates(
+  apiRelayEvidenceFolders,
+  ['API', 'AI'],
+  {
+    title: 'Free LLM API relay',
+    url: 'https://example.test/api-relay',
+    domain: 'example.test',
+    metaDesc: 'A unified API interface relay for LLM models, compatible with AI coding tools.',
+  },
+  {
+    tags: [{ tag: 'AI', confidence: 0.8 }],
+    reason: '\u8fd9\u662f\u4e00\u9879\u5927\u6a21\u578b\u63a5\u53e3\u4e2d\u8f6c\u670d\u52a1\uff0c\u540c\u65f6\u53ef\u7528\u4e8e AI \u7f16\u7a0b\u5de5\u5177\u3002',
+    evidence: ['\u63a5\u53e3\u4e2d\u8f6c'],
+  },
+);
+assert.equal(apiRelayEvidenceCandidates[0]?.folderPath, 'AI/\u4eba\u5de5\u667a\u80fd/\u63a5\u53e3\u4e2d\u8f6c');
+assert.equal(apiRelayEvidenceCandidates[0]?.leafExactContentMatches, 1);
+
 const draft = buildLocalBookmarkSuggestion(
   { title: 'Example', url: 'https://example.test', domain: 'example.test' },
   [{ tag: '开发', score: 50, signals: ['folder'] }],
@@ -401,7 +425,52 @@ assert.deepEqual(tagNamesFor({
   domain: 'example.com',
 }), ['视频']);
 
+const urlNormalizerStart = source.indexOf('function normalizeRecommendationUrl(url)');
+const urlNormalizerEnd = source.indexOf('function recommendationUrlFingerprint(url)', urlNormalizerStart);
+const duplicateFinderStart = source.indexOf('async function findExistingBookmarkByUrl(url)');
+const duplicateFinderEnd = source.indexOf('function markProgrammaticBookmarkMove(', duplicateFinderStart);
+assert.ok(urlNormalizerStart >= 0 && urlNormalizerEnd > urlNormalizerStart, 'bookmark URL normalizer should be present');
+assert.ok(duplicateFinderStart >= 0 && duplicateFinderEnd > duplicateFinderStart, 'bookmark duplicate finder should be present');
+
+let treeCalls = 0;
+const duplicateFinderContext = {
+  Array,
+  String,
+  URL,
+  chrome: {
+    bookmarks: {
+      async search({ url }) {
+        return url === 'https://example.test/exact'
+          ? [{ id: 'exact-bookmark', url }]
+          : [];
+      },
+      async getTree() {
+        treeCalls++;
+        return [{
+          id: '0',
+          children: [{
+            id: 'folder-1',
+            children: [
+              { id: 'normalized-bookmark', url: 'https://example.test/guide/?article=1' },
+              { id: 'different-query', url: 'https://example.test/guide/?article=2' },
+            ],
+          }],
+        }];
+      },
+    },
+  },
+};
+vm.createContext(duplicateFinderContext);
+vm.runInContext(`${source.slice(urlNormalizerStart, urlNormalizerEnd)}${source.slice(duplicateFinderStart, duplicateFinderEnd)}; this.findExistingBookmarkByUrl = findExistingBookmarkByUrl;`, duplicateFinderContext);
+
+assert.equal((await duplicateFinderContext.findExistingBookmarkByUrl('https://example.test/exact'))?.id, 'exact-bookmark');
+assert.equal(treeCalls, 0, 'an exact duplicate should not traverse the bookmark tree');
+assert.equal((await duplicateFinderContext.findExistingBookmarkByUrl('https://www.example.test/guide?utm_source=newsletter&article=1#overview'))?.id, 'normalized-bookmark');
+assert.equal(await duplicateFinderContext.findExistingBookmarkByUrl('https://example.test/guide?article=3'), null, 'business query parameters must not be treated as tracking data');
+
 for (const needle of [
+  'findExistingBookmarkByUrl(tab.url)',
+  'findExistingBookmarkByUrl(draft.url)',
   'draft.duplicate = true;',
   "existingFolderPath: existingFolder.path || ''",
   "['move', 'copy'].includes(draft.duplicateAction)",

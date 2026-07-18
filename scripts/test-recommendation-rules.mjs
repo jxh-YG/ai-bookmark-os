@@ -21,26 +21,57 @@ vm.createContext(context);
 vm.runInContext(readFileSync('src/timeline/shared/recommendation-core.js', 'utf8'), context);
 vm.runInContext(`${readFileSync('src/timeline/shared/smart-tagger.js', 'utf8')}; this.rules = {
   CATEGORY_TAXONOMY,
-  autoTagBookmarkSync,
-  getSmartTaggerRuleAudit,
-  keywordMatchesWhole,
-  matchDomainTag,
-  matchUrlPathTag,
-  segmentChineseWords
-};`, context);
-
-const {
-  CATEGORY_TAXONOMY,
+  autoTagBookmark,
   autoTagBookmarkSync,
   getSmartTaggerRuleAudit,
   keywordMatchesWhole,
   matchDomainTag,
   matchUrlPathTag,
   segmentChineseWords,
+  setDynamicRulesSnapshot
+};`, context);
+
+const {
+  CATEGORY_TAXONOMY,
+  autoTagBookmark,
+  autoTagBookmarkSync,
+  getSmartTaggerRuleAudit,
+  keywordMatchesWhole,
+  matchDomainTag,
+  matchUrlPathTag,
+  segmentChineseWords,
+  setDynamicRulesSnapshot,
 } = context.rules;
 assert.equal(getSmartTaggerRuleAudit().valid, true);
 assert.equal(Object.keys(CATEGORY_TAXONOMY).length, 34);
 assert.equal(keywordMatchesWhole('node', 'release notes'), false);
+assert.equal(matchDomainTag('openai.com')?.source, 'curated');
+assert.equal(matchDomainTag('openai.com')?.curated, true);
+setDynamicRulesSnapshot({
+  domainRules: [{ domains: ['manual.example.test'], tag: 'AI', color: '#000000', source: 'user' }],
+});
+assert.equal(matchDomainTag('manual.example.test')?.source, 'user');
+assert.equal(matchDomainTag('manual.example.test')?.curated, false);
+const userDomainTag = autoTagBookmarkSync({
+  title: 'Home',
+  url: 'https://manual.example.test/',
+  domain: 'manual.example.test',
+}).find(item => item.tag === 'AI');
+assert.ok(userDomainTag?.signals.includes('user-override:domain'));
+
+setDynamicRulesSnapshot({
+  domainRules: [{ domains: ['learned.example.test'], tag: 'AI', color: '#000000' }],
+});
+assert.equal(matchDomainTag('learned.example.test')?.source, 'learned');
+assert.equal(matchDomainTag('learned.example.test')?.curated, false);
+const learnedDomainTag = autoTagBookmarkSync({
+  title: 'Home',
+  url: 'https://learned.example.test/',
+  domain: 'learned.example.test',
+}).find(item => item.tag === 'AI');
+assert.ok(learnedDomainTag?.signals.includes('learned-domain'));
+assert.ok(!learnedDomainTag?.signals.includes('curated-domain'));
+setDynamicRulesSnapshot(null);
 assert.equal(keywordMatchesWhole('合规', '产品不合规格需要返工'), false);
 assert.ok(segmentChineseWords('数据分析与机器学习').length > 0);
 
@@ -141,7 +172,7 @@ const ambiguous = [
   ['个人主页', '/about'], ['收藏页面', '/favorite'], ['详情', '/detail'], ['开始', '/start'], ['内容', '/content'],
 ].map(([title, path]) => ({ title, url: `https://neutral.example${path}`, domain: 'neutral.example' }));
 const abstained = ambiguous.filter(sample => autoTagBookmarkSync(sample)[0]?.tag === '其他').length;
-assert.ok(abstained / ambiguous.length >= 0.80, `模糊样本放弃率不足：${abstained}/${ambiguous.length}`);
+assert.equal(abstained, ambiguous.length, `无直接线索的样本必须归入其他：${abstained}/${ambiguous.length}`);
 
 assert.equal(matchDomainTag('docs.github.com')?.tag, '开发');
 assert.equal(matchDomainTag('notgithub.com'), null);
@@ -160,7 +191,126 @@ for (const sample of contextual) {
   const tags = Array.from(autoTagBookmarkSync(sample), item => item.tag);
   assert.ok(tags.includes(sample.expected), `${sample.url} 应包含 ${sample.expected}，实际为 ${tags.join(', ')}`);
 }
-assert.equal(autoTagBookmarkSync({ title: '企业合规清单', url: 'https://example.test/checklist', domain: 'example.test' })[0]?.tag, '其他');
+assert.equal(autoTagBookmarkSync({ title: '企业合规清单', url: 'https://example.test/checklist', domain: 'example.test' })[0]?.tag, '法律');
+
+const directTitle = { title: 'TypeScript', url: 'https://neutral.example/typescript', domain: 'neutral.example' };
+assert.equal(autoTagBookmarkSync(directTitle)[0]?.tag, '开发', '单个明确标题线索不应回退为其他');
+assert.deepEqual(
+  Array.from(await autoTagBookmark(directTitle, { skipAI: true }), item => item.tag),
+  Array.from(autoTagBookmarkSync(directTitle), item => item.tag),
+  '异步生产分类与同步兼容分类在禁用 AI 时必须一致',
+);
+const folderTags = Array.from(autoTagBookmarkSync({
+  title: 'Home',
+  url: 'https://neutral.example/folder',
+  domain: 'neutral.example',
+  folderName: '开发工具',
+}), item => item.tag);
+assert.deepEqual(folderTags, ['开发'], '复合文件夹名应映射到标准大类，而非保留原名');
+const dynamicFolderTags = Array.from(autoTagBookmarkSync({
+  title: 'Home',
+  url: 'https://neutral.example/customer-system',
+  domain: 'neutral.example',
+  folderName: '客户协同系统',
+}), item => item.tag);
+assert.deepEqual(dynamicFolderTags, ['客户协同系统'], '有效的业务文件夹名应保留为动态标签，而非受固定分类限制');
+const relayTags = Array.from(autoTagBookmarkSync({
+  title: 'Codexcn中转站',
+  url: 'https://codexcn.top/console',
+  domain: 'codexcn.top',
+  folderName: 'API中转',
+}), item => item.tag);
+assert.deepEqual(relayTags, ['中转站'], 'API 中转文件夹应生成中转站标签，不能把所有中转服务都归为 API');
+assert.equal(autoTagBookmarkSync({
+  title: 'Home',
+  url: 'https://neutral.example/numeric-folder',
+  domain: 'neutral.example',
+  folderName: '24',
+})[0]?.tag, '其他', '纯数字文件夹名不能成为动态标签');
+const officeTags = Array.from(autoTagBookmarkSync({
+  title: '上海国投公司2023年协同OA办公系统',
+  url: 'http://192.168.101.3/oa',
+  domain: '192.168.101.3',
+}), item => item.tag);
+assert.ok(officeTags.includes('办公'), `协同 OA 应包含办公标签，实际为 ${officeTags.join(', ')}`);
+assert.ok(officeTags.includes('协同OA办公系统'), `协同 OA 应保留业务系统标签，实际为 ${officeTags.join(', ')}`);
+assert.ok(!officeTags.includes('工具'));
+const summaryTags = Array.from(autoTagBookmarkSync({
+  title: 'Home',
+  url: 'https://neutral.example/portal',
+  domain: 'neutral.example',
+  metaDesc: '综合办公管理平台，提供企业协同与审批服务。',
+}), item => item.tag);
+assert.ok(summaryTags.includes('综合办公管理平台'), `摘要中的业务系统应生成动态标签，实际为 ${summaryTags.join(', ')}`);
+assert.equal(autoTagBookmarkSync({
+  title: 'Home',
+  url: 'https://neutral.example/semantic',
+  domain: 'neutral.example',
+  contentText: 'A generic landing page with no category-specific evidence.'.repeat(20),
+})[0]?.tag, '其他', '纯语义噪声不能单独触发分类');
+context.classifyWithAI = async () => [{ tag: '法律', confidence: 1 }, { tag: '其他', confidence: 1 }];
+assert.equal((await autoTagBookmark(directTitle))[0]?.tag, '开发', 'AI 只能补充，不能改写直接本地分类');
+context.classifyWithAI = async () => [{ tag: '企业协同', confidence: 1 }, { tag: '24', confidence: 1 }];
+const aiDynamicTags = Array.from(await autoTagBookmark({
+  title: 'Home',
+  url: 'https://neutral.example/ai-dynamic',
+  domain: 'neutral.example',
+}), item => item.tag);
+assert.ok(aiDynamicTags.includes('企业协同'), `有效 AI 标签应允许动态输出，实际为 ${aiDynamicTags.join(', ')}`);
+assert.ok(!aiDynamicTags.includes('24'), `纯数字 AI 标签必须拒绝，实际为 ${aiDynamicTags.join(', ')}`);
+delete context.classifyWithAI;
+
+const OTHER = '\u5176\u4ed6';
+const aiFolderTags = Array.from(autoTagBookmarkSync({
+  title: 'OpenAI',
+  url: 'https://openai.com/',
+  domain: 'openai.com',
+  folderName: '\u2728 AI \u6574\u7406',
+}), item => item.tag);
+assert.ok(aiFolderTags.includes('AI'), 'AI root folder should preserve the AI tag: ' + aiFolderTags.join(', '));
+assert.ok(!aiFolderTags.includes('\u2728 AI \u6574\u7406'));
+
+const unknownFolderTags = Array.from(autoTagBookmarkSync({
+  title: 'OpenAI',
+  url: 'https://openai.com/',
+  domain: 'openai.com',
+  folderName: '\u6536\u4ef6\u7bb1',
+}), item => item.tag);
+assert.ok(unknownFolderTags.includes('AI'), 'Unknown folders should not suppress a domain tag: ' + unknownFolderTags.join(', '));
+assert.ok(!unknownFolderTags.includes('\u6536\u4ef6\u7bb1'));
+
+const sheApiTags = Array.from(autoTagBookmarkSync({
+  title: 'SheApi',
+  url: 'https://sheapi.top/',
+  domain: 'sheapi.top',
+}), item => item.tag);
+assert.ok(sheApiTags.includes('API'), 'SheApi should be recognized as API: ' + sheApiTags.join(', '));
+
+const xelvTags = Array.from(autoTagBookmarkSync({
+  title: 'XelvAI API',
+  url: 'https://xelvai.com/',
+  domain: 'xelvai.com',
+}), item => item.tag);
+assert.ok(xelvTags.includes('AI'), 'XelvAI API should include AI: ' + xelvTags.join(', '));
+assert.ok(xelvTags.includes('API'), 'XelvAI API should include API: ' + xelvTags.join(', '));
+
+assert.equal(autoTagBookmarkSync({
+  title: 'Home',
+  url: 'https://openai.com/',
+})[0]?.tag, 'AI', 'the classifier should derive the domain from the URL');
+assert.equal(autoTagBookmarkSync({
+  title: 'Home',
+  url: 'https://rapid.example.com/',
+  domain: 'rapid.example.com',
+})[0]?.tag, OTHER, 'rapid must not be treated as an API subdomain');
+assert.equal(autoTagBookmarkSync({
+  title: 'Home',
+  url: 'https://api.example.com/',
+  domain: 'api.example.com',
+})[0]?.tag, 'API', 'the api subdomain should be recognized as API');
+assert.equal(keywordMatchesWhole('\u673a\u5668\u5b66\u4e60', '\u6570\u636e\u5206\u6790\u4e0e\u673a\u5668\u5b66\u4e60'), true);
+assert.equal(keywordMatchesWhole('\u673a\u5668\u5b66\u4e60', '\u673a\u5668\uff0c\u5b66\u4e60'), false);
+assert.equal(keywordMatchesWhole('\u5408\u89c4', '\u4ea7\u54c1\u4e0d\u5408\u89c4\u683c\u9700\u8981\u8fd4\u5de5'), false);
 
 const fallbackContext = {
   Array, Date, Intl: {}, JSON, Map, Math, Number, Object, Promise, Set, String, URL, chrome, console,

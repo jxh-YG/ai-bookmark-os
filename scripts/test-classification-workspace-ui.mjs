@@ -29,4 +29,18 @@ assert.match(app, /className="draft-apply-action"/, 'the draft page must always 
 assert.match(app, /needsCompatibilityCheck[\s\S]{0,900}checkCompatibilityAndApply/, 'stale and legacy drafts must enter compatibility checking instead of applying directly');
 assert.match(app, /className="pending-apply-banner"/, 'the live tree must point users to a ready draft that is waiting to be applied');
 
+const compatibilityStart = app.indexOf('const checkCompatibilityAndApply = useCallback');
+const compatibilityEnd = app.indexOf('const reclassifyViewedPlan = useCallback', compatibilityStart);
+assert.ok(compatibilityStart >= 0 && compatibilityEnd > compatibilityStart, 'must locate the compatibility flow');
+const compatibilityFlow = app.slice(compatibilityStart, compatibilityEnd);
+assert.match(compatibilityFlow, /setPendingReuse\(\{[\s\S]*plan: fork/, 'a compatible plan must remain temporary until confirmed');
+assert.doesNotMatch(compatibilityFlow, /saveClassifyResult\(|archiveClassificationPlan\(/, 'compatibility checks must not persist or archive a draft before confirmation');
+assert.match(app, /const closeApplyModal = useCallback\(\(\) => \{[\s\S]{0,100}setPendingReuse\(null\)/, 'cancelling confirmation must discard the temporary compatible plan');
+
+const applyStart = app.indexOf('const doApply = useCallback');
+const applyEnd = app.indexOf('const doUndo = useCallback', applyStart);
+assert.ok(applyStart >= 0 && applyEnd > applyStart, 'must locate the apply flow');
+const applyFlow = app.slice(applyStart, applyEnd);
+assert.match(applyFlow, /if \(pendingReuse\) \{[\s\S]{0,160}await archiveClassificationPlan\(replaced\)/, 'archiving a replaced draft must wait for confirmed reuse application');
+
 console.log('classification workspace UI contract checks passed');

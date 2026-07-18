@@ -280,9 +280,13 @@ const TITLE_PLATFORM_SUFFIXES = [
 
 // ===== 文件夹名→标签同义词映射（解决“AI学习”这类非标准文件夹） =====
 const FOLDER_SYNONYM_MAP = new Map([
+  ['ai\u6574\u7406', 'AI'], ['api\u4e2d\u8f6c', '中转站'], ['api\u4e2d\u8f6c\u7ad9', '中转站'],
+  ['api\u4ee3\u7406', '中转站'], ['api\u8f6c\u53d1', '中转站'],
   ['ai学习', 'AI'], ['ai', 'AI'], ['人工智能', 'AI'],
   ['大模型', 'AI'], ['机器学习', 'AI'], ['深度学习', 'AI'],
-  ['前端', '开发'], ['后端', '开发'], ['全栈', '开发'],
+  ['前端', '开发'], ['后端', '开发'], ['全栈', '开发'], ['开发工具', '开发'],
+  ['办公', '办公'], ['oa', '办公'], ['协同', '办公'], ['协同办公', '办公'],
+  ['企业管理', '办公'], ['项目管理', '办公'], ['行政办公', '办公'],
   ['设计资源', '设计'], ['uiux', '设计'], ['ux', '设计'],
   ['数据科学', '数据'], ['数据分析', '数据'], ['数据库', '数据'],
   ['devops', 'DevOps'], ['运维', 'DevOps'],
@@ -291,18 +295,50 @@ const FOLDER_SYNONYM_MAP = new Map([
   ['健康知识', '健康'], ['法律资料', '法律']
 ]);
 
+const GENERIC_FOLDER_NAMES = new Set([
+  '收件箱', '收藏', '书签', '未分类', '其他', '默认', '临时', '杂项', 'newfolder'
+]);
+
 function cleanTitle(title) {
   if (!title) return '';
   return TITLE_PLATFORM_SUFFIXES.reduce(
     (t, re) => t.replace(re, ''),
-    title.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, ' ')
+    title
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, ' ')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/([A-Za-z])(\d)|(\d)([A-Za-z])/g, '$1$3 $2$4')
   ).replace(/\s+/g, ' ').trim();
 }
 
 function normalizeFolderName(name) {
-  if (!name) return name;
-  const key = name.toLowerCase().trim();
-  return canonicalizeTagName(FOLDER_SYNONYM_MAP.get(key) || name);
+  const key = String(name || '')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+    .toLowerCase()
+    .replace(/[\s_./-]+/g, '')
+    .trim();
+  if (!key) return '';
+  if (GENERIC_FOLDER_NAMES.has(key)) return '';
+  const canonical = canonicalizeTagName(FOLDER_SYNONYM_MAP.get(key) || name);
+  return canonicalCategoryTag(canonical);
+}
+
+function inferFolderCategory(name) {
+  const normalized = normalizeFolderName(name);
+  if (normalized) return { tag: normalized, signal: 'folder' };
+
+  const text = cleanTitle(name).toLowerCase();
+  if (!text) return null;
+
+  const titleMatch = extractTagsFromTitle(text).find(item => canonicalCategoryTag(item.tag));
+  if (titleMatch) return { tag: titleMatch.tag, signal: 'folder-keyword' };
+
+  const taxonomyMatch = Object.keys(CATEGORY_ID_BY_LABEL)
+    .filter(tag => tag !== '其他')
+    .flatMap(tag => getCanonicalCategoryTerms(tag)
+      .map(term => ({ tag, term: String(term).toLowerCase() }))
+      .filter(({ term }) => term && text.includes(term)))
+    .sort((left, right) => right.term.length - left.term.length)[0];
+  return taxonomyMatch ? { tag: taxonomyMatch.tag, signal: 'folder-keyword' } : null;
 }
 
 // ===== 信号基础权重（便于统一调参） =====
@@ -337,17 +373,17 @@ const SIGNAL_WEIGHTS = {
   override: 100
 };
 
-// ===== 标题关键词映射（18 类） =====
+// ===== 标题关键词映射 =====
 const KEYWORD_TAG_MAP = {
   '开发': ['javascript', 'typescript', 'python', 'react', 'vue', 'angular',
            'node', 'css', 'html', 'webpack', 'vite', 'docker', 'kubernetes',
-           'git', 'api', 'frontend', 'backend', 'fullstack', '算法', '编程',
+           'git', 'frontend', 'backend', 'fullstack', '算法', '编程',
            '框架', '组件', '库', 'npm', 'yarn', 'package', 'rust', 'go',
            'java', 'c++', 'swift', 'kotlin', 'flutter', 'dart', 'ruby',
            'php', 'laravel', 'django', 'flask', 'spring', 'svelte',
            'nextjs', 'nuxt', 'remix', 'astro', 'tailwind', 'sass',
            'graphql', 'rest', 'microservice', 'serverless', 'wasm',
-           '编译', '调试', '重构', '部署', '测试', '单元测试', 'e2e'],
+           '编译', '调试', '重构', '部署', '单元测试', 'e2e'],
   'AI':   ['ai', 'ml', 'machine learning', 'deep learning', 'neural',
            'gpt', 'llm', 'chatgpt', 'openai', 'diffusion', 'transformer',
            '人工智能', '机器学习', '深度学习', '大模型', '生成式', 'prompt',
@@ -383,10 +419,10 @@ const KEYWORD_TAG_MAP = {
            'ab测试', '灰度', '迭代', 'sprint', 'backlog', '看板',
            '用户研究', '可用性测试', 'a/b test', 'funnel', 'cohort'],
   'DevOps': ['pipeline', 'jenkins', 'github actions', 'gitlab ci',
-             'terraform', 'ansible', 'k8s', 'helm', 'prometheus', 'grafana',
-             '监控', '告警', '日志', '链路追踪', 'sre', 'sla', 'sli',
-             'argo', 'istio', 'envoy', 'consul', 'vault', 'nexus',
-             '容器', '编排', '弹性伸缩', '蓝绿部署', '金丝雀发布'],
+              'terraform', 'ansible', 'k8s', 'helm', 'prometheus', 'grafana',
+              '监控', '告警', '日志', '链路追踪', 'sre', 'sla', 'sli',
+              'argo', 'istio', 'envoy', 'consul', 'vault', 'nexus',
+              '容器', '编排', '弹性伸缩', '蓝绿部署', '金丝雀发布'],
   '游戏': ['game', 'gaming', 'unity', 'unreal', 'godot', '游戏',
            '3d', '2d', 'rpg', 'fps', 'moba', '像素', '独立游戏',
            'shader', '渲染', '物理引擎', '碰撞检测', 'ai行为树',
@@ -395,7 +431,7 @@ const KEYWORD_TAG_MAP = {
            '运动', '健身', '营养', '饮食', '睡眠', '心理', '冥想',
            'yoga', '跑步', '卡路里', 'bmi', '体检', '中医', '养生',
            '康复', '疫苗', '症状', '诊断', '处方'],
-  '法律': ['law', 'legal', 'regulation', '法律', '法规',
+  '法律': ['law', 'legal', 'regulation', 'privacy', 'compliance', '法律', '法规', '合规',
            '合同', '知识产权', '专利', '商标', '版权',
            '隐私', 'gdpr', '数据保护', '诉讼', '仲裁', '劳动法',
            '公司法', '证券法', '反垄断', '牌照'],
@@ -428,7 +464,7 @@ const KEYWORD_TAG_MAP = {
            '私域', '公域', '流量', '涨粉', '变现'],
   '文章': ['article', 'blog post', 'longform', '专栏文章', '技术文章', '深度报道'],
   '项目': ['repository', 'source code', 'open source project', '代码仓库', '开源项目', '项目主页'],
-  'API': ['api reference', 'sdk reference', 'endpoint', '接口文档', '开发接口', 'webhook'],
+  'API': ['api', 'api reference', 'sdk reference', 'endpoint', '接口文档', '开发接口', 'webhook'],
   '学习': ['course', 'lesson', 'curriculum', '学习', '课程', '课堂', '练习题', '在线教育'],
   '教程': ['tutorial', 'how to', 'getting started', 'quickstart', '教程', '入门指南', '操作步骤'],
   '文档': ['documentation', 'manual', 'reference guide', '文档', '手册', '知识库', '帮助中心'],
@@ -515,6 +551,15 @@ function canonicalizeTagName(value) {
   return CATEGORY_ALIASES[tag] || tag;
 }
 
+function isUsableTagName(value) {
+  const tag = String(value || '').trim();
+  return tag.length >= 2
+    && tag.length <= 24
+    && !isGenericFallbackTag(tag)
+    && !/^\d+(?:[._:/-]\d+)*$/.test(tag)
+    && /[A-Za-z\u4e00-\u9fa5]/.test(tag);
+}
+
 function getCanonicalCategoryTerms(value) {
   const canonical = canonicalizeTagName(value);
   if (!canonical) return [];
@@ -530,6 +575,11 @@ function getCanonicalCategoryTerms(value) {
 
 function isCanonicalCategoryTag(value) {
   return Object.prototype.hasOwnProperty.call(CATEGORY_ID_BY_LABEL, canonicalizeTagName(value));
+}
+
+function canonicalCategoryTag(value) {
+  const tag = canonicalizeTagName(value);
+  return isUsableTagName(tag) ? tag : '';
 }
 
 function getSmartTaggerRuleAudit() {
@@ -618,7 +668,8 @@ function segmentChineseWords(text) {
 function keywordMatchesWhole(kw, textLower) {
   const lowerKw = kw.toLowerCase();
   if (/[\u4e00-\u9fa5]/.test(lowerKw)) {
-    return segmentChineseWords(textLower).includes(lowerKw);
+    if (lowerKw === '合规' && textLower.includes('合规格')) return false;
+    return textLower.includes(lowerKw);
   }
   if (lowerKw.includes(' ')) {
     return textLower.includes(lowerKw);
@@ -646,6 +697,10 @@ const TITLE_REGEX_RULES = [
   { regex: /(xss|csrf|sql.?注入|漏洞|渗透)[\s\-_]*(攻击|防御|修复|检测|防护)/i, tag: '安全', score: 2 },
   { regex: /((网络|信息|数据|云|系统)安全|等保|零信任).{0,10}(合规|compliance)|(合规|compliance).{0,10}((网络|信息|数据|云|系统)安全|等保|零信任)/i, tag: '安全', score: 3 },
   { regex: /(法律|法规|监管|隐私|gdpr|合同).{0,10}(合规|compliance)|(合规|compliance).{0,10}(法律|法规|监管|隐私|gdpr|合同)/i, tag: '法律', score: 3 },
+  // 企业 OA、协同及管理系统属于办公；“管理”或“测试”单独出现时不归类。
+  { regex: /(?:协同|办公|\boa\b|审批|报销|企业管理|综合管理|移动管理|项目管理|管理平台|审核系统|wps).{0,12}(系统|平台|门户|客户端|应用)?/i, tag: '办公', score: 4 },
+  { regex: /(?:国投|集团|股份|公司|企业).{0,8}(?:测试|业务|管理|办公).{0,6}(?:系统|平台)/i, tag: '办公', score: 4 },
+  { regex: /(?:单元|自动化|集成|接口|e2e).{0,4}测试|测试.{0,4}(?:框架|用例|代码|接口|工具)/i, tag: '开发', score: 3 },
   // 产品组合
   { regex: /(用户|user)[\s\-_]*(增长|留存|转化|画像|旅程|研究|调研)/i, tag: '产品', score: 2 },
   // 金融组合
@@ -1065,13 +1120,20 @@ function hasStrongSignal(signals, tag) {
   );
 }
 
-function hasReliableLocalSignal(signals, tag) {
+function hasDirectLocalSignal(signals, tag) {
   const list = signals[tag] || [];
   return hasStrongSignal(signals, tag) || list.some(s =>
+    s === 'folder-keyword' ||
     s === 'subdomain' ||
     s === 'extension' ||
     s === 'domain+path' ||
-    s === 'url-path:1'
+    s === 'url-path:1' ||
+    s.startsWith('semantic-title:') ||
+    s.startsWith('semantic-summary:') ||
+    s.startsWith('semantic-url:') ||
+    s.startsWith('regex:') ||
+    s.startsWith('keyword:') ||
+    s.startsWith('ngram:')
   );
 }
 
@@ -1097,6 +1159,30 @@ function applyConfidenceFilter(sortedEntries, signals) {
   const filtered = sortedEntries.filter(([_, score]) => score >= relativeThreshold);
 
   return filtered.slice(0, 3);
+}
+
+function selectFinalTagEntries(scores, signals) {
+  const sortedEntries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  if (sortedEntries.length === 0) return [['其他', 0]];
+
+  // 明确的标题、文件夹、域名或路径线索优先于正文统计分数，避免弱语义挤掉实际业务标签。
+  const directEntries = sortedEntries.filter(([tag]) => hasDirectLocalSignal(signals, tag));
+  if (directEntries.length > 0) return applyConfidenceFilter(directEntries, signals);
+
+  const filteredEntries = applyConfidenceFilter(sortedEntries, signals);
+  const topScore = filteredEntries[0]?.[1] || 0;
+  if (topScore > 16) return filteredEntries;
+
+  // 弱统计或语义信号不足以归类。
+  return [['其他', 0]];
+}
+
+const GENERIC_FALLBACK_TAGS = new Set(['其他', '其它', '未知', '未分类', 'other', 'others', 'unknown', 'uncategorized', 'misc']);
+
+function isGenericFallbackTag(tag) {
+  return GENERIC_FALLBACK_TAGS.has(
+    String(tag || '').trim().toLowerCase()
+  );
 }
 
 // ===== 双向贝叶斯评分（is / is_not + delta） =====
@@ -1511,11 +1597,13 @@ function extractTagsFromTitle(title) {
 
   const cleaned = cleanTitle(title);
   const lower = cleaned.toLowerCase();
+  const rawLower = String(title).toLowerCase();
   const scores = {};
   const signals = {}; // tag -> string[] 信号来源追踪
 
   function addScore(tag, score, signal) {
-    tag = canonicalizeTagName(tag);
+    tag = canonicalCategoryTag(tag);
+    if (!tag) return;
     scores[tag] = (scores[tag] || 0) + score;
     if (!signals[tag]) signals[tag] = [];
     signals[tag].push(signal);
@@ -1535,7 +1623,7 @@ function extractTagsFromTitle(title) {
       const normalizedKw = normalizeTerm(kw);
       const kwWeight = keywordBaseWeight(kw);
       // 精确匹配（英文整词，中文/短语子串）
-      if (keywordMatchesWhole(kw, lower)) {
+      if (keywordMatchesWhole(kw, lower) || keywordMatchesWhole(kw, rawLower)) {
         addScore(tag, kwWeight, `keyword:${kw}`);
         continue;
       }
@@ -1573,6 +1661,31 @@ function extractTagsFromTitle(title) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
     .map(([tag, score]) => ({ tag, score, signals: signals[tag] || [] }));
+}
+
+function extractLocalSemanticTags(title) {
+  const cleaned = cleanTitle(title);
+  if (!cleaned) return [];
+
+  const tags = new Map();
+  const add = (tag, score) => {
+    const normalized = canonicalCategoryTag(tag);
+    if (normalized) tags.set(normalized, Math.max(tags.get(normalized) || 0, score));
+  };
+
+  if (/(协同|办公|\boa\b|审批|报销|考勤|请假|wps)/i.test(cleaned)) add('办公', 4);
+  if (/中转(?:站|服务|平台)/.test(cleaned)) add('中转站', 10);
+  const management = cleaned.match(/(企业管理|综合管理|移动管理|项目管理|管理平台|审核系统)/i);
+  if (management) add(management[1], 8);
+  if (/(?:国投|集团|股份|公司|企业).{0,8}(?:测试|业务|管理|办公).{0,6}(?:系统|平台)/i.test(cleaned)) add('办公', 4);
+
+  for (const match of cleaned.matchAll(/([\u4e00-\u9fa5A-Za-z]{2,20}(?:系统|平台|门户))/g)) {
+    const tag = match[1]
+      .replace(/^(?:\d{4}年|年)/, '')
+      .replace(/^(?:[\u4e00-\u9fa5]{2,10}(?:公司|集团|股份))/, '');
+    add(tag, 10);
+  }
+  return [...tags].map(([tag, score]) => ({ tag, score, signal: `semantic-title:${tag}` }));
 }
 
 // ===== URL 深度特征规则 =====
@@ -1650,7 +1763,7 @@ function getFileExtension(pathname) {
 function matchSubdomainTag(features) {
   if (!features || !features.subdomain) return null;
   for (const rule of SUBDOMAIN_RULES) {
-    if (rule.patterns.some(p => features.subdomain.includes(p))) return rule.tag;
+    if (rule.patterns.some(p => features.subdomain === p)) return rule.tag;
   }
   return null;
 }
@@ -1708,7 +1821,12 @@ function matchDomainTag(domain) {
   const mergedRules = getMergedDomainRules();
   for (const rule of mergedRules) {
     if (rule.domains.some(matchesDomain)) {
-      return { tag: rule.tag, color: rule.color, confidence: 1.0 };
+      const tag = canonicalCategoryTag(rule.tag);
+      if (!tag) continue;
+      const source = DOMAIN_RULES.includes(rule)
+        ? 'curated'
+        : (rule.source === 'user' ? 'user' : 'learned');
+      return { tag, color: rule.color, confidence: 1.0, curated: source === 'curated', source };
     }
   }
 
@@ -1717,10 +1835,11 @@ function matchDomainTag(domain) {
     for (const [d, info] of Object.entries(_dynamicRulesCache.learnedDomainTag)) {
       if (matchesDomain(d)) {
         const isObj = info && typeof info === 'object';
-        const tag = isObj ? info.tag : info;
+        const tag = canonicalCategoryTag(isObj ? info.tag : info);
+        if (!tag) continue;
         const count = isObj ? (info.count || 1) : 1;
         const confidence = Math.min(count / 3, 1.0); // 确认 3 次后置信度 1.0
-        return { tag, color: '#607d8b', confidence };
+        return { tag, color: '#607d8b', confidence, source: 'learned' };
       }
     }
   }
@@ -1747,7 +1866,9 @@ function matchUrlPathTag(url) {
       if (normalized.endsWith('/')) return lowerPath.includes(normalized);
       return lowerPath === normalized || lowerPath.startsWith(normalized + '/') || lowerPath.includes(normalized + '/');
     })) {
-      return { tag: rule.tag, weight: rule.weight ?? 1.0 };
+      const tag = canonicalCategoryTag(rule.tag);
+      if (!tag) continue;
+      return { tag, weight: rule.weight ?? 1.0 };
     }
   }
   return null;
@@ -1817,7 +1938,8 @@ async function autoTagBookmark(bookmark, options = {}) {
   const tagColors = {};
 
   function addScore(tag, score, signal) {
-    tag = canonicalizeTagName(tag);
+    tag = canonicalCategoryTag(tag);
+    if (!tag) return;
     scores[tag] = (scores[tag] || 0) + score;
     if (!signals[tag]) signals[tag] = [];
     signals[tag].push(signal);
@@ -1832,16 +1954,19 @@ async function autoTagBookmark(bookmark, options = {}) {
       bookmark.folderName !== '其他书签' &&
       bookmark.folderName !== 'Other bookmarks' &&
       bookmark.folderName !== 'Bookmarks bar') {
-    const normalizedFolder = normalizeFolderName(bookmark.folderName);
-    addScore(normalizedFolder, SIGNAL_WEIGHTS.folder, 'folder');
+    const folderCategory = inferFolderCategory(bookmark.folderName);
+    if (folderCategory) addScore(folderCategory.tag, SIGNAL_WEIGHTS.folder, folderCategory.signal);
   }
 
   // Layer 2: 域名匹配（权重 30 × 置信度）
-  const domainMatch = matchDomainTag(bookmark.domain);
+  const domainMatch = matchDomainTag(bookmark.domain || urlFeatures?.hostname || '');
   const hasDomainRule = Boolean(domainMatch);
   if (domainMatch) {
     const domainWeight = SIGNAL_WEIGHTS.domain * (domainMatch.confidence || 1.0);
     addScore(domainMatch.tag, domainWeight, 'domain');
+    if (domainMatch.curated) addScore(domainMatch.tag, 0, 'curated-domain');
+    else if (domainMatch.source === 'user') addScore(domainMatch.tag, 0, 'user-override:domain');
+    else if (domainMatch.source === 'learned') addScore(domainMatch.tag, 0, 'learned-domain');
     tagColors[domainMatch.tag] = domainMatch.color;
   }
 
@@ -1869,11 +1994,17 @@ async function autoTagBookmark(bookmark, options = {}) {
   for (const hit of matchCombinationRules(urlFeatures)) {
     addScore(hit.tag, hit.score, 'domain+path');
   }
+  for (const { tag, score, signal } of extractLocalSemanticTags(`${bookmark.url || ''} ${bookmark.domain || ''}`)) {
+    addScore(tag, score, signal.replace('semantic-title:', 'semantic-url:'));
+  }
 
   // Layer 4: 标题关键词（权重 10）+ 同义词归并 + 模糊匹配 + n-gram
   const titleTags = extractTagsFromTitle(bookmark.title);
   for (const { tag, score, signals: titleSignals } of titleTags) {
     addScore(tag, SIGNAL_WEIGHTS.title + score, ...titleSignals);
+  }
+  for (const { tag, score, signal } of extractLocalSemanticTags(bookmark.title)) {
+    addScore(tag, score, signal);
   }
 
   // ===== 增强信号：网页内容特征与语义原型 =====
@@ -1895,6 +2026,11 @@ async function autoTagBookmark(bookmark, options = {}) {
     ? extractPageFingerprintFromText(contentText)
     : (bookmark.html ? extractPageFingerprintFromHtml(bookmark.html) : extractPageFingerprintFromText(''));
   const headings = [...new Set([...(fingerprint.headings || []), ...extractedHeadings])];
+  for (const summary of [metaDesc, ogDescription, ...headings]) {
+    for (const { tag, score, signal } of extractLocalSemanticTags(summary)) {
+      addScore(tag, score * 0.8, signal.replace('semantic-title:', 'semantic-summary:'));
+    }
+  }
 
   const richText = [
     cleanTitle(bookmark.title || ''),
@@ -1959,6 +2095,9 @@ async function autoTagBookmark(bookmark, options = {}) {
 
   // Layer 4.9: 云端 AI 分类增强（仅对低置信样本触发）
   // AI 结果作为独立信号加入排序，不替代规则引擎
+  const localDirectTop = Object.entries(scores)
+    .filter(([tag]) => hasDirectLocalSignal(signals, tag))
+    .sort((a, b) => b[1] - a[1])[0];
   if (options.skipAI !== true && typeof classifyWithAI === 'function') {
     const preAiTopTags = Object.entries(scores)
       .sort((a, b) => b[1] - a[1])
@@ -1968,7 +2107,11 @@ async function autoTagBookmark(bookmark, options = {}) {
       const aiResults = await classifyWithAI(bookmark, preAiTopTags, signals, scores);
       if (aiResults && aiResults.length > 0) {
         for (const item of aiResults) {
-          const aiScore = item.confidence * SIGNAL_WEIGHTS.ai;
+          if (isGenericFallbackTag(item?.tag)) continue;
+          const rawAiScore = item.confidence * SIGNAL_WEIGHTS.ai;
+          const aiScore = localDirectTop && item.tag !== localDirectTop[0]
+            ? Math.min(rawAiScore, localDirectTop[1] * 0.8)
+            : rawAiScore;
           addScore(item.tag, aiScore, `ai:${item.confidence.toFixed(2)}`);
         }
       }
@@ -2032,18 +2175,7 @@ async function autoTagBookmark(bookmark, options = {}) {
     }
   }
 
-  // 排序 + 相对阈值过滤 + 取 Top-3
-  const sortedEntries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-  let filteredEntries = applyConfidenceFilter(sortedEntries, signals);
-
-  if (filteredEntries.length === 0) {
-    filteredEntries = [['其他', 0]];
-  }
-
-  // 低置信度兜底：无强规则信号且 top1 分数过低时归为“其他”
-  if (filteredEntries.length > 0 && filteredEntries[0][1] <= 16 && !hasReliableLocalSignal(signals, filteredEntries[0][0])) {
-    filteredEntries = [['其他', 0]];
-  }
+  const filteredEntries = selectFinalTagEntries(scores, signals);
 
   const results = filteredEntries.map(([tag, score]) => ({
     tag,
@@ -2080,6 +2212,8 @@ function autoTagBookmarkSync(bookmark) {
   const tagColors = {};
 
   function addScore(tag, score, signal) {
+    tag = canonicalCategoryTag(tag);
+    if (!tag) return;
     scores[tag] = (scores[tag] || 0) + score;
     if (!signals[tag]) signals[tag] = [];
     signals[tag].push(signal);
@@ -2094,16 +2228,19 @@ function autoTagBookmarkSync(bookmark) {
       bookmark.folderName !== '其他书签' &&
       bookmark.folderName !== 'Other bookmarks' &&
       bookmark.folderName !== 'Bookmarks bar') {
-    const normalizedFolder = normalizeFolderName(bookmark.folderName);
-    addScore(normalizedFolder, SIGNAL_WEIGHTS.folder, 'folder');
+    const folderCategory = inferFolderCategory(bookmark.folderName);
+    if (folderCategory) addScore(folderCategory.tag, SIGNAL_WEIGHTS.folder, folderCategory.signal);
   }
 
   // Layer 2: 域名匹配（权重 30 × 置信度）
-  const domainMatch = matchDomainTag(bookmark.domain);
+  const domainMatch = matchDomainTag(bookmark.domain || urlFeatures?.hostname || '');
   const hasDomainRule = Boolean(domainMatch);
   if (domainMatch) {
     const domainWeight = SIGNAL_WEIGHTS.domain * (domainMatch.confidence || 1.0);
     addScore(domainMatch.tag, domainWeight, 'domain');
+    if (domainMatch.curated) addScore(domainMatch.tag, 0, 'curated-domain');
+    else if (domainMatch.source === 'user') addScore(domainMatch.tag, 0, 'user-override:domain');
+    else if (domainMatch.source === 'learned') addScore(domainMatch.tag, 0, 'learned-domain');
     tagColors[domainMatch.tag] = domainMatch.color;
   }
 
@@ -2131,11 +2268,17 @@ function autoTagBookmarkSync(bookmark) {
   for (const hit of matchCombinationRules(urlFeatures)) {
     addScore(hit.tag, hit.score, 'domain+path');
   }
+  for (const { tag, score, signal } of extractLocalSemanticTags(`${bookmark.url || ''} ${bookmark.domain || ''}`)) {
+    addScore(tag, score, signal.replace('semantic-title:', 'semantic-url:'));
+  }
 
   // Layer 4: 标题关键词（权重 10）+ 同义词归并 + 模糊匹配 + n-gram
   const titleTags = extractTagsFromTitle(bookmark.title);
   for (const { tag, score, signals: titleSignals } of titleTags) {
     addScore(tag, SIGNAL_WEIGHTS.title + score, ...titleSignals);
+  }
+  for (const { tag, score, signal } of extractLocalSemanticTags(bookmark.title)) {
+    addScore(tag, score, signal);
   }
 
   // ===== 增强信号：网页内容特征与语义原型 =====
@@ -2156,6 +2299,11 @@ function autoTagBookmarkSync(bookmark) {
     ? extractPageFingerprintFromText(contentText)
     : (bookmark.html ? extractPageFingerprintFromHtml(bookmark.html) : extractPageFingerprintFromText(''));
   const headings = [...new Set([...(fingerprint.headings || []), ...extractedHeadings])];
+  for (const summary of [metaDesc, ogDescription, ...headings]) {
+    for (const { tag, score, signal } of extractLocalSemanticTags(summary)) {
+      addScore(tag, score * 0.8, signal.replace('semantic-title:', 'semantic-summary:'));
+    }
+  }
 
   const richText = [
     cleanTitle(bookmark.title || ''),
@@ -2256,17 +2404,7 @@ function autoTagBookmarkSync(bookmark) {
     }
   }
 
-  const sortedEntries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-  let filteredEntries = applyConfidenceFilter(sortedEntries, signals);
-
-  if (filteredEntries.length === 0) {
-    filteredEntries = [['其他', 0]];
-  }
-
-  // 低置信度兜底：无强规则信号且 top1 分数过低时归为“其他”
-  if (filteredEntries.length > 0 && filteredEntries[0][1] <= 16 && !hasReliableLocalSignal(signals, filteredEntries[0][0])) {
-    filteredEntries = [['其他', 0]];
-  }
+  const filteredEntries = selectFinalTagEntries(scores, signals);
 
   const results = filteredEntries.map(([tag, score]) => ({
     tag,
@@ -2287,7 +2425,7 @@ function autoTagBookmarkSync(bookmark) {
 
 // ===== 动态规则层（用户自定义 + 自动学习，与内置规则合并） =====
 // 存储结构：
-//   domainRules:  [{ domains: ['xxx.com'], tag: 'AI', color: '#673ab7' }]
+//   domainRules:  [{ domains: ['xxx.com'], tag: 'AI', color: '#673ab7', source: 'user' | 'learned' }]
 //   urlPathRules: [{ patterns: ['/blog/'], tag: '文章' }]
 //   keywordRules: { 'AI': ['qianwen', '通义千问'] }  // 与 KEYWORD_TAG_MAP 同构
 //   stopWords:    ['xxx', 'yyy']
@@ -2391,6 +2529,7 @@ function getMergedKeywordMap() {
 // 自动学习：当用户手动将书签移入某目录时，学习"域名→目录名(标签)"映射
 // domain: 书签域名, folderName: 目标目录名（视为标签）
 async function learnDomainTag(domain, folderName) {
+  folderName = canonicalCategoryTag(folderName);
   if (!domain || !folderName) return;
   const rules = await loadDynamicRules();
   const lowerDomain = domain.toLowerCase();
@@ -2410,11 +2549,12 @@ async function learnDomainTag(domain, folderName) {
   const inDynamic = (rules.domainRules || []).some(r => r.domains.some(d => lowerDomain.includes(d)));
   if (!inBuiltin && !inDynamic && learned.count >= 2) {
     if (!rules.domainRules) rules.domainRules = [];
-    const existingRule = rules.domainRules.find(r => r.tag === folderName);
+    const existingRule = rules.domainRules.find(r => r.tag === folderName && r.source !== 'user');
     if (existingRule) {
+      existingRule.source = 'learned';
       if (!existingRule.domains.includes(lowerDomain)) existingRule.domains.push(lowerDomain);
     } else {
-      rules.domainRules.push({ domains: [lowerDomain], tag: folderName, color: '#607d8b' });
+      rules.domainRules.push({ domains: [lowerDomain], tag: folderName, color: '#607d8b', source: 'learned' });
     }
   }
 
@@ -2427,9 +2567,11 @@ async function getDynamicRules() {
 }
 
 async function addDynamicDomainRule(domains, tag, color) {
+  tag = canonicalCategoryTag(tag);
+  if (!tag) throw new Error('invalid_category_tag');
   const rules = await loadDynamicRules();
   if (!rules.domainRules) rules.domainRules = [];
-  rules.domainRules.push({ domains, tag, color: color || '#607d8b' });
+  rules.domainRules.push({ domains, tag, color: color || '#607d8b', source: 'user' });
   await saveDynamicRules(rules);
 }
 
@@ -2841,7 +2983,7 @@ async function updateLearningStats(suggestedTags, confirmedTags, action) {
   await saveLearningStats(stats);
 }
 
-async function autoTagBookmarks(bookmarks, concurrency = 10) {
+async function autoTagBookmarks(bookmarks, concurrency = 10, options = {}) {
   const results = new Array(bookmarks.length);
   let nextIndex = 0;
   const runners = Array.from({ length: Math.min(concurrency, bookmarks.length) }, async () => {
@@ -2849,7 +2991,7 @@ async function autoTagBookmarks(bookmarks, concurrency = 10) {
       const i = nextIndex++;
       if (i >= bookmarks.length) return;
       const bookmark = bookmarks[i];
-      const tags = await autoTagBookmark(bookmark);
+      const tags = await autoTagBookmark(bookmark, options);
       results[i] = {
         ...bookmark,
         tags: tags.map(t => t.tag),

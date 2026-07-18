@@ -9,6 +9,7 @@ assert.ok(start >= 0 && end > start, 'quick bookmark confirmation helper should 
 
 let snapshots = [];
 let folderOptions = [];
+let existingBookmark = null;
 const context = {
   Array,
   Map,
@@ -20,7 +21,8 @@ const context = {
     },
   },
   ensureRecommendationStore: async () => ({ snapshots }),
-  getBookmarkFolderInfo: async () => ({ id: '', title: '', path: '' }),
+  findExistingBookmarkByUrl: async () => existingBookmark,
+  getBookmarkFolderInfo: async () => ({ id: '', title: 'Existing folder', path: 'Saved/Existing folder' }),
   isSafeExternalUrl: value => {
     try { return /^(https?|ftp):$/.test(new URL(value).protocol); } catch { return false; }
   },
@@ -51,6 +53,19 @@ assert.deepEqual(
 );
 
 snapshots = [];
+existingBookmark = { id: 'existing-bookmark', url: 'https://example.test/page' };
+assert.deepEqual(
+  { ...await context.saveConfirmedBookmark({ url: 'https://example.test/page' }) },
+  {
+    success: false,
+    duplicated: true,
+    bookmarkId: 'existing-bookmark',
+    existingFolderName: 'Existing folder',
+    existingFolderPath: 'Saved/Existing folder',
+    error: 'already_exists',
+  },
+);
+existingBookmark = null;
 folderOptions = [{ id: 'folder-1', title: '开发', path: '工作/开发' }];
 assert.deepEqual(
   { ...await context.saveConfirmedBookmark({

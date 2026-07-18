@@ -131,6 +131,8 @@ try {
     if (!bookmarks.length) throw new Error('synthetic bookmarks were not mirrored');
     bookmarks[0] = {
       ...bookmarks[0],
+      tags: ['E2E Unified Tag'],
+      tagsAuto: ['E2E Unified Tag'],
       contentText: 'private cached body',
       contentExcerpt: 'private summary',
       contentHeadings: ['Private heading'],
@@ -138,6 +140,46 @@ try {
     const now = Date.now();
     await chrome.storage.local.set({
       bookmark_timeline_data: bookmarks,
+      tag_colors: { 'E2E Unified Tag': '#123456' },
+      classificationWorkspace: {
+        version: 1,
+        comparisons: [{
+          id: 'e2e-change-history',
+          scope: { mode: 'full' },
+          createdAt: now,
+          beforeFingerprint: 'before-e2e',
+          afterFingerprint: 'after-e2e',
+          summary: { added: 0, removed: 1, moved: 2, renamed: 1, reordered: 0, urlChanged: 0 },
+          changes: [
+            {
+              kind: 'moved', id: 'history-react', nodeKind: 'bookmark',
+              before: { id: 'history-react', kind: 'bookmark', index: 0, title: 'Synthetic React' },
+              after: { id: 'history-react', kind: 'bookmark', index: 0, title: 'Synthetic React' },
+              beforePath: 'Bookmarks Bar / Inbox / Synthetic React',
+              afterPath: 'Bookmarks Bar / AI Organize / Development / Synthetic React',
+            },
+            {
+              kind: 'moved', id: 'history-design', nodeKind: 'bookmark',
+              before: { id: 'history-design', kind: 'bookmark', index: 1, title: 'Synthetic Design' },
+              after: { id: 'history-design', kind: 'bookmark', index: 0, title: 'Synthetic Design' },
+              beforePath: 'Bookmarks Bar / Inbox / Synthetic Design',
+              afterPath: 'Bookmarks Bar / AI Organize / Design / Synthetic Design',
+            },
+            {
+              kind: 'removed', id: 'history-old', nodeKind: 'bookmark',
+              before: { id: 'history-old', kind: 'bookmark', index: 2, title: 'Old bookmark' },
+              beforePath: 'Bookmarks Bar / Inbox / Old bookmark',
+            },
+            {
+              kind: 'renamed', id: 'history-folder', nodeKind: 'folder',
+              before: { id: 'history-folder', kind: 'folder', index: 0, title: 'Old category' },
+              after: { id: 'history-folder', kind: 'folder', index: 0, title: 'New category' },
+              beforePath: 'Bookmarks Bar / AI Organize / Old category',
+              afterPath: 'Bookmarks Bar / AI Organize / New category',
+            },
+          ],
+        }],
+      },
       bookmark_recommendation_store_v2: {
         version: 2,
         migratedAt: now,
@@ -190,13 +232,9 @@ try {
   await settings.locator('#aiPageContentToggle').evaluate((element) => element.click());
   await waitForStorage(settings, async () => {
     const state = await chrome.storage.local.get(['ai_classifier_config', 'ai_tag_cache', 'page_content_cache', 'bookmark_timeline_data']);
-    const mirror = state.bookmark_timeline_data?.[0] || {};
     return state.ai_classifier_config?.allowPageContentForAi === false
       && state.ai_tag_cache === undefined
-      && state.page_content_cache === undefined
-      && mirror.contentText === undefined
-      && mirror.contentExcerpt === undefined
-      && mirror.contentHeadings === undefined;
+      && state.page_content_cache?.['https://example.test/react']?.textContent === 'private cached body';
   });
   await settings.locator('#aiPageContentToggle').evaluate((element) => element.click());
   await waitForStorage(settings, async () => (await chrome.storage.local.get('ai_classifier_config')).ai_classifier_config?.allowPageContentForAi === true);
@@ -270,6 +308,42 @@ try {
     if (label === 'graph') {
       await page.locator('#graphLoading').waitFor({ state: 'hidden', timeout: 10000 });
       assert.ok(await page.locator('#cy canvas').count() > 0, 'graph rendered no canvas');
+    }
+    if (label === 'bookmark navigation') {
+      const unifiedTag = page.locator('.bookmark-card__tag', { hasText: 'E2E Unified Tag' });
+      await unifiedTag.waitFor({ timeout: 10000 });
+      assert.equal(await unifiedTag.evaluate((element) => getComputedStyle(element).color), 'rgb(18, 52, 86)');
+      await worker.evaluate(async () => {
+        const state = await chrome.storage.local.get('bookmark_timeline_data');
+        const bookmarks = state.bookmark_timeline_data || [];
+        const bookmark = bookmarks.find((item) => item.tags?.includes('E2E Unified Tag'));
+        if (!bookmark) throw new Error('unified tag fixture was not found');
+        bookmark.tags = ['E2E Synced Tag'];
+        bookmark.tagsAuto = ['E2E Synced Tag'];
+        await chrome.storage.local.set({
+          bookmark_timeline_data: bookmarks,
+          tag_colors: { 'E2E Synced Tag': '#654321' },
+        });
+      });
+      const syncedTag = page.locator('.bookmark-card__tag', { hasText: 'E2E Synced Tag' });
+      await syncedTag.waitFor({ timeout: 10000 });
+      assert.equal(await syncedTag.evaluate((element) => getComputedStyle(element).color), 'rgb(101, 67, 33)');
+      assert.equal(await page.getByText('E2E Unified Tag', { exact: true }).count(), 0, 'bookmark navigation did not refresh its shared tags');
+    }
+    if (label === 'AI classification') {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.locator('.workspace-tabs [role="tab"]').nth(2).click();
+      await page.locator('.comparison-record > summary').click();
+      const historyTree = page.locator('.change-history-tree');
+      await historyTree.waitFor({ state: 'visible', timeout: 10000 });
+      assert.equal(await historyTree.locator('.change-history-tree__branch').count() > 0, true, 'change history did not render a folder tree');
+      await historyTree.getByText('Development', { exact: true }).click();
+      assert.match(await historyTree.innerText(), /Synthetic React[\s\S]*来自 Bookmarks Bar \/ Inbox/, 'change history lost the compact move origin');
+      await page.screenshot({ path: join(artifactsPath, 'classification-history-desktop.png'), fullPage: true });
+      await assertNoHorizontalOverflow(page, 'classification history desktop');
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.screenshot({ path: join(artifactsPath, 'classification-history-narrow.png'), fullPage: true });
+      await assertNoHorizontalOverflow(page, 'classification history narrow');
     }
     await page.close();
   }

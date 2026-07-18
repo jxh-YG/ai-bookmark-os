@@ -38,9 +38,13 @@
     const unique = new Map();
     for (const rawTag of tags || []) {
       const tag = text(typeof rawTag === 'string' ? rawTag : rawTag && rawTag.tag).replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 24);
-      if (tag && !unique.has(tag.toLocaleLowerCase())) unique.set(tag.toLocaleLowerCase(), tag);
+      if (tag && !isNumericOnlyTag(tag) && !unique.has(tag.toLocaleLowerCase())) unique.set(tag.toLocaleLowerCase(), tag);
     }
     return [...unique.values()].slice(0, 8);
+  }
+
+  function isNumericOnlyTag(tag) {
+    return /^\d+(?:[._:/-]\d+)*$/.test(String(tag || '').trim());
   }
 
   function addFolderPath(folders, path) {

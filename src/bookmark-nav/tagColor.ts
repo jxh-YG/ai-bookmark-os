@@ -1,25 +1,10 @@
 /** Stable tag color — matches workspace style (dot + chip). */
-const TAG_PALETTE = [
-  '#0A84FF', '#30D158', '#FF9F0A', '#FF375F', '#BF5AF2',
-  '#64D2FF', '#FFD60A', '#FF6482', '#5E5CE6', '#AC8E68',
-  '#32ADE6', '#34C759', '#FF9500', '#AF52DE', '#FF2D55',
-  '#5856D6', '#00C7BE', '#A2845E',
-];
+export type TagColorMap = Record<string, string>;
 
-export function getTagColor(tag: string): string {
+export function getTagColor(tag: string, tagColors: TagColorMap = {}): string {
   const text = String(tag || '').trim();
-  if (!text) return TAG_PALETTE[0];
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    hash = text.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return TAG_PALETTE[Math.abs(hash) % TAG_PALETTE.length];
-}
-
-/** Soft background derived from solid tag color */
-export function getTagSoftBackground(color: string): string {
-  // Prefer modern color-mix when available in CSS; fallback for style attr
-  return color.startsWith('hsl')
-    ? color.replace('hsl(', 'hsla(').replace(')', ', 0.14)')
-    : `${color}22`;
+  if (!text) return 'hsl(0, 60%, 50%)';
+  if (tagColors[text]) return tagColors[text];
+  const hue = Array.from(text).reduce((total, char) => total + char.charCodeAt(0), 0) % 360;
+  return `hsl(${hue}, 60%, 50%)`;
 }

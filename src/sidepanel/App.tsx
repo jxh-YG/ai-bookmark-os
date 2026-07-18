@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   BookmarkTreeSnapshot,
-  BookmarkTreeChange,
   CategoryNode,
   ClassificationPlanVersion,
   ClassificationScope,
@@ -70,6 +69,7 @@ import {
   setActiveFullClassification,
 } from '../core/classificationWorkspace';
 import { LiveBookmarkTree } from './LiveBookmarkTree';
+import { ChangeHistoryTree } from './ChangeHistoryTree';
 import {
   archiveClassificationPlan,
   getClassificationPlanVersionId,
@@ -149,14 +149,6 @@ function draftStatusLabel(status: DraftStatus | undefined): string {
     case 'unavailable': return '目标目录不可用';
     default: return '状态检查中';
   }
-}
-
-function changeDetail(change: BookmarkTreeChange): string {
-  const before = change.before?.title || change.before?.url || '新建';
-  const after = change.after?.title || change.after?.url || '已删除';
-  if (change.kind === 'renamed') return `名称：${before} → ${after}`;
-  if (change.kind === 'urlChanged') return `网址：${change.before?.url ?? '无'} → ${change.after?.url ?? '无'}`;
-  return `${before} → ${after}`;
 }
 
 function historicalVersionToResult(version: ClassificationPlanVersion): ClassifyResult {
@@ -338,7 +330,10 @@ export function App() {
   const draftSaveLockRef = useRef(false);
   const incrementalRunRef = useRef(false);
   const closePartialModal = useCallback(() => setShowPartialModal(false), []);
-  const closeApplyModal = useCallback(() => setShowApplyModal(false), []);
+  const closeApplyModal = useCallback(() => {
+    setPendingReuse(null);
+    setShowApplyModal(false);
+  }, []);
   const closeEstimate = useCallback(() => setEstimate(null), []);
   const closeWhatsNew = useCallback(() => {
     setWhatsNew(null);
@@ -1054,32 +1049,12 @@ export function App() {
       }
 
       const fork = forkClassificationPlan(plan, snapshot);
-      const storageKey = draftStorageKey(snapshot.scope);
-      const replaced = await loadSavedResult(snapshot.scope);
-      if (replaced) await archiveClassificationPlan(replaced);
-      draftSaveLockRef.current = true;
-      try {
-        await saveClassifyResult(fork);
-      } finally {
-        draftSaveLockRef.current = false;
-      }
-
-      setResult(fork);
-      resultRef.current = fork;
-      setActiveDraftKey(storageKey);
-      activeDraftKeyRef.current = storageKey;
-      setSelectedHistoryVersionId('');
-      setWorkspaceView('draft');
-      const nextDrafts = await refreshDraftList();
-      await refreshHistoricalVersions();
-      await refreshDraftStatuses(nextDrafts, snapshot);
       setPendingReuse({
         plan: fork,
         report,
         planVersionId,
         versionArchivedAt: selectedHistoricalVersion?.archivedAt ?? plan.updatedAt ?? plan.createdAt,
       });
-      setNotice('兼容性检查通过，已创建新的当前草稿副本。');
       setShowApplyModal(true);
     } catch (e) {
       setCompatibilityIssue({
@@ -1090,9 +1065,6 @@ export function App() {
       setCheckingCompatibility(false);
     }
   }, [
-    refreshDraftList,
-    refreshDraftStatuses,
-    refreshHistoricalVersions,
     selectedHistoricalVersion,
     viewedResult,
   ]);
@@ -1129,6 +1101,10 @@ export function App() {
         await updateDraftStatus(plan, beforeSnapshot, activeDraftKeyRef.current);
         setShowApplyModal(false);
         throw new Error('分类方案生成后书签已变化，请基于最新书签重新生成方案。');
+      }
+      if (pendingReuse) {
+        const replaced = await loadSavedResult(scope);
+        if (replaced) await archiveClassificationPlan(replaced);
       }
       if (scope.mode === 'partial') {
         const applied = await applyPartialToBookmarks(plan.tree, scope.targetDirectoryId, undefined, { scope, fingerprint: plan.source.fingerprint });
@@ -1192,6 +1168,7 @@ export function App() {
     } catch (e) {
       if (chromeApplyCommitted) {
         setShowApplyModal(false);
+        setPendingReuse(null);
         setCanUndo(!!(await getLatestApplyRecord().catch(() => null)));
         setError(`书签已应用，但无法完成方案记录：${(e as Error).message}`);
       } else {
@@ -1211,6 +1188,7 @@ export function App() {
     refreshDraftList,
     refreshDraftStatuses,
     result,
+    pendingReuse,
     uiSettings.language,
     updateDraftStatus,
   ]);
@@ -1715,15 +1693,14 @@ export function App() {
                         : '全量分类'} · {new Date(changeSet.createdAt).toLocaleString()}
                     </summary>
                     <div className="comparison-summary">
-                      新增 {changeSet.summary.added} · 删除 {changeSet.summary.removed} · 移动 {changeSet.summary.moved} · 改名 {changeSet.summary.renamed} · 排序 {changeSet.summary.reordered} · 网址 {changeSet.summary.urlChanged}
+                      <span>新增 {changeSet.summary.added}</span>
+                      <span>删除 {changeSet.summary.removed}</span>
+                      <span>移动 {changeSet.summary.moved}</span>
+                      <span>改名 {changeSet.summary.renamed}</span>
+                      <span>排序 {changeSet.summary.reordered}</span>
+                      <span>网址 {changeSet.summary.urlChanged}</span>
                     </div>
-                    <ul>
-                      {changeSet.changes.map((change) => (
-                        <li key={`${change.kind}-${change.id}`}>
-                          {change.kind}：{change.beforePath ?? '新建'} → {change.afterPath ?? '已删除'}（{changeDetail(change)}）
-                        </li>
-                      ))}
-                    </ul>
+                    <ChangeHistoryTree changes={changeSet.changes} />
                     {changeSet.truncated && <small>详情已截断，摘要统计完整。</small>}
                   </details>
                 )) : <p className="empty-sub">暂无分类应用记录。</p>}

@@ -779,6 +779,9 @@ body.theme-dark #saThemeBtn .theme-icon-light { display: none; }
 /* 日期分组 */
 .sa-date-group {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
   margin-bottom: var(--space-lg);
 }
 
@@ -790,7 +793,7 @@ body.theme-dark #saThemeBtn .theme-icon-light { display: none; }
   display: flex;
   align-items: center;
   gap: var(--space-md);
-  padding: 0 var(--space-lg) var(--space-sm) 44px;
+  padding: 0 var(--space-lg) 0 44px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);

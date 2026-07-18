@@ -14,15 +14,15 @@ import {
   Sparkles,
   Tags,
   X,
-  PanelLeft,
-  LayoutGrid,
 } from 'lucide-react';
 import { getFlatBookmarks } from '../core/bookmarks';
 import { hashUrl } from '../core/cache';
 import type { ClassifyResult, FlatBookmark } from '../types';
 import { BookmarkCard } from './BookmarkCard';
 import { getTagColor } from './tagColor';
+import type { TagColorMap } from './tagColor';
 import { openAiClassificationPanel, openOrFocusExtensionPage } from '../core/pageRouter';
+import { DEMO_BOOKMARKS, DEMO_CLASSIFY_RESULT, DEMO_FOLDER_TREE } from './demoData';
 
 type LoadStatus = 'loading' | 'ready' | 'empty' | 'error';
 type LabelLike = { summary?: string; tags?: string[] };
@@ -30,6 +30,10 @@ type LabelCache = Record<string, LabelLike>;
 type BookmarkMeta = { title: string; description: string };
 type BookmarkMetaMap = Record<string, BookmarkMeta>;
 type BookmarkEnrichment = { summary: string; tags: string[] };
+type TimelineBookmark = { id?: unknown; tags?: unknown };
+type TimelineTagMap = Record<string, string[]>;
+type TimelineBookmarksResponse = { success?: boolean; bookmarks?: TimelineBookmark[] };
+const TAG_COLORS_KEY = 'tag_colors';
 
 const META_FAILURE_TTL_MS = 5 * 60 * 1000;
 const META_REQUESTS = new Map<string, Promise<BookmarkMeta | null>>();
@@ -63,6 +67,57 @@ function uniqueStrings(values: Array<string | undefined>, limit = 3) {
     if (result.length >= limit) break;
   }
   return result;
+}
+
+function visibleTags(tags: unknown): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of Array.isArray(tags) ? tags : []) {
+    const value = typeof tag === 'string' ? tag.trim() : '';
+    const key = value.toLowerCase();
+    if (!value || /^\d+(?:[._:/-]\d+)*$/.test(value) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+  return result;
+}
+
+function indexTimelineTags(bookmarks: TimelineBookmark[] | undefined): TimelineTagMap {
+  const tagsById: TimelineTagMap = {};
+  for (const bookmark of bookmarks ?? []) {
+    const id = typeof bookmark?.id === 'string' ? bookmark.id.trim() : '';
+    if (id) tagsById[id] = visibleTags(bookmark.tags);
+  }
+  return tagsById;
+}
+
+async function getTimelineTags(): Promise<TimelineTagMap> {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getBookmarks' }) as TimelineBookmarksResponse;
+    return response?.success ? indexTimelineTags(response.bookmarks) : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeTagColors(value: unknown): TagColorMap {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([tag, color]) => {
+      const name = tag.trim();
+      const cssColor = typeof color === 'string' ? color.trim() : '';
+      return name && cssColor ? [[name, cssColor]] : [];
+    }),
+  );
+}
+
+async function getSharedTagColors(): Promise<TagColorMap> {
+  try {
+    const stored = await chrome.storage.local.get(TAG_COLORS_KEY);
+    return normalizeTagColors(stored[TAG_COLORS_KEY]);
+  } catch {
+    return {};
+  }
 }
 
 function getHostname(url: string): string {
@@ -152,21 +207,20 @@ function inferTags(bookmark: FlatBookmark, meta?: BookmarkMeta) {
   return uniqueStrings([...matched, folderTag, hostTag], 3);
 }
 
-function buildBookmarkEnrichment(bookmark: FlatBookmark, label?: LabelLike, meta?: BookmarkMeta): BookmarkEnrichment {
+function buildBookmarkEnrichment(bookmark: FlatBookmark, label: LabelLike | undefined, meta: BookmarkMeta | undefined, tags: string[]): BookmarkEnrichment {
   const labelSummary = cleanMetaText(label?.summary);
-  const labelTags = label?.tags ?? [];
-  if (labelSummary) return { summary: labelSummary, tags: uniqueStrings([...labelTags, ...inferTags(bookmark, meta)], 3) };
+  if (labelSummary) return { summary: labelSummary, tags };
 
   const metaDescription = cleanMetaText(meta?.description);
   if (metaDescription) {
-    return { summary: metaDescription.slice(0, 132), tags: uniqueStrings([...labelTags, ...inferTags(bookmark, meta)], 3) };
+    return { summary: metaDescription.slice(0, 132), tags };
   }
 
   const metaTitle = cleanMetaText(meta?.title);
   if (metaTitle && metaTitle !== bookmark.title) {
     return {
       summary: `页面标题显示为「${metaTitle}」，适合从当前书签快速回到该站点内容。`,
-      tags: uniqueStrings([...labelTags, ...inferTags(bookmark, meta)], 3),
+      tags,
     };
   }
 
@@ -178,7 +232,7 @@ function buildBookmarkEnrichment(bookmark: FlatBookmark, label?: LabelLike, meta
   const context = folder ? `位于「${folder}」集合` : '来自浏览器书签树';
   return {
     summary: `${context}，站点域名为 ${hostname}${pathHint}。可从「${title}」继续查看对应页面。`,
-    tags: uniqueStrings([...labelTags, ...inferTags(bookmark, meta)], 3),
+    tags,
   };
 }
 
@@ -329,10 +383,13 @@ function FolderNavItems({
 }
 
 export function BookmarkNavPage() {
+  const isDemo = !canUseBookmarksApi();
   const [bookmarks, setBookmarks] = useState<FlatBookmark[]>([]);
   const [folderTree, setFolderTree] = useState<BookmarkFolderNode[]>([]);
   const [classifyResult, setClassifyResult] = useState<ClassifyResult | null>(null);
   const [labelCache, setLabelCache] = useState<LabelCache>({});
+  const [timelineTags, setTimelineTags] = useState<TimelineTagMap>({});
+  const [tagColors, setTagColors] = useState<TagColorMap>({});
   const [bookmarkMeta, setBookmarkMeta] = useState<BookmarkMetaMap>({});
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [error, setError] = useState('');
@@ -351,15 +408,26 @@ export function BookmarkNavPage() {
     setError('');
 
     if (!canUseBookmarksApi()) {
-      setStatus('error');
-      setError('请在已加载的 Chrome 扩展中打开 AI 书签导航页面。');
+      setBookmarks(DEMO_BOOKMARKS);
+      setFolderTree(DEMO_FOLDER_TREE);
+      setClassifyResult(DEMO_CLASSIFY_RESULT);
+      setLabelCache({});
+      setTimelineTags({});
+      setTagColors({});
+      setBookmarkMeta({});
+      setMetaUnavailable(false);
+      setActiveFolderId((current) => (current !== 'all' && !findFolder(DEMO_FOLDER_TREE, current) ? 'all' : current));
+      setExpandedFolderIds(collectDefaultExpandedIds(DEMO_FOLDER_TREE));
+      setStatus('ready');
       return;
     }
 
     try {
-      const [items, storage] = await Promise.all([
+      const [items, storage, tagsById, sharedTagColors] = await Promise.all([
         getFlatBookmarks(),
         chrome.storage.local.get(['classifyResult', 'labelCache']),
+        getTimelineTags(),
+        getSharedTagColors(),
       ]);
       const tree = await chrome.bookmarks.getTree();
       const nextFolderTree = buildFolderTree(tree);
@@ -368,6 +436,8 @@ export function BookmarkNavPage() {
       setActiveFolderId((current) => (current !== 'all' && !findFolder(nextFolderTree, current) ? 'all' : current));
       setClassifyResult(storage.classifyResult ?? null);
       setLabelCache(storage.labelCache ?? {});
+      setTimelineTags(tagsById);
+      setTagColors(sharedTagColors);
       setExpandedFolderIds((current) => {
         const valid = new Set<string>();
         const collect = (nodes: BookmarkFolderNode[]) => {
@@ -396,6 +466,12 @@ export function BookmarkNavPage() {
     return classifyResult?.labels[bookmark.id] ?? labelCache[hashUrl(bookmark.url)];
   }, [classifyResult, labelCache]);
 
+  const getBookmarkTags = useCallback((bookmark: FlatBookmark): string[] => {
+    if (!isDemo) return timelineTags[bookmark.id] ?? [];
+    const demoTags = visibleTags((bookmark as FlatBookmark & { tags?: unknown }).tags);
+    return demoTags.length ? demoTags : inferTags(bookmark);
+  }, [isDemo, timelineTags]);
+
   useEffect(() => {
     if (!canUseBookmarksApi()) return;
     const refresh = () => {
@@ -418,6 +494,20 @@ export function BookmarkNavPage() {
     };
   }, [loadBookmarks]);
 
+  useEffect(() => {
+    if (!canUseBookmarksApi()) return;
+    const refreshTags = () => {
+      void getTimelineTags().then(setTimelineTags);
+    };
+    const onStorageChanged = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName !== 'local') return;
+      if (changes.bookmark_timeline_data) refreshTags();
+      if (changes[TAG_COLORS_KEY]) setTagColors(normalizeTagColors(changes[TAG_COLORS_KEY].newValue));
+    };
+    chrome.storage.onChanged.addListener(onStorageChanged);
+    return () => chrome.storage.onChanged.removeListener(onStorageChanged);
+  }, []);
+
   const visibleBookmarks = useMemo(() => {
     const selectedFolder = activeFolderId === 'all' ? null : findFolder(folderTree, activeFolderId);
     const selectedIds = selectedFolder ? new Set(selectedFolder.bookmarkIds) : null;
@@ -427,7 +517,7 @@ export function BookmarkNavPage() {
       if (selectedIds && !selectedIds.has(bookmark.id)) return false;
       const label = getBookmarkLabel(bookmark);
       const meta = bookmarkMeta[bookmark.id];
-      const enrichment = buildBookmarkEnrichment(bookmark, label, meta);
+      const enrichment = buildBookmarkEnrichment(bookmark, label, meta, getBookmarkTags(bookmark));
       const tags = enrichment.tags;
       if (activeTags.length > 0) {
         const lowered = tags.map((item) => item.toLowerCase());
@@ -448,11 +538,11 @@ export function BookmarkNavPage() {
         .toLowerCase()
         .includes(q);
     });
-  }, [activeFolderId, activeTags, bookmarks, bookmarkMeta, folderTree, getBookmarkLabel, query]);
+  }, [activeFolderId, activeTags, bookmarks, bookmarkMeta, folderTree, getBookmarkLabel, getBookmarkTags, query]);
 
 
   useEffect(() => {
-    if (status !== 'ready' || typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
+    if (isDemo || status !== 'ready' || typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
     const targets = visibleBookmarks
       .filter((bookmark) => {
         const label = getBookmarkLabel(bookmark);
@@ -484,7 +574,7 @@ export function BookmarkNavPage() {
       cancelled = true;
       metaRequestId.current += 1;
     };
-  }, [bookmarkMeta, getBookmarkLabel, status, visibleBookmarks]);
+  }, [bookmarkMeta, getBookmarkLabel, isDemo, status, visibleBookmarks]);
 
   const toggleFolder = useCallback((id: string) => {
     setExpandedFolderIds((current) => {
@@ -506,15 +596,12 @@ export function BookmarkNavPage() {
   const tagStats = useMemo(() => {
     const counts = new Map<string, number>();
     for (const bookmark of bookmarks) {
-      const label = getBookmarkLabel(bookmark);
-      const meta = bookmarkMeta[bookmark.id];
-      const tags = buildBookmarkEnrichment(bookmark, label, meta).tags;
-      for (const tag of tags) counts.set(tag, (counts.get(tag) || 0) + 1);
+      for (const tag of getBookmarkTags(bookmark)) counts.set(tag, (counts.get(tag) || 0) + 1);
     }
     return [...counts.entries()]
-      .map(([tag, count]) => ({ tag, count, color: getTagColor(tag) }))
+      .map(([tag, count]) => ({ tag, count, color: getTagColor(tag, tagColors) }))
       .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh-CN'));
-  }, [bookmarkMeta, bookmarks, getBookmarkLabel]);
+  }, [bookmarks, getBookmarkTags, tagColors]);
 
   const toggleTag = useCallback((tag: string) => {
     setActiveTags((current) => (
@@ -560,16 +647,21 @@ export function BookmarkNavPage() {
     [activeFolderId, folderTree],
   );
   const activeTitle = activeFolder?.title ?? '全部书签';
-  const activePath = activeFolder?.path ?? '浏览器真实书签树';
+  const activePath = activeFolder?.path ?? (isDemo ? '示例书签库' : '浏览器真实书签树');
   const openExtensionPage = useCallback((path: string) => {
+    if (!canUseBookmarksApi()) return;
     void openOrFocusExtensionPage(path);
+  }, []);
+  const openAiPanel = useCallback(() => {
+    if (!canUseBookmarksApi()) return;
+    void openAiClassificationPanel();
   }, []);
 
   return (
-    <main className="bookmark-nav-shell">
+    <main className="bookmark-nav-shell" data-source={isDemo ? 'demo' : 'extension'}>
       <div className="bookmark-nav-chrome">
       <header className="bookmark-nav-header">
-        <div className="bookmark-nav-brand">
+          <div className="bookmark-nav-brand">
           <div className="bookmark-nav-mark" aria-hidden="true">
             <Bookmark size={22} strokeWidth={2.2} />
           </div>
@@ -577,16 +669,17 @@ export function BookmarkNavPage() {
             <p className="bookmark-nav-eyebrow">AI Bookmark OS</p>
             <h1>AI 书签导航</h1>
           </div>
-        </div>
-        <div className="bookmark-nav-header-actions">
-          <nav className="bookmark-page-nav" aria-label="AI Bookmark OS">
-            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/standalone/standalone.html')}>工作台</button>
-            <button type="button" className="bookmark-page-nav__btn" onClick={() => void openAiClassificationPanel()}>AI 分类</button>
+          </div>
+          <div className="bookmark-nav-header-actions">
+            <nav className="bookmark-page-nav" aria-label="AI Bookmark OS">
+            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/standalone/standalone.html')} disabled={isDemo}>工作台</button>
+            <button type="button" className="bookmark-page-nav__btn" onClick={openAiPanel} disabled={isDemo}>AI 分类</button>
             <button type="button" className="bookmark-page-nav__btn is-active" aria-current="page">书签导航</button>
-            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/checker/checker.html')}>失效检查</button>
-            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/graph/graph.html')}>图谱</button>
-            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/settings/settings.html')}>设置</button>
+            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/checker/checker.html')} disabled={isDemo}>失效检查</button>
+            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/graph/graph.html')} disabled={isDemo}>图谱</button>
+            <button type="button" className="bookmark-page-nav__btn" onClick={() => openExtensionPage('pages/settings/settings.html')} disabled={isDemo}>设置</button>
           </nav>
+          {isDemo ? <span className="bookmark-nav-source">演示数据</span> : null}
           <button className="bookmark-nav-refresh" type="button" onClick={loadBookmarks} disabled={status === 'loading'}>
             {status === 'loading' ? <Loader2 size={16} className="spin" aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
             <span>刷新</span>
@@ -601,6 +694,7 @@ export function BookmarkNavPage() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索标题、网址、文件夹或标签"
+            aria-label="搜索书签"
           />
           {query ? (
             <button type="button" className="bookmark-nav-clear" onClick={() => setQuery('')} aria-label="清空搜索">
@@ -688,7 +782,7 @@ export function BookmarkNavPage() {
         <aside className="bookmark-folder-sidebar" aria-label="浏览器书签树">
           <div className="folder-sidebar-head">
             <div>
-              <span>真实书签树</span>
+              <span>{isDemo ? '示例书签库' : '真实书签树'}</span>
               <strong>{totalFolders} 个集合</strong>
             </div>
             <button
@@ -777,13 +871,14 @@ export function BookmarkNavPage() {
               {visibleBookmarks.map((bookmark) => {
                 const label = getBookmarkLabel(bookmark);
                 const meta = bookmarkMeta[bookmark.id];
-                const enrichment = buildBookmarkEnrichment(bookmark, label, meta);
+                const enrichment = buildBookmarkEnrichment(bookmark, label, meta, getBookmarkTags(bookmark));
                 return (
                   <BookmarkCard
                     key={bookmark.id}
                     bookmark={bookmark}
                     summary={enrichment.summary}
                     tags={enrichment.tags}
+                    tagColors={tagColors}
                     faviconUrl={getFaviconUrl(bookmark.url)}
                     activeTags={activeTags}
                     onOpen={openBookmark}
@@ -796,27 +891,6 @@ export function BookmarkNavPage() {
         </div>
       </div>
 
-      <div className="bookmark-nav-float-actions" aria-label="快捷操作">
-        <div className="bookmark-nav-float-actions__inner">
-          <button type="button" onClick={() => setActiveFolderId('all')}>
-            <LayoutGrid size={15} aria-hidden="true" />
-            <span>全部书签</span>
-          </button>
-          <button type="button" onClick={allFoldersExpanded ? collapseAllFolders : expandAllFolders} disabled={!totalFolders}>
-            <PanelLeft size={15} aria-hidden="true" />
-            <span>{allFoldersExpanded ? '收起目录' : '展开目录'}</span>
-          </button>
-          <button type="button" className="is-primary" onClick={loadBookmarks} disabled={status === 'loading'}>
-            {status === 'loading' ? <Loader2 size={15} className="spin" aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
-            <span>刷新</span>
-          </button>
-        </div>
-      </div>
-
-      <footer className="bookmark-nav-footer">
-        <strong>AI Bookmark OS</strong>
-        · 真实书签树 · 玻璃拟态导航 · 本地优先
-      </footer>
     </main>
   );
 }

@@ -1,11 +1,13 @@
-import { ExternalLink, Globe2 } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import type { FlatBookmark } from '../types';
-import { getTagColor, getTagSoftBackground } from './tagColor';
+import { getTagColor } from './tagColor';
+import type { TagColorMap } from './tagColor';
 
 interface BookmarkCardProps {
   bookmark: FlatBookmark;
   summary?: string;
   tags?: string[];
+  tagColors?: TagColorMap;
   faviconUrl?: string;
   activeTags?: string[];
   onOpen: (bookmark: FlatBookmark) => void;
@@ -24,6 +26,7 @@ export function BookmarkCard({
   bookmark,
   summary,
   tags = [],
+  tagColors = {},
   faviconUrl,
   activeTags = [],
   onOpen,
@@ -34,6 +37,7 @@ export function BookmarkCard({
   const displaySummary = summary?.trim() || '';
   const displayTags = tags.filter(Boolean).slice(0, 2);
   const activeSet = new Set(activeTags);
+  const siteInitial = hostname.replace(/^www\./, '').slice(0, 1).toUpperCase() || '•';
 
   return (
     <article
@@ -50,7 +54,7 @@ export function BookmarkCard({
     >
       <div className="bookmark-card__head">
         <div className="bookmark-card__favicon" aria-hidden="true">
-          {faviconUrl ? <img src={faviconUrl} alt="" loading="lazy" /> : <Globe2 size={15} strokeWidth={2} />}
+          {faviconUrl ? <img src={faviconUrl} alt="" loading="lazy" /> : <span>{siteInitial}</span>}
         </div>
         <div className="bookmark-card__main">
           <h2 className="bookmark-card__title">{title}</h2>
@@ -66,7 +70,7 @@ export function BookmarkCard({
       {displayTags.length > 0 ? (
         <div className="bookmark-card__tags">
           {displayTags.map((tag) => {
-            const color = getTagColor(tag);
+            const color = getTagColor(tag, tagColors);
             const active = activeSet.has(tag);
             return (
               <button
@@ -74,11 +78,7 @@ export function BookmarkCard({
                 className={`bookmark-card__tag${active ? ' is-active' : ''}`}
                 key={tag}
                 title={`筛选标签：${tag}`}
-                style={{
-                  color,
-                  background: getTagSoftBackground(color),
-                  borderColor: active ? color : 'transparent',
-                }}
+                style={{ color, borderColor: active ? color : 'transparent' }}
                 onClick={(event) => {
                   event.stopPropagation();
                   onTagClick?.(tag);

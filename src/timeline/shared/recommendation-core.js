@@ -11,8 +11,10 @@
   });
   const EVIDENCE_RELIABILITY = Object.freeze({
     user_rule: 1,
+    curated_domain: 0.90,
     learned_rule: 0.85,
     history_profile: 0.70,
+    folder_leaf: 0.70,
     domain_path: 0.65,
     domain: 0.40,
     title_metadata: 0.35,
@@ -89,7 +91,7 @@
 
   function confidenceFor(support, margin, positiveFamilies, options = {}) {
     const families = new Set(positiveFamilies || []);
-    const explicit = families.has('user_rule');
+    const explicit = families.has('user_rule') || families.has('curated_domain');
     const independent = [...families].filter(family => family !== 'ai').length;
     if (support >= CONFIDENCE_THRESHOLDS.high
       && margin >= CONFIDENCE_THRESHOLDS.highMargin

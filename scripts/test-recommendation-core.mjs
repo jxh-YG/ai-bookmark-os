@@ -10,8 +10,10 @@ const core = context.BookmarkRecommendationCore;
 assert.equal(core.RULE_VERSION, 'bookmark-recommendation-v2');
 assert.deepEqual({ ...core.EVIDENCE_RELIABILITY }, {
   user_rule: 1,
+  curated_domain: 0.90,
   learned_rule: 0.85,
   history_profile: 0.70,
+  folder_leaf: 0.70,
   domain_path: 0.65,
   domain: 0.40,
   title_metadata: 0.35,
@@ -56,6 +58,16 @@ const explicit = core.rankCandidates([
 ]);
 assert.equal(explicit[0].confidence, 'high');
 assert.equal(explicit[0].folderId, 'folder-1');
+
+const curatedDomain = core.rankCandidates([
+  { kind: 'tag', tag: 'AI', evidence: [{ family: 'curated_domain', strength: 1 }] },
+]);
+assert.equal(curatedDomain[0].confidence, 'high');
+
+const learnedDomain = core.rankCandidates([
+  { kind: 'tag', tag: 'AI', evidence: [{ family: 'learned_rule', strength: 1 }] },
+]);
+assert.equal(learnedDomain[0].confidence, 'medium');
 
 const highLocal = { folders: explicit, tags: [] };
 assert.deepEqual({ ...core.shouldTriggerAI(highLocal) }, { trigger: false, reason: 'local_high_confidence' });

@@ -3044,32 +3044,75 @@ if (rebuildRecommendationLearningBtn) {
   });
 }
 
-function canApplyReevaluation(item) {
+function mergeReevaluationTags(existingTags, existingAutoTags, recommendedTag) {
+  const tags = [];
+  const tagsAuto = [];
+  const addUnique = (target, value) => {
+    const tag = String(value || '').trim();
+    if (!tag || target.some(existing => existing.toLowerCase() === tag.toLowerCase())) return;
+    target.push(tag);
+  };
+  for (const tag of existingTags || []) addUnique(tags, tag);
+  for (const tag of existingAutoTags || []) {
+    const normalized = String(tag || '').trim();
+    if (normalized && tags.some(existing => existing.toLowerCase() === normalized.toLowerCase())) {
+      addUnique(tagsAuto, normalized);
+    }
+  }
+  if (recommendedTag) {
+    addUnique(tags, recommendedTag);
+    addUnique(tagsAuto, recommendedTag);
+  }
+  return {
+    tags,
+    tagsAuto: tagsAuto.filter(tag => tags.some(existing => existing.toLowerCase() === tag.toLowerCase())),
+  };
+}
+
+function getHighConfidenceReevaluationTag(item) {
+  const candidate = item?.recommendation?.tags?.[0];
+  return candidate?.confidence === 'high' ? String(candidate.tag || '').trim() : '';
+}
+
+function getApplicableReevaluationFolder(item) {
   const folder = item?.recommendation?.folders?.[0];
-  if (!(folder?.confidence === 'high' && folder?.exists && (folder.id || folder.folderId))) return false;
-  const folderChanged = (folder.id || folder.folderId) !== item.parentId;
-  const recommendedTag = item.recommendation?.tags?.[0]?.confidence === 'high'
-    ? item.recommendation.tags[0].tag
-    : '';
-  const tagChanged = !!recommendedTag && !(item.tags || []).some(tag => tag.toLowerCase() === recommendedTag.toLowerCase());
+  if (!(folder?.confidence === 'high' && folder?.exists)) return null;
+  const id = folder.id || folder.folderId;
+  return id ? { ...folder, id } : null;
+}
+
+function canApplyReevaluation(item) {
+  const folder = getApplicableReevaluationFolder(item);
+  const folderChanged = !!folder && folder.id !== item?.parentId;
+  const recommendedTag = getHighConfidenceReevaluationTag(item);
+  const tagChanged = !!recommendedTag
+    && !(item?.tags || []).some(tag => String(tag).toLowerCase() === recommendedTag.toLowerCase());
   return folderChanged || tagChanged;
 }
 
 async function applyReevaluationItem(item) {
   if (!canApplyReevaluation(item)) return { success: false, reason: 'recommendation_not_applicable' };
-  const recommendation = item.recommendation;
-  const folder = recommendation.folders[0];
-  const folderId = folder.id || folder.folderId;
-  const recommendedTag = recommendation.tags?.[0]?.confidence === 'high' ? recommendation.tags[0].tag : '';
-  const tags = recommendedTag ? [recommendedTag] : [];
+  const recommendation = item.recommendation || {};
+  const folder = getApplicableReevaluationFolder(item);
+  const folderId = folder?.id || '';
+  const recommendedTag = getHighConfidenceReevaluationTag(item);
+  const tagChanged = !!recommendedTag
+    && !(item.tags || []).some(tag => String(tag).toLowerCase() === recommendedTag.toLowerCase());
+  const mergedTags = mergeReevaluationTags(item.tags, item.tagsAuto, tagChanged ? recommendedTag : '');
+  const folderChanged = !!folderId && folderId !== item.parentId;
   let moved = false;
   try {
-    if (folderId !== item.parentId) {
+    if (folderChanged) {
       await chrome.bookmarks.move(item.id, { parentId: folderId });
       moved = true;
     }
-    if (recommendedTag) {
-      const updated = await chrome.runtime.sendMessage({ action: 'updateBookmark', id: item.id, tags }).catch(() => null);
+    if (tagChanged) {
+      const updated = await chrome.runtime.sendMessage({
+        action: 'updateBookmark',
+        id: item.id,
+        tags: mergedTags.tags,
+        tagsAuto: mergedTags.tagsAuto,
+      }).catch(() => null);
       if (!updated?.success) throw new Error('tag_update_failed');
     }
     await chrome.runtime.sendMessage({
@@ -3078,8 +3121,14 @@ async function applyReevaluationItem(item) {
       recommendationId: recommendation.recommendationId,
       bookmarkId: item.id,
       outcome: 'accepted',
-      changedFields: [],
-      selection: { folderPath: folder.folderPath || folder.path, tags }
+      changedFields: [
+        ...(folderChanged ? ['folder'] : []),
+        ...(tagChanged ? ['tags'] : []),
+      ],
+      selection: {
+        folderPath: folder?.folderPath || folder?.path || item.folderPath || '',
+        tags: mergedTags.tags,
+      }
     }).catch(() => null);
     return { success: true };
   } catch (error) {
@@ -3095,12 +3144,12 @@ async function applySelectedReevaluations(ids, requireConfirmation = true) {
   const selectedItems = ids.map(id => reevaluationItems.get(id)).filter(canApplyReevaluation);
   if (selectedItems.length === 0) return;
   const tagChanges = selectedItems.filter(item => {
-    const tag = item.recommendation?.tags?.[0];
-    return tag?.confidence === 'high' && !(item.tags || []).some(existing => existing.toLowerCase() === tag.tag.toLowerCase());
+    const tag = getHighConfidenceReevaluationTag(item);
+    return !!tag && !(item.tags || []).some(existing => String(existing).toLowerCase() === tag.toLowerCase());
   }).length;
   const folderChanges = selectedItems.filter(item => {
-    const folder = item.recommendation?.folders?.[0];
-    return (folder?.id || folder?.folderId) !== item.parentId;
+    const folder = getApplicableReevaluationFolder(item);
+    return !!folder && folder.id !== item.parentId;
   }).length;
   if (requireConfirmation && !confirm(`将应用 ${selectedItems.length} 条高置信建议：移动 ${folderChanges} 条，更新标签 ${tagChanges} 条。是否继续？`)) return;
   reevaluationApplying = true;
@@ -3161,8 +3210,22 @@ function renderReevaluationResults(items, progressText = '', evaluating = false)
   reevaluationResults.querySelectorAll('.reevaluation-apply').forEach(button => button.addEventListener('click', async () => {
     const row = button.closest('.reevaluation-item');
     const item = reevaluationItems.get(row?.dataset.id);
-    const recommendation = item?.recommendation;
-    const folder = recommendation?.folders?.[0];
+    const folder = getApplicableReevaluationFolder(item);
+    if (!folder && item && canApplyReevaluation(item)) {
+      if (!confirm('\u5e94\u7528\u8fd9\u6761\u9ad8\u7f6e\u4fe1\u5efa\u8bae\u5417\uff1f')) return;
+      button.disabled = true;
+      const result = await applyReevaluationItem(item);
+      if (result.success) {
+        reevaluationItems.delete(item.id);
+        reevaluationSelected.delete(item.id);
+        renderReevaluationResults(reevaluationItems, progressText);
+        showToast('\u5df2\u5e94\u7528\u91cd\u65b0\u8bc4\u4f30\u7ed3\u679c', 'success');
+      } else {
+        button.disabled = false;
+        showToast('\u5e94\u7528\u91cd\u65b0\u8bc4\u4f30\u7ed3\u679c\u5931\u8d25', 'error');
+      }
+      return;
+    }
     if (!item || !folder || !confirm(`将“${item.title || item.id}”移动到“${folder.folderPath || folder.path}”并应用推荐标签吗？`)) return;
     button.disabled = true;
     const result = await applyReevaluationItem(item);
@@ -3199,7 +3262,9 @@ if (reevaluateBookmarksBtn) {
           ...responseItem,
           title: bookmark?.title || responseItem.id,
           tags: bookmark?.tags || [],
+          tagsAuto: bookmark?.tagsAuto || [],
           parentId: bookmark?.parentId || '',
+          folderPath: bookmark?.folderPath || '',
         });
       }
       renderReevaluationResults(reevaluationItems, `已评估 ${Math.min(index + chunk.length, bookmarks.length)} / ${bookmarks.length}`, true);

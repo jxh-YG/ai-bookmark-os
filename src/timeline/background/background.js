@@ -416,10 +416,21 @@ function normalizeRecommendationUrl(url) {
     const parsed = new URL(String(url || ''));
     parsed.hash = '';
     for (const key of [...parsed.searchParams.keys()]) {
-      if (/^(utm_|fbclid$|gclid$|spm$)/i.test(key)) parsed.searchParams.delete(key);
+      if (/^(utm_|fbclid$|gclid$|spm$|ref$|ref_src$)/i.test(key)) parsed.searchParams.delete(key);
     }
+    parsed.protocol = parsed.protocol.toLowerCase();
     parsed.hostname = parsed.hostname.toLowerCase();
+    if (parsed.hostname.startsWith('www.')) parsed.hostname = parsed.hostname.slice(4);
+    if ((parsed.protocol === 'https:' && parsed.port === '443') || (parsed.protocol === 'http:' && parsed.port === '80')) {
+      parsed.port = '';
+    }
     if (parsed.pathname.length > 1) parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+    const parameters = [...parsed.searchParams.entries()].sort(([leftKey, leftValue], [rightKey, rightValue]) => {
+      const keyComparison = leftKey.localeCompare(rightKey);
+      return keyComparison || leftValue.localeCompare(rightValue);
+    });
+    parsed.search = '';
+    for (const [key, value] of parameters) parsed.searchParams.append(key, value);
     return parsed.toString();
   } catch {
     return String(url || '').trim();
@@ -428,6 +439,32 @@ function normalizeRecommendationUrl(url) {
 
 function recommendationUrlFingerprint(url) {
   return stableRecommendationId('url', normalizeRecommendationUrl(url));
+}
+
+async function findExistingBookmarkByUrl(url) {
+  const rawUrl = String(url || '').trim();
+  if (!rawUrl) return null;
+
+  const exactMatches = await chrome.bookmarks.search({ url: rawUrl }).catch(() => []);
+  const exact = (Array.isArray(exactMatches) ? exactMatches : []).find(item => item?.url === rawUrl);
+  if (exact) return exact;
+
+  const normalizedUrl = normalizeRecommendationUrl(rawUrl);
+  if (!normalizedUrl) return null;
+  const tree = await chrome.bookmarks.getTree().catch(() => []);
+  let matched = null;
+  const walk = (nodes) => {
+    for (const node of nodes || []) {
+      if (node?.url && normalizeRecommendationUrl(node.url) === normalizedUrl) {
+        matched = node;
+        return true;
+      }
+      if (node?.children && walk(node.children)) return true;
+    }
+    return false;
+  };
+  walk(tree);
+  return matched;
 }
 
 function markProgrammaticBookmarkMove(bookmarkId, parentId) {
@@ -2033,6 +2070,7 @@ async function syncAllBookmarksOnce() {
       if (prev) {
         item.pinned = !!prev.pinned;
         item.pinnedAt = prev.pinnedAt || null;
+        item.tagsAuto = Array.isArray(prev.tagsAuto) ? [...prev.tagsAuto] : [];
         item.clickCount = prev.clickCount || 0;
         item.lastClickedAt = prev.lastClickedAt || null;
         item.contentText = prev.contentText || '';
@@ -2046,12 +2084,7 @@ async function syncAllBookmarksOnce() {
         item.contentStatus = prev.contentStatus || item.contentStatus;
         item.contentFailureReason = prev.contentFailureReason || '';
         item.contentSource = prev.contentSource || '';
-        if (prev.tags && prev.tags.length > 0) {
-          // 合并：用户手动标签优先
-          const auto = new Set(item.tags || []);
-          const manual = new Set(prev.tags);
-          item.tags = Array.from(new Set([...manual, ...auto]));
-        }
+        item.tags = normalizeTagList([...(prev.tags || []), ...(item.tags || [])]);
       } else {
         added++;
       }
@@ -2077,8 +2110,32 @@ async function syncAllBookmarksOnce() {
       return next;
     });
 
-    // 历史镜像只同步现状；分类建议必须由用户主动重新评估后确认。
-    const taggedCount = 0;
+    // 重评空/泛化标签，以及完全由系统自动生成的旧标签；手动标签始终保留。
+    const officeSystemUrlKeys = collectOfficeSystemUrlKeys(merged);
+    const needsTag = merged.filter(item => shouldRefreshLocalTags(
+      item.tags,
+      item.tagsAuto,
+      officeSystemUrlKeys.has(localTagGroupKey(item)),
+    ));
+    const refreshedTagKeys = new Set();
+    const itemKey = item => item.id || `${item.url}_${item.dateAdded}`;
+    let taggedCount = 0;
+    if (needsTag.length > 0 && typeof autoTagBookmarks === 'function') {
+      const tagged = await autoTagBookmarks(needsTag, 10, { skipAI: true });
+      const stableAutoTags = selectStableAutoTags(needsTag, tagged);
+      for (let index = 0; index < needsTag.length; index++) {
+        const localTags = stableAutoTags.get(localTagGroupKey(needsTag[index])) || [];
+        const refreshed = applyLocalAutoTags(
+          needsTag[index].tags,
+          needsTag[index].tagsAuto,
+          localTags,
+        );
+        needsTag[index].tags = refreshed.tags;
+        needsTag[index].tagsAuto = refreshed.tagsAuto;
+        refreshedTagKeys.add(itemKey(needsTag[index]));
+        if (localTags.length > 0) taggedCount++;
+      }
+    }
 
     // 从 Chrome 历史记录获取真实点击次数
     await enrichClickCounts(merged, 10);
@@ -2095,13 +2152,25 @@ async function syncAllBookmarksOnce() {
       return merged.map((item) => {
         const current = latestById.get(item.id) || latestByKey.get(item.url + '_' + item.dateAdded);
         if (!current) return item;
+        const refreshedAutoTags = refreshedTagKeys.has(itemKey(item));
+        const refreshed = refreshedAutoTags
+          ? applyLocalAutoTags(current.tags, current.tagsAuto, item.tagsAuto)
+          : null;
+        const tags = refreshed
+          ? refreshed.tags
+          : normalizeTagList([...(current.tags || []), ...(item.tags || [])]);
+        const tagsAuto = refreshed
+          ? refreshed.tagsAuto
+          : normalizeTagList([...(current.tagsAuto || []), ...(item.tagsAuto || [])])
+            .filter(tag => (tags || []).some(candidate => candidate.toLowerCase() === tag.toLowerCase()));
         return {
           ...item,
           pinned: !!current.pinned,
           pinnedAt: current.pinnedAt || null,
           clickCount: current.clickCount || 0,
           lastClickedAt: current.lastClickedAt || null,
-          tags: current.tags?.length ? Array.from(new Set([...(current.tags || []), ...(item.tags || [])])) : item.tags,
+          tags,
+          tagsAuto,
           contentText: current.contentText || item.contentText,
           contentTitle: current.contentTitle || item.contentTitle,
           contentExcerpt: current.contentExcerpt || item.contentExcerpt,
@@ -2269,9 +2338,77 @@ function normalizeTagList(tags) {
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 24);
-    if (tag && !normalized.has(tag.toLowerCase())) normalized.set(tag.toLowerCase(), tag);
+    if (tag && !isNumericOnlyTag(tag) && !normalized.has(tag.toLowerCase())) normalized.set(tag.toLowerCase(), tag);
   }
   return [...normalized.values()].slice(0, 8);
+}
+
+function isNumericOnlyTag(tag) {
+  return /^\d+(?:[._:/-]\d+)*$/.test(String(tag || '').trim());
+}
+
+const GENERIC_TAG_VALUES = new Set([
+  '其他', '其它', '未知', '未分类', '无', '无标签',
+  'other', 'others', 'unknown', 'uncategorized', 'misc', 'none', 'n/a'
+]);
+
+function isGenericTag(tag) {
+  return GENERIC_TAG_VALUES.has(String(tag || '').trim().toLowerCase());
+}
+
+function tagKey(tag) {
+  return String(tag || '').trim().toLowerCase();
+}
+
+function getManualTags(tags, tagsAuto) {
+  const automatic = new Set(normalizeTagList(tagsAuto).map(tagKey));
+  return normalizeTagList(tags).filter(tag => !isGenericTag(tag) && !automatic.has(tagKey(tag)));
+}
+
+function shouldRefreshLocalTags(tags, tagsAuto = [], forceRefresh = false) {
+  if (forceRefresh) return true;
+  const normalized = normalizeTagList(tags);
+  if (normalized.length === 0 || normalized.every(isGenericTag)) return true;
+  const automatic = new Set(normalizeTagList(tagsAuto).map(tagKey));
+  return automatic.size > 0 && normalized.every(tag => isGenericTag(tag) || automatic.has(tagKey(tag)));
+}
+
+function applyLocalAutoTags(existingTags, existingAutoTags, localTags) {
+  const tagsAuto = normalizeTagList(localTags).filter(tag => !isGenericTag(tag));
+  return {
+    tags: normalizeTagList([...getManualTags(existingTags, existingAutoTags), ...tagsAuto]),
+    tagsAuto,
+  };
+}
+
+function localTagGroupKey(item) {
+  const url = String(item?.url || '').trim();
+  return url ? `url:${url}` : `id:${item?.id || ''}`;
+}
+
+function collectOfficeSystemUrlKeys(bookmarks) {
+  const officeSystemTitle = /(?:协同|办公|\boa\b|审批|报销|企业管理|综合管理|移动管理|项目管理|管理平台|审核系统|wps|(?:国投|集团|股份|公司|企业).{0,8}(?:测试|业务|管理|办公).{0,6}(?:系统|平台))/i;
+  return new Set((bookmarks || [])
+    .filter(item => officeSystemTitle.test(`${item?.title || ''} ${item?.folderName || ''} ${item?.folderPath || ''}`))
+    .map(localTagGroupKey));
+}
+
+function selectStableAutoTags(bookmarks, tagged) {
+  const chosen = new Map();
+  for (let index = 0; index < bookmarks.length; index++) {
+    const bookmark = bookmarks[index];
+    const tags = normalizeTagList(tagged[index]?.tags || []).filter(tag => !isGenericTag(tag));
+    const rank = [
+      tags.length === 0 ? '1' : '0',
+      tags.join('\u0000'),
+      String(bookmark?.title || ''),
+      String(bookmark?.id || ''),
+    ].join('\u0000');
+    const key = localTagGroupKey(bookmark);
+    const existing = chosen.get(key);
+    if (!existing || rank < existing.rank) chosen.set(key, { rank, tags });
+  }
+  return new Map([...chosen].map(([key, value]) => [key, value.tags]));
 }
 
 function normalizeBookmarkFolderPath(path) {
@@ -2301,7 +2438,14 @@ function tokenizeFolderEvidence(value) {
     .split(/[^a-z0-9\u4e00-\u9fa5]+/i)
     .map(part => part.trim())
     .filter(part => part.length >= 2);
-  const chinese = text.match(/[\u4e00-\u9fa5]{2,}/g) || [];
+  const chinese = [];
+  for (const phrase of text.match(/[\u4e00-\u9fa5]{2,}/g) || []) {
+    chinese.push(phrase);
+    for (let index = 0; index + 1 < phrase.length; index += 2) {
+      chinese.push(phrase.slice(index, index + 2));
+    }
+    if (phrase.length > 2 && phrase.length % 2 === 1) chinese.push(phrase.slice(-2));
+  }
   return [...new Set([...tokens, ...chinese])];
 }
 
@@ -2340,7 +2484,19 @@ function folderEvidenceTokenMatchesText(token, evidenceText) {
 }
 
 function getFolderPathTokens(folderPath) {
-  return normalizeBookmarkFolderPath(folderPath).split('/').flatMap(tokenizeFolderEvidence);
+  return getFolderPathTokenEntries(folderPath).map(item => item.token);
+}
+
+function getFolderPathTokenEntries(folderPath) {
+  const parts = normalizeBookmarkFolderPath(folderPath).split('/').filter(Boolean);
+  return parts.flatMap((part, index) => {
+    const normalizedPart = String(part || '').toLowerCase().trim();
+    return tokenizeFolderEvidence(part).map(token => ({
+      token,
+      isLeaf: index === parts.length - 1,
+      isWholeSegment: token === normalizedPart,
+    }));
+  });
 }
 
 function getTagTokens(tags) {
@@ -2484,33 +2640,48 @@ function scoreFolderPathEvidence(folderPath, bookmark, ruleTags, aiSuggestion) {
   const reasons = [];
   let score = 0;
 
-  const tokens = getFolderPathTokens(normalized).filter(token => !FOLDER_EVIDENCE_STOP_WORDS.has(token));
+  const tokens = getFolderPathTokenEntries(normalized).filter(item => !FOLDER_EVIDENCE_STOP_WORDS.has(item.token));
   const parts = normalized.split('/').filter(Boolean);
   const leafTokens = new Set(tokenizeFolderEvidence(parts[parts.length - 1] || '').filter(token => !FOLDER_EVIDENCE_STOP_WORDS.has(token)));
   let leafMatched = leafTokens.size === 0;
-  for (const token of tokens) {
+  const leafTagMatches = new Set();
+  const leafContentMatches = new Set();
+  const leafExactContentMatches = new Set();
+  for (const { token, isLeaf, isWholeSegment } of tokens) {
     let matched = false;
     if (folderTokenMatchesTag(token, localTagTokens)) {
-      score += 18;
+      score += isLeaf ? 24 : 4;
       reasons.push(`local-tag:${token}`);
       matched = true;
+      if (isLeaf) leafTagMatches.add(token);
     }
     if (folderTokenMatchesTag(token, aiTagTokens)) {
-      score += 12;
+      score += isLeaf ? 16 : 3;
       reasons.push(`ai-tag:${token}`);
       matched = true;
+      if (isLeaf) leafTagMatches.add(token);
     }
     if (folderEvidenceTokenMatchesText(token, evidenceText)) {
-      score += 30;
+      score += isLeaf ? 36 : 8;
       reasons.push(`content:${token}`);
       matched = true;
+      if (isLeaf) {
+        leafContentMatches.add(token);
+        if (isWholeSegment) leafExactContentMatches.add(token);
+      }
     }
     if (matched && leafTokens.has(token)) leafMatched = true;
   }
   if (parts.length > 1 && !leafMatched) return { score: 0, reasons: [] };
   if (tokens.length > 1 && score > 0) score += 6;
 
-  return { score, reasons: [...new Set(reasons)] };
+  return {
+    score,
+    reasons: [...new Set(reasons)],
+    leafTagMatches: leafTagMatches.size,
+    leafContentMatches: leafContentMatches.size,
+    leafExactContentMatches: leafExactContentMatches.size,
+  };
 }
 
 function scoreHistoricalFolderCandidates(storedBookmarks, suggestedTags, bookmark, aiSuggestion, folderOptions = []) {
@@ -2532,11 +2703,14 @@ function scoreHistoricalFolderCandidates(storedBookmarks, suggestedTags, bookmar
     if (!key) continue;
     if (!folderScore.has(key)) {
       const folderName = matchedFolder.title || item.folderName || key.split('/').filter(Boolean).slice(-1)[0] || '';
-      folderScore.set(key, { count: 0, score: 0, folderName, folderPath: key, reasons: new Set() });
+      folderScore.set(key, { count: 0, score: 0, folderName, folderPath: key, reasons: new Set(), leafTagMatches: 0, leafContentMatches: 0, leafExactContentMatches: 0 });
     }
     const candidate = folderScore.get(key);
     candidate.count += overlap;
     candidate.score = Math.max(candidate.score, evidence.score + overlap * 10);
+    candidate.leafTagMatches = Math.max(candidate.leafTagMatches, evidence.leafTagMatches || 0);
+    candidate.leafContentMatches = Math.max(candidate.leafContentMatches, evidence.leafContentMatches || 0);
+    candidate.leafExactContentMatches = Math.max(candidate.leafExactContentMatches, evidence.leafExactContentMatches || 0);
     for (const reason of evidence.reasons) candidate.reasons.add(reason);
   }
   return [...folderScore.values()]
@@ -2563,7 +2737,10 @@ function scoreExistingFolderCandidates(folderOptions, suggestedTags, bookmark, a
       exists: true,
       score: evidence.score,
       count: 0,
-      reasons: evidence.reasons
+      reasons: evidence.reasons,
+      leafTagMatches: evidence.leafTagMatches || 0,
+      leafContentMatches: evidence.leafContentMatches || 0,
+      leafExactContentMatches: evidence.leafExactContentMatches || 0,
     });
   }
   return candidates.sort((a, b) => b.score - a.score || a.folderPath.localeCompare(b.folderPath, 'zh'));
@@ -2608,12 +2785,17 @@ function chooseAISuggestedFolder(aiFolderPath, folderOptions, bookmark, ruleTags
 
 function recommendationEvidenceFromTagResult(result) {
   const evidence = [];
-  for (const signal of result?.signals || []) {
+  const signals = Array.from(result?.signals || []);
+  const hasLearnedDomain = signals.some(signal => String(signal || '') === 'learned-domain');
+  for (const signal of signals) {
     const value = String(signal || '');
+    if (value === 'domain' && hasLearnedDomain) continue;
     let family = 'title_metadata';
     if (value.startsWith('user-override')) family = 'user_rule';
     else if (value === 'folder' || value.startsWith('sibling-') || value.startsWith('temporal-') || value.startsWith('domain-cooccurrence')) family = 'history_profile';
     else if (value === 'domain+path' || value.startsWith('url-path') || value === 'extension' || value === 'query-param') family = 'domain_path';
+    else if (value === 'curated-domain') family = 'curated_domain';
+    else if (value === 'learned-domain') family = 'learned_rule';
     else if (value === 'domain' || value === 'subdomain') family = 'domain';
     else if (value.startsWith('ai:')) family = 'ai';
     else if (value.startsWith('content-') || value.startsWith('prototype-') || value.startsWith('tfidf:') || value.startsWith('bayesian:')) family = 'content_semantic';
@@ -2627,6 +2809,14 @@ function recommendationEvidenceFromFolderCandidate(candidate, source) {
   const normalizedScore = Math.min(1, Math.max(0.35, Number(candidate?.score || 0) / 100));
   if (source === 'history' || source === 'profile') {
     evidence.push({ family: 'history_profile', strength: normalizedScore, reason: source === 'profile' ? 'folder-profile' : 'confirmed-folder-history', source });
+  }
+  if (Number(candidate?.leafExactContentMatches || 0) > 0 || Number(candidate?.leafContentMatches || 0) >= 2) {
+    evidence.push({
+      family: 'folder_leaf',
+      strength: 1,
+      reason: Number(candidate?.leafExactContentMatches || 0) > 0 ? 'folder-leaf-exact-match' : 'folder-leaf-content-match',
+      source,
+    });
   }
   for (const reason of candidate?.reasons || []) {
     const value = String(reason || '');
@@ -2854,6 +3044,16 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
         }
       }
     }
+    // The AI explanation is additional evidence for every known folder, not a
+    // privileged path selection. This lets the local scorer compare the full taxonomy.
+    folderCandidates.push(
+      ...scoreHistoricalFolderCandidates(storedBookmarks, aiCandidateTags, bookmark, aiSuggestion, folderOptions)
+        .map(item => withRecommendationEvidence(item, 'history')),
+      ...scoreExistingFolderCandidates(folderOptions, aiCandidateTags, bookmark, aiSuggestion)
+        .map(item => withRecommendationEvidence(item, 'existing')),
+      ...scoreFolderProfileCandidates(storedBookmarks, folderOptions, bookmark, aiCandidateTags, aiSuggestion)
+        .map(item => withRecommendationEvidence(item, 'profile')),
+    );
     summary = core.summarizeRecommendation(tagCandidates, folderCandidates);
   }
 
@@ -3075,9 +3275,10 @@ function buildLocalBookmarkSuggestion(tempItem, ruleTags, suggestedFolder, aiSug
 }
 
 async function prepareBookmarkSuggestion(tab) {
-  const aiConfig = typeof getAIConfig === 'function' ? await getAIConfig().catch(() => null) : null;
-  const allowPageContent = aiConfig?.allowPageContentForAi !== false;
-  const contentData = allowPageContent && tab.id && tab.url
+  const duplicate = await findExistingBookmarkByUrl(tab.url);
+  // Local rules always use page content. The AI privacy setting only controls
+  // whether this already-extracted content can be included in AI prompts.
+  const contentData = tab.id && tab.url
     ? await extractActiveTabContent(tab.id, tab.url)
     : null;
   const tempItem = {
@@ -3134,8 +3335,6 @@ async function prepareBookmarkSuggestion(tab) {
     || selectedFolder?.reasons?.join('；')
     || (recommendation.abstained ? '当前证据不足，暂不自动推荐分类。' : '根据本地规则与已有目录画像生成建议。');
   draft.folderOptions = folderOptions;
-  const existing = await chrome.bookmarks.search({ url: tempItem.url });
-  const duplicate = existing[0];
   if (duplicate) {
     const existingFolder = await getBookmarkFolderInfo(duplicate);
     draft.duplicate = true;
@@ -3160,8 +3359,7 @@ async function saveConfirmedBookmark(draft) {
     }
   }
 
-  const existing = await chrome.bookmarks.search({ url: draft.url });
-  const duplicate = existing[0];
+  const duplicate = await findExistingBookmarkByUrl(draft.url);
   if (duplicate && !['move', 'copy'].includes(draft.duplicateAction)) {
     const existingFolder = await getBookmarkFolderInfo(duplicate);
     return {
@@ -3894,6 +4092,17 @@ async function addSingleBookmark(id) {
       item.tags = pending.tags;
       item.tagsAuto = pending.tags;
     }
+    if (item.tags.length === 0 && typeof autoTagBookmark === 'function') {
+      try {
+        const localTags = normalizeTagList(
+          (await autoTagBookmark(item, { skipAI: true })).map(tag => tag.tag),
+        );
+        item.tags = localTags;
+        item.tagsAuto = localTags;
+      } catch (error) {
+        console.warn('Local bookmark tagging failed:', error);
+      }
+    }
     if (pending) {
       item.contentText = pending.contentText || '';
       item.contentTitle = pending.contentTitle || pending.title || '';
@@ -3915,12 +4124,13 @@ async function addSingleBookmark(id) {
     });
     if (duplicate) return null;
 
-    const aiConfig = typeof getAIConfig === 'function' ? await getAIConfig().catch(() => null) : null;
-    if (aiConfig?.allowPageContentForAi !== false && !pending?.contentText && item.url) {
-      fetchBookmarkContent(item.url, { forceRefresh: false }).then(async (content) => {
+    let contentTask = Promise.resolve(item);
+    if (!pending?.contentText && item.url) {
+      contentTask = fetchBookmarkContent(item.url, { forceRefresh: false }).then(async (content) => {
+        let enrichedItem = item;
         await mutateStoredBookmarks((bookmarks) => bookmarks.map((stored) => {
           if (stored.id !== item.id && (stored.url !== item.url || stored.dateAdded !== item.dateAdded)) return stored;
-          return {
+          enrichedItem = {
             ...stored,
             contentText: content.textContent || '',
             contentTitle: content.title || stored.contentTitle || '',
@@ -3934,8 +4144,13 @@ async function addSingleBookmark(id) {
             contentFailureReason: content.failureReason || '',
             contentSource: content.source || '',
           };
+          return enrichedItem;
         }));
-      }).catch(err => console.warn('Bookmark content backfill failed:', err));
+        return enrichedItem;
+      }).catch(err => {
+        console.warn('Bookmark content backfill failed:', err);
+        return item;
+      });
     }
 
     // 桌面通知：一键收藏成功后，根据用户设置弹出系统通知
@@ -3953,7 +4168,7 @@ async function addSingleBookmark(id) {
       }
     }
 
-    return { item, hadPending: !!pending };
+    return { item, hadPending: !!pending, contentTask };
   } catch (err) {
     console.error('增量同步失败:', err);
     return null;
@@ -4210,7 +4425,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'updateBookmark':
       (async () => {
-        const { id, title, url, tags } = message;
+        const { id, title, url, tags, tagsAuto } = message;
         // 更新 Chrome 书签
         if (id) {
           try {
@@ -4225,11 +4440,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         // 更新本地存储
-        await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => item.id !== id ? item : {
-          ...item,
-          ...(title !== undefined ? { title } : {}),
-          ...(url !== undefined ? { url, domain: extractDomain(url) } : {}),
-          ...(tags !== undefined ? { tags: [...tags] } : {}),
+        await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
+          if (item.id !== id) return item;
+          const nextTags = tags !== undefined ? normalizeTagList(tags) : item.tags;
+          const requestedAutoTags = tagsAuto !== undefined ? tagsAuto : item.tagsAuto;
+          const nextTagsAuto = normalizeTagList(requestedAutoTags)
+            .filter(tag => (nextTags || []).some(candidate => candidate.toLowerCase() === tag.toLowerCase()));
+          return {
+            ...item,
+            ...(title !== undefined ? { title } : {}),
+            ...(url !== undefined ? { url, domain: extractDomain(url) } : {}),
+            ...(tags !== undefined ? { tags: nextTags } : {}),
+            ...(tagsAuto !== undefined || tags !== undefined ? { tagsAuto: nextTagsAuto } : {}),
+          };
         }));
         sendResponse({ success: true });
       })();
@@ -4638,21 +4861,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (previous.allowPageContentForAi !== config.allowPageContentForAi) {
             await clearAICache();
           }
-          if (config.allowPageContentForAi === false) {
-            await mutateStorageResource(PAGE_CONTENT_CACHE_KEY, () => undefined);
-            const pageContentFields = [
-              'contentText', 'contentTitle', 'contentExcerpt', 'contentMetaDesc', 'contentMetaKeywords',
-              'contentHeadings', 'contentStructuredTypes', 'contentFetchedAt', 'contentStatus',
-              'contentFailureReason', 'contentSource', 'excerpt', 'metaDesc', 'metaKeywords',
-              'headings', 'structuredTypes',
-            ];
-            await mutateStoredBookmarks((bookmarks) => bookmarks.map((bookmark) => {
-              if (!pageContentFields.some((field) => Object.prototype.hasOwnProperty.call(bookmark, field))) return bookmark;
-              const sanitized = { ...bookmark };
-              for (const field of pageContentFields) delete sanitized[field];
-              return sanitized;
-            }));
-          }
           sendResponse({ success: true, config });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
@@ -4947,7 +5155,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await runSerializedOperationDomain('recommendation_rule_compat', async () => {
             await mutateLegacyDynamicRules((rules) => ({
               ...rules,
-              domainRules: [...rules.domainRules, { domains: normalizedDomains, tag: String(tag).trim(), color: color || '#607d8b' }],
+              domainRules: [...rules.domainRules, { domains: normalizedDomains, tag: String(tag).trim(), color: color || '#607d8b', source: 'user' }],
             }));
             for (const domain of normalizedDomains) await addRecommendationUserRule('domain_tag', domain, String(tag).trim());
           });
@@ -5477,7 +5685,9 @@ chrome.bookmarks.onCreated.addListener((id, bookmark) => {
           bookmark: result.item
         }).catch(() => {}); // popup 可能未打开
         if (!result.hadPending) {
-          queueNewBookmarkRecommendation(result.item).catch(() => {});
+          Promise.resolve(result.contentTask || result.item)
+            .then((bookmarkWithContent) => queueNewBookmarkRecommendation(bookmarkWithContent))
+            .catch(() => {});
           enqueueIncrementalClassification(id, bookmark).catch(() => {});
         }
       }

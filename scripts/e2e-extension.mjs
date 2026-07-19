@@ -276,7 +276,7 @@ try {
   await settings.locator('#reevaluationResults').filter({ hasText: /评估完成|Evaluation complete/i }).waitFor({ timeout: 15000 });
   await settings.locator('.review-item--recommendation').first().waitFor({ state: 'visible', timeout: 10000 });
   assert.equal(await settings.locator('#reevaluationResults .reevaluation-select input').count(), 0, 'medium-confidence reevaluation items must not be preselected');
-  const recommendationCandidates = await settings.locator('.review-item--recommendation .review-candidates').allInnerTexts();
+  const recommendationCandidates = await settings.locator('.review-item--recommendation [aria-label="标签候选"]').allInnerTexts();
   assert.doesNotMatch(recommendationCandidates.join('\n'), /E2E Synthetic/, 'folder names must not leak into tag candidates');
   await settings.screenshot({ path: join(artifactsPath, 'learning-desktop.png'), fullPage: true });
   await assertNoHorizontalOverflow(settings, 'learning desktop');

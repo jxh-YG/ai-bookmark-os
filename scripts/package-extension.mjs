@@ -15,6 +15,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const dist = path.join(root, 'dist');
 const timelineSource = path.join(root, 'src', 'timeline');
 const aiDist = path.join(dist, 'ai');
+const packageMetadata = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 
 function ensureDir(p) {
   mkdirSync(p, { recursive: true });
@@ -173,7 +174,7 @@ for (const loc of ['en', 'zh_CN']) {
 const manifest = {
   manifest_version: 3,
   name: '__MSG_extName__',
-  version: '1.0.2',
+  version: packageMetadata.version,
   homepage_url: 'https://github.com/jxh-YG/ai-bookmark-os',
   default_locale: 'zh_CN',
   description: '__MSG_extDescription__',

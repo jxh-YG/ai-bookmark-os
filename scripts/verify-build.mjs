@@ -3,7 +3,12 @@ import { join } from 'node:path';
 
 const dist = 'dist';
 let ok = true;
+const packageMetadata = JSON.parse(readFileSync('package.json', 'utf8'));
 const rootManifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
+if (rootManifest.version !== packageMetadata.version) {
+  console.error('root manifest version must match package.json:', rootManifest.version, packageMetadata.version);
+  ok = false;
+}
 const rootServiceWorker = rootManifest.background?.service_worker;
 if (!rootServiceWorker || !existsSync(rootServiceWorker)) {
   console.error('root manifest service worker is missing:', rootServiceWorker);
@@ -68,6 +73,10 @@ for (const f of required) {
 }
 
 const manifest = JSON.parse(readFileSync(join(dist, 'manifest.json'), 'utf8'));
+if (manifest.version !== packageMetadata.version) {
+  console.error('dist manifest version must match package.json:', manifest.version, packageMetadata.version);
+  ok = false;
+}
 if (manifest.permissions?.includes('declarativeNetRequest') || existsSync(join(dist, 'rules/frame_allow.json'))) {
   console.error('build must not remove third-party frame security headers');
   ok = false;

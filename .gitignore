@@ -58,6 +58,8 @@ pnpm-debug.log*
 /tmp-*.json
 /tmp-ui-shots/
 /scripts/_*.mjs
+/.checker-smoke-chrome/
+/.checker-smoke-chrome-2/
 
 # Local release archives
 /*.zip

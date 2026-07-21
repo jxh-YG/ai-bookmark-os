@@ -8,7 +8,7 @@ import type {
   FlatBookmark,
   Settings,
 } from '../types';
-import { chat, extractJson } from './llm';
+import { chat, extractJson, getAiRequestTimeoutMs, getAiRetryCount } from './llm';
 import { resolveClassifyPrompts } from '../types';
 import { hashUrl, loadCache, saveCache, type CachedPageContext } from './cache';
 
@@ -120,8 +120,9 @@ export async function saveClassifyResult(result: ClassifyResult): Promise<void> 
   await chrome.storage.local.set({ [key]: persisted });
 }
 
-function retryMessage(attempt: number, maxRetries: number, delayMs: number): string {
-  return `AI 连接失败，${Math.ceil(delayMs / 1000)} 秒后重连（${attempt}/${maxRetries}）`;
+function retryMessage(attempt: number, maxRetries: number, delayMs: number, timeoutSeconds: number): string {
+  const seconds = Number((delayMs / 1000).toFixed(1));
+  return `AI 连接失败，${seconds} 秒后重连（第 ${attempt}/${maxRetries} 次重连；单次超时 ${timeoutSeconds} 秒）`;
 }
 
 /** 是否参照原有书签夹（默认开启） */
@@ -202,6 +203,24 @@ function preservedFolderSet(settings: Settings): Set<string> {
 function preservedFolderIdSet(settings: Settings): Set<string> {
   if (!respectFolders(settings)) return new Set();
   return new Set((settings.preservedFolderIds ?? []).filter(Boolean));
+}
+
+async function resolvePreservedFolderPaths(settings: Settings): Promise<Set<string>> {
+  const paths = preservedFolderSet(settings);
+  const ids = preservedFolderIdSet(settings);
+  if (ids.size === 0) return paths;
+  try {
+    const { getBookmarkFolders } = await import('./bookmarks');
+    const folders = await getBookmarkFolders();
+    for (const folder of folders) {
+      if (!ids.has(folder.id)) continue;
+      const key = fullFolderKey(folder.path.replace(/ \/ /g, '/'));
+      if (key) paths.add(key);
+    }
+  } catch {
+    // Path-based preservation remains available when folder IDs cannot be resolved.
+  }
+  return paths;
 }
 
 function preservedFolderPathFor(bookmark: FlatBookmark, paths: Set<string>): string | null {
@@ -498,7 +517,7 @@ async function labelBookmarks(
             phase: 'labeling',
             done,
             total,
-            message: retryMessage(info.attempt, info.maxRetries, info.delayMs),
+            message: retryMessage(info.attempt, info.maxRetries, info.delayMs, getAiRequestTimeoutMs(settings) / 1000),
           }),
       },
     );
@@ -534,6 +553,11 @@ async function labelBookmarks(
       ]);
       parsed = [...parsedA, ...parsedB];
     } else if (!isComplete) {
+      throw new Error('AI 标签结果不完整，已取消本次分类，未写入书签分类结果。');
+    }
+
+    const finalIds = new Set(parsed.map((item) => String(item.id)));
+    if (finalIds.size !== batch.length || !batch.every((bookmark) => finalIds.has(bookmark.id))) {
       throw new Error('AI 标签结果不完整，已取消本次分类，未写入书签分类结果。');
     }
 
@@ -658,7 +682,7 @@ async function buildTree(
               phase: 'building',
               done: 0,
               total: 1,
-              message: retryMessage(info.attempt, info.maxRetries, info.delayMs),
+              message: retryMessage(info.attempt, info.maxRetries, info.delayMs, getAiRequestTimeoutMs(settings) / 1000),
             }),
         },
       );
@@ -748,7 +772,7 @@ async function assignBookmarks(
             phase: 'assigning',
             done,
             total,
-            message: retryMessage(info.attempt, info.maxRetries, info.delayMs),
+            message: retryMessage(info.attempt, info.maxRetries, info.delayMs, getAiRequestTimeoutMs(settings) / 1000),
           }),
       },
     );
@@ -797,6 +821,10 @@ async function assignBookmarks(
       throw new Error('AI 分配结果不完整，已取消本次分类，未写入书签分类结果。');
     }
 
+    if (assignmentById.size !== batch.length || !batch.every((bookmark) => assignmentById.has(bookmark.id))) {
+      throw new Error('AI 分配结果不完整，已取消本次分类，未写入书签分类结果。');
+    }
+
     for (const [id, cat] of assignmentById) assignments.push({ id, cat });
 
     const assignedIds = new Set<string>();
@@ -837,24 +865,7 @@ export async function classify(
     throw new Error('局部分类必须指定目标目录。');
   }
   // 基础路径集合（用户配置的路径字符串）
-  const preservedPaths = preservedFolderSet(settings);
-
-  // 补充：通过 preservedFolderIds 将 ID 解析为路径（兼容文件夹重命名后路径失效的情况）
-  const preservedIds = preservedFolderIdSet(settings);
-  if (preservedIds.size > 0) {
-    try {
-      const { getBookmarkFolders } = await import('./bookmarks');
-      const folders = await getBookmarkFolders();
-      for (const folder of folders) {
-        if (preservedIds.has(folder.id)) {
-          const key = fullFolderKey(folder.path.replace(/ \/ /g, '/'));
-          if (key) preservedPaths.add(key);
-        }
-      }
-    } catch {
-      // 解析失败不阻断分类流程，仅依赖路径匹配
-    }
-  }
+  const preservedPaths = await resolvePreservedFolderPaths(settings);
 
   const preservedTree = buildPreservedTree(bookmarks, preservedPaths);
   const flexibleBookmarks = bookmarks.filter((bookmark) => !isInPreservedFolder(bookmark, preservedPaths));
@@ -979,6 +990,16 @@ export interface ClassifyEstimate {
   cached: number;
   /** 预计 API 请求次数 */
   requests: number;
+  /** 包含 JSON 修复与不完整响应拆批后的理论最大业务请求数 */
+  maxRequests: number;
+  /** 失败重连次数，不包含首次请求 */
+  retries: number;
+  /** 单个基础请求在全失败时的最大连接尝试次数 */
+  attemptsPerRequest: number;
+  /** 单个基础请求的超时时间（秒） */
+  timeoutSeconds: number;
+  /** 所有基础请求都用尽重连时的理论最大连接尝试次数 */
+  maxConnectionAttempts: number;
 }
 
 /** 分类前成本预估（纯本地，基于缓存命中率） */
@@ -988,16 +1009,47 @@ export async function estimateClassify(
 ): Promise<ClassifyEstimate> {
   const cacheEnabled = settings ? useClassificationCache(settings) : true;
   const cache = cacheEnabled ? await loadCache() : {};
-  const cached = cacheEnabled ? bookmarks.filter((b) => {
-    const entry = cache[classificationCacheKey(b, settings)];
-    return entry?.sourceUrl === normalizedUrl(b.url);
+  const preservedPaths = settings ? await resolvePreservedFolderPaths(settings) : new Set<string>();
+  const flexible = settings
+    ? bookmarks.filter((bookmark) => !isInPreservedFolder(bookmark, preservedPaths))
+    : bookmarks;
+  const cached = cacheEnabled ? flexible.filter((bookmark) => {
+    const entry = cache[classificationCacheKey(bookmark, settings)];
+    return entry?.sourceUrl === normalizedUrl(bookmark.url);
   }).length : 0;
-  const pending = bookmarks.length - cached;
+  const flexiblePending = flexible.length - cached;
   const requests =
-    Math.ceil(pending / (settings ? batchSize(settings) : BATCH_SIZE))
-    + 1
-    + Math.ceil(bookmarks.length / (settings ? assignBatchSize(settings) : ASSIGN_BATCH_SIZE));
-  return { total: bookmarks.length, cached, requests };
+    (flexible.length > 0
+      ? Math.ceil(flexiblePending / (settings ? batchSize(settings) : BATCH_SIZE))
+        + 1
+        + Math.ceil(flexible.length / (settings ? assignBatchSize(settings) : ASSIGN_BATCH_SIZE))
+      : 0);
+  const maxBatchRequests = (count: number, size: number): number => {
+    let maximum = 0;
+    for (let offset = 0; offset < count; offset += size) {
+      const batchLength = Math.min(size, count - offset);
+      maximum += batchLength > 10 ? 6 : 2;
+    }
+    return maximum;
+  };
+  const maxRequests = flexible.length > 0
+    ? maxBatchRequests(flexiblePending, settings ? batchSize(settings) : BATCH_SIZE)
+      + 2
+      + maxBatchRequests(flexible.length, settings ? assignBatchSize(settings) : ASSIGN_BATCH_SIZE)
+    : 0;
+  const retries = settings ? getAiRetryCount(settings) : 5;
+  const attemptsPerRequest = retries + 1;
+  const timeoutSeconds = settings ? getAiRequestTimeoutMs(settings) / 1000 : 90;
+  return {
+    total: bookmarks.length,
+    cached,
+    requests,
+    maxRequests,
+    retries,
+    attemptsPerRequest,
+    timeoutSeconds,
+    maxConnectionAttempts: maxRequests * attemptsPerRequest,
+  };
 }
 
 /**
@@ -1013,22 +1065,7 @@ export async function classifyIncremental(
   options: ClassifyRunOptions = {},
 ): Promise<ClassifyResult> {
   // 路径 + ID 双模式匹配（与 classify 保持一致）
-  const preservedPaths = preservedFolderSet(settings);
-  const preservedIds = preservedFolderIdSet(settings);
-  if (preservedIds.size > 0) {
-    try {
-      const { getBookmarkFolders } = await import('./bookmarks');
-      const folders = await getBookmarkFolders();
-      for (const folder of folders) {
-        if (preservedIds.has(folder.id)) {
-          const key = fullFolderKey(folder.path.replace(/ \/ /g, '/'));
-          if (key) preservedPaths.add(key);
-        }
-      }
-    } catch {
-      // 解析失败不阻断流程
-    }
-  }
+  const preservedPaths = await resolvePreservedFolderPaths(settings);
   const preservedTree = buildPreservedTree(newBookmarks, preservedPaths);
   const flexibleBookmarks = newBookmarks.filter((bookmark) => !isInPreservedFolder(bookmark, preservedPaths));
   const labeled = await labelBookmarks(settings, flexibleBookmarks, onProgress, signal);

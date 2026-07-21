@@ -49,6 +49,7 @@ const context = {
   scoreFolderPathEvidence: () => ({ score: 60, reasons: ['local-tag:ai'] }),
   scoreFolderProfileCandidates: () => profileFolderCandidates,
   scoreHistoricalFolderCandidates: () => [],
+  sampleFolderBookmarks: bookmarks => bookmarks,
   suggestBookmarkWithAI: async () => {
     aiCalls += 1;
     return aiResult;

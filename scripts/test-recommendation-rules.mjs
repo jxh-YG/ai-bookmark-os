@@ -248,6 +248,20 @@ assert.equal(autoTagBookmarkSync({
   domain: 'neutral.example',
   contentText: 'A generic landing page with no category-specific evidence.'.repeat(20),
 })[0]?.tag, '其他', '纯语义噪声不能单独触发分类');
+const bodyOnlyTags = Array.from(autoTagBookmarkSync({
+  title: 'Reference',
+  url: 'https://neutral.example/item',
+  domain: 'neutral.example',
+  contentText: '人工智能 大语言模型 机器学习 深度学习 Transformer 神经网络 模型训练 RAG 智能体。'.repeat(30),
+}), item => item.tag);
+assert.equal(bodyOnlyTags[0], 'AI', `标题与 URL 中性时，正文应能独立改变本地分类，实际为 ${bodyOnlyTags.join(', ')}`);
+assert.ok(!bodyOnlyTags.includes('其他'));
+assert.equal(autoTagBookmarkSync({
+  title: 'Reference',
+  url: 'https://neutral.example/summary',
+  domain: 'neutral.example',
+  contentMetaDesc: '人工智能 大语言模型 机器学习 深度学习 Transformer RAG 智能体',
+})[0]?.tag, 'AI', '已保存的页面描述字段必须参与本地分类');
 context.classifyWithAI = async () => [{ tag: '法律', confidence: 1 }, { tag: '其他', confidence: 1 }];
 assert.equal((await autoTagBookmark(directTitle))[0]?.tag, '开发', 'AI 只能补充，不能改写直接本地分类');
 context.classifyWithAI = async () => [{ tag: '企业协同', confidence: 1 }, { tag: '24', confidence: 1 }];

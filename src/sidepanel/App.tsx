@@ -1864,7 +1864,14 @@ export function App() {
                     )}
                     <li>{d.estimateTotal(estimate.total)}</li>
                     {estimate.cached > 0 && <li>{d.estimateCached(estimate.cached)}</li>}
-                    <li>{d.estimateRequests(estimate.requests)}</li>
+                    <li>{d.estimateRequestsNormal(estimate.requests)}</li>
+                    {estimate.maxRequests > estimate.requests && (
+                      <li>{d.estimateRequestsMax(estimate.maxRequests)}</li>
+                    )}
+                    <li>{d.estimateConnection(estimate.timeoutSeconds, estimate.retries, estimate.attemptsPerRequest)}</li>
+                    {estimate.retries > 0 && estimate.maxRequests > 0 && (
+                      <li>{d.estimateConnectionMax(estimate.maxConnectionAttempts)}</li>
+                    )}
                   </ul>
                   <small>
                     {estimate.scope.mode === 'partial'

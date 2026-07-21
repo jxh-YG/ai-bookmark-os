@@ -68,12 +68,17 @@ const addSingleSource = background.slice(addSingleStart, addSingleEnd);
 assert.match(addSingleSource, /await autoTagBookmark\(item,\s*\{\s*skipAI:\s*true\s*\}\)/, 'ordinary new bookmarks must receive local tags immediately');
 assert.match(addSingleSource, /item\.tagsAuto\s*=\s*localTags/, 'ordinary new bookmark auto tags must retain their source');
 assert.match(addSingleSource, /let contentTask = Promise\.resolve\(item\)/, 'ordinary new bookmarks must extract local page content');
+assert.match(addSingleSource, /await autoTagBookmark\(\{ \.\.\.item, \.\.\.contentPatch \}, \{ skipAI: true \}\)/, 'ordinary bookmarks must recompute local tags after page content is extracted');
+assert.match(addSingleSource, /applyLocalAutoTags\(stored\.tags, stored\.tagsAuto, refreshedLocalTags\)/, 'content-based recomputation must preserve manual tags');
+assert.match(addSingleSource, /action: 'tagsUpdated', bookmarkId: item\.id/, 'content-enriched tags must refresh open bookmark views');
 assert.doesNotMatch(addSingleSource, /allowPageContentForAi/, 'local page extraction must not depend on the AI content-sharing setting');
 
 const recommendationStart = background.indexOf('async function buildBookmarkRecommendation(');
 const recommendationEnd = background.indexOf('async function reevaluateBookmarkRecommendations(', recommendationStart);
 const recommendationSource = background.slice(recommendationStart, recommendationEnd);
 assert.match(recommendationSource, /await autoTagBookmark\(bookmark, \{ skipAI: true \}\)/);
+assert.match(recommendationSource, /const folderMatchBookmarks = sampleFolderBookmarks\(storedBookmarks\)/, 'each recommendation must sample existing bookmarks per folder');
+assert.match(recommendationSource, /scoreFolderProfileCandidates\(folderMatchBookmarks,/, 'folder profiles must use the bounded sample');
 assert.doesNotMatch(recommendationSource, /autoTagBookmarkSync\s*\(/);
 assert.match(recommendationSource, /async function queueNewBookmarkRecommendation/);
 

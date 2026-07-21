@@ -189,6 +189,49 @@ async function testEstimateIgnoresFolderWhenDisabledAndMissesV1() {
   assert.equal(oldVersion.cached, 0, '旧版本 URL 缓存必须自然失效');
 }
 
+async function testEstimateReportsConfiguredConnectionLimits() {
+  const storage = createStorage({ labelCache: {} });
+  globalThis.chrome = createChrome(storage);
+  const { estimateClassify } = await importTypeScript('src/core/classifier.ts');
+  const bookmarks = [
+    ...Array.from({ length: 40 }, (_, index) => ({
+      id: `preserved-${index}`,
+      title: `Preserved ${index}`,
+      url: `https://preserved.test/${index}`,
+      folderPath: 'Work/Keep',
+    })),
+    { id: 'flexible', title: 'Flexible', url: 'https://flexible.test/', folderPath: 'Work/Inbox' },
+  ];
+  storage.values.labelCache = {
+    [contentContextV5Key(bookmarks[0], { ...baseSettings, preservedFolderPaths: ['Work/Keep'] })]: {
+      summary: 'preserved cache',
+      tags: ['preserved'],
+      sourceUrl: normalizeUrl(bookmarks[0].url),
+    },
+  };
+  const estimate = await estimateClassify(bookmarks, {
+    ...baseSettings,
+    preservedFolderPaths: ['Work/Keep'],
+    aiRetryCount: 2,
+    aiRequestTimeoutSeconds: 17,
+  });
+  assert.equal(estimate.cached, 0, '保持原样目录的缓存不应显示为 AI 分类缓存命中');
+  assert.equal(estimate.requests, 3, '保持原样目录不应计入正常业务请求数');
+  assert.equal(estimate.maxRequests, 6, '理论上限应包含 JSON 修复请求');
+  assert.equal(estimate.retries, 2);
+  assert.equal(estimate.attemptsPerRequest, 3);
+  assert.equal(estimate.timeoutSeconds, 17);
+  assert.equal(estimate.maxConnectionAttempts, 18);
+
+  const preservedOnly = await estimateClassify(bookmarks.slice(0, 40), {
+    ...baseSettings,
+    preservedFolderPaths: ['Work/Keep'],
+  });
+  assert.equal(preservedOnly.requests, 0);
+  assert.equal(preservedOnly.maxRequests, 0);
+  assert.equal(preservedOnly.maxConnectionAttempts, 0);
+}
+
 async function testLabelingUsesTheSameSignatureAsEstimate() {
   const storage = createStorage({
     labelCache: {
@@ -228,8 +271,40 @@ async function testLabelingUsesTheSameSignatureAsEstimate() {
   assert.equal(requests[0].max_tokens, 4096, '首个 AI 请求必须是建树，而不是重新打标签');
 }
 
+async function testIncompleteSplitDoesNotPersistDraft() {
+  const storage = createStorage({ labelCache: {} });
+  globalThis.chrome = createChrome(storage, {
+    permissions: { contains: async () => false },
+  });
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests += 1;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: '[]' } }] }),
+      text: async () => '',
+    };
+  };
+  const bookmarks = Array.from({ length: 11 }, (_, index) => ({
+    id: `incomplete-${index}`,
+    title: `Bookmark ${index}`,
+    url: `https://incomplete.test/${index}`,
+    folderPath: 'Inbox',
+  }));
+  const { classify } = await importTypeScript('src/core/classifier.ts');
+  await assert.rejects(
+    () => classify(baseSettings, bookmarks, () => {}, new AbortController().signal),
+    /AI 标签结果不完整/,
+  );
+  assert.equal(requests, 3, '完整批次不完整时应拆半复核一次');
+  assert.equal(storage.values.classifyResult, undefined, '拆半后仍不完整时不得写回残缺分类草稿');
+}
+
 await testEstimateUsesContentContextV5();
 await testEstimateIgnoresFolderWhenDisabledAndMissesV1();
+await testEstimateReportsConfiguredConnectionLimits();
 await testLabelingUsesTheSameSignatureAsEstimate();
+await testIncompleteSplitDoesNotPersistDraft();
 
 console.log('classification cache regression checks passed');

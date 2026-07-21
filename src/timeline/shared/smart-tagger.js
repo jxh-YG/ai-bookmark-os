@@ -1423,6 +1423,16 @@ function extractPageFingerprintFromText(text) {
   return { leadingText, codeBlocks, images, tables, headings, techStack };
 }
 
+function extractTagsFromPageContent(contentText) {
+  const text = String(contentText || '').replace(/\s+/g, ' ').trim().slice(0, 1500);
+  if (text.length < 80) return [];
+  const qualityFactor = Math.min(1, Math.max(0.5, text.length / 800));
+  return extractTagsFromTitle(text)
+    .slice(0, 2)
+    .map(item => ({ tag: item.tag, score: Math.min(item.score, 18) * qualityFactor }))
+    .filter(item => item.score >= 4);
+}
+
 // ===== 标签原型 BM25 语义匹配 =====
 function computePrototypeBm25Scores(text, prototypes) {
   const tokens = tokenize(text);
@@ -2009,7 +2019,8 @@ async function autoTagBookmark(bookmark, options = {}) {
 
   // ===== 增强信号：网页内容特征与语义原型 =====
   const contentText = bookmark.contentText || '';
-  const metaDesc = bookmark.metaDesc || '';
+  const metaDesc = bookmark.metaDesc || bookmark.contentMetaDesc || '';
+  const excerpt = bookmark.excerpt || bookmark.contentExcerpt || '';
   const ogDescription = bookmark.ogDescription || '';
   const metaKeywords = Array.isArray(bookmark.metaKeywords)
     ? bookmark.metaKeywords
@@ -2026,7 +2037,7 @@ async function autoTagBookmark(bookmark, options = {}) {
     ? extractPageFingerprintFromText(contentText)
     : (bookmark.html ? extractPageFingerprintFromHtml(bookmark.html) : extractPageFingerprintFromText(''));
   const headings = [...new Set([...(fingerprint.headings || []), ...extractedHeadings])];
-  for (const summary of [metaDesc, ogDescription, ...headings]) {
+  for (const summary of [metaDesc, excerpt, ogDescription, ...headings]) {
     for (const { tag, score, signal } of extractLocalSemanticTags(summary)) {
       addScore(tag, score * 0.8, signal.replace('semantic-title:', 'semantic-summary:'));
     }
@@ -2037,6 +2048,7 @@ async function autoTagBookmark(bookmark, options = {}) {
     bookmark.url || '',
     bookmark.domain || '',
     metaDesc,
+    excerpt,
     ogDescription,
     fingerprint.leadingText,
     ...headings,
@@ -2055,6 +2067,10 @@ async function autoTagBookmark(bookmark, options = {}) {
   const fingerprintScores = scoreContentFingerprint(fingerprint);
   for (const [tag, score] of Object.entries(fingerprintScores)) {
     addScore(tag, score * contentDamp, `content-fingerprint:${tag}`);
+  }
+
+  for (const { tag, score } of extractTagsFromPageContent(contentText)) {
+    addScore(tag, score * contentDamp, `content-keyword:${tag}`);
   }
 
   // Layer 4.6: meta description 关键词命中（仅保留前两名，避免噪声扩散）
@@ -2283,7 +2299,8 @@ function autoTagBookmarkSync(bookmark) {
 
   // ===== 增强信号：网页内容特征与语义原型 =====
   const contentText = bookmark.contentText || '';
-  const metaDesc = bookmark.metaDesc || '';
+  const metaDesc = bookmark.metaDesc || bookmark.contentMetaDesc || '';
+  const excerpt = bookmark.excerpt || bookmark.contentExcerpt || '';
   const ogDescription = bookmark.ogDescription || '';
   const metaKeywords = Array.isArray(bookmark.metaKeywords)
     ? bookmark.metaKeywords
@@ -2299,7 +2316,7 @@ function autoTagBookmarkSync(bookmark) {
     ? extractPageFingerprintFromText(contentText)
     : (bookmark.html ? extractPageFingerprintFromHtml(bookmark.html) : extractPageFingerprintFromText(''));
   const headings = [...new Set([...(fingerprint.headings || []), ...extractedHeadings])];
-  for (const summary of [metaDesc, ogDescription, ...headings]) {
+  for (const summary of [metaDesc, excerpt, ogDescription, ...headings]) {
     for (const { tag, score, signal } of extractLocalSemanticTags(summary)) {
       addScore(tag, score * 0.8, signal.replace('semantic-title:', 'semantic-summary:'));
     }
@@ -2310,6 +2327,7 @@ function autoTagBookmarkSync(bookmark) {
     bookmark.url || '',
     bookmark.domain || '',
     metaDesc,
+    excerpt,
     ogDescription,
     fingerprint.leadingText,
     ...headings,
@@ -2328,6 +2346,10 @@ function autoTagBookmarkSync(bookmark) {
   const fingerprintScores = scoreContentFingerprint(fingerprint);
   for (const [tag, score] of Object.entries(fingerprintScores)) {
     addScore(tag, score * contentDamp, `content-fingerprint:${tag}`);
+  }
+
+  for (const { tag, score } of extractTagsFromPageContent(contentText)) {
+    addScore(tag, score * contentDamp, `content-keyword:${tag}`);
   }
 
   // Layer 4.6: meta description 关键词命中（仅保留前两名，避免噪声扩散）
@@ -2690,7 +2712,9 @@ function needsHumanReview(results, bookmark) {
   const top1 = results[0];
   const top2 = results[1];
 
-  const readableContent = String(bookmark?.contentText || bookmark?.excerpt || bookmark?.metaDesc || '').trim();
+  const readableContent = String(
+    bookmark?.contentText || bookmark?.excerpt || bookmark?.contentExcerpt || bookmark?.metaDesc || bookmark?.contentMetaDesc || ''
+  ).trim();
   const hasPageSignals = readableContent.length >= 80 ||
     (Array.isArray(bookmark?.headings) && bookmark.headings.length > 0) ||
     (Array.isArray(bookmark?.contentHeadings) && bookmark.contentHeadings.length > 0) ||

@@ -148,6 +148,7 @@ vm.createContext(context);
 vm.runInContext(`${source.slice(start, end)}; this.helpers = {
   normalizeTagList,
   normalizeBookmarkFolderPath,
+  sampleFolderBookmarks,
   matchBookmarkFolderOption,
   chooseAISuggestedFolder,
   scoreExistingFolderCandidates,
@@ -160,6 +161,7 @@ vm.runInContext(`${source.slice(start, end)}; this.helpers = {
 const {
   normalizeTagList,
   normalizeBookmarkFolderPath,
+  sampleFolderBookmarks,
   matchBookmarkFolderOption,
   chooseAISuggestedFolder,
   scoreExistingFolderCandidates,
@@ -173,6 +175,20 @@ assert.deepEqual([...normalizeTagList([' docs ', { tag: 'docs' }, { tag: 'AI' }]
 assert.deepEqual([...normalizeTagList(['24', '40', '企业协同', '1.2.3'])], ['企业协同']);
 assert.equal(normalizeBookmarkFolderPath('Bookmarks bar/Work / Project'), 'Work/Project');
 assert.equal(normalizeBookmarkFolderPath('Other bookmarks/Work/Project'), 'Work/Project');
+const sampleSource = [
+  ...Array.from({ length: 12 }, (_, index) => ({ id: `a-${index}`, folderPath: 'Work/A' })),
+  ...Array.from({ length: 4 }, (_, index) => ({ id: `b-${index}`, folderPath: 'Work/B' })),
+  { id: 'root', folderPath: '' },
+];
+const sampledFolders = sampleFolderBookmarks(sampleSource, () => 0);
+assert.equal(sampledFolders.filter(item => item.folderPath === 'Work/A').length, 10);
+assert.equal(sampledFolders.filter(item => item.folderPath === 'Work/B').length, 4);
+assert.equal(sampledFolders.some(item => item.id === 'root'), false);
+assert.notDeepEqual(
+  [...sampleFolderBookmarks(sampleSource, () => 0)].map(item => item.id),
+  [...sampleFolderBookmarks(sampleSource, () => 0.999999)].map(item => item.id),
+  '超过 10 条时应使用随机样本而不是固定前 10 条',
+);
 assert.deepEqual(
   { ...matchBookmarkFolderOption([{ id: '42', path: 'Work/Project' }], 'Bookmarks bar/Work/Project') },
   { id: '42', path: 'Work/Project' },
@@ -281,6 +297,46 @@ assert.equal(scoreFolderProfileCandidates(
   ['产品'],
   null,
 ).length, 0);
+assert.equal(scoreFolderProfileCandidates(
+  [{
+    title: 'Reference',
+    url: 'https://old.test/reference',
+    domain: 'old.test',
+    contentExcerpt: 'quantum lattice methods',
+    folderName: 'Research',
+    folderPath: 'Research',
+  }],
+  [{ id: 'research-folder', title: 'Research', path: 'Research' }],
+  {
+    title: 'Paper',
+    url: 'https://new.test/paper',
+    domain: 'new.test',
+    contentMetaDesc: 'quantum lattice overview',
+  },
+  [],
+  null,
+)[0]?.folderPath, 'Research', '本地画像应使用已保存的页面摘要字段');
+assert.equal(scoreFolderProfileCandidates(
+  [{
+    title: 'Archive item',
+    url: 'https://old.test/archive',
+    domain: 'old.test',
+    contentText: 'quantum lattice tensor simulation methods and benchmark results',
+    contentHeadings: ['Quantum lattice experiments'],
+    folderName: 'Research',
+    folderPath: 'Research',
+  }],
+  [{ id: 'research-folder', title: 'Research', path: 'Research' }],
+  {
+    title: 'Reference',
+    url: 'https://new.test/reference',
+    domain: 'new.test',
+    contentText: 'quantum lattice tensor simulation methods with reproducible benchmark results',
+    contentHeadings: ['Quantum lattice methods'],
+  },
+  [],
+  null,
+)[0]?.folderPath, 'Research', '当前正文必须与目录内历史正文共同参与本地画像匹配');
 const aiRelayFolders = [
   { id: 'ai-public-folder', title: '公益导航', path: 'AI 整理/人工智能/公益导航' },
   { id: 'ai-relay-folder', title: 'API中转', path: 'AI 整理/人工智能/API中转' },
@@ -489,6 +545,9 @@ for (const needle of [
   "event.key === 'ArrowDown'",
   "event.key === 'Escape'",
   "folderResults.addEventListener('click'",
+  "contentReady: '已读取页面正文（$1 字）并用于本地分类。'",
+  'const contentLength = String(panelState.contentText',
+  'class="ab-content-status"',
 ]) {
   assert.ok(source.includes(needle), `quick bookmark duplicate flow missing: ${needle}`);
 }

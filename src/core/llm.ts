@@ -15,17 +15,22 @@ interface ChatOptions {
 
 const DEFAULT_MAX_RETRIES = 5;
 const BASE_DELAY_MS = 1500;
+const MAX_RETRY_DELAY_MS = 30_000;
 const DEFAULT_REQUEST_TIMEOUT_SECONDS = 90;
+
+function retryDelayMs(attempt: number): number {
+  return Math.min(MAX_RETRY_DELAY_MS, BASE_DELAY_MS * 2 ** attempt);
+}
 
 export function getAiRetryCount(settings: Settings): number {
   const value = Number(settings.aiRetryCount ?? DEFAULT_MAX_RETRIES);
   if (!Number.isFinite(value)) return DEFAULT_MAX_RETRIES;
-  return Math.min(20, Math.max(0, Math.floor(value)));
+  return Math.min(20, Math.max(0, Math.round(value)));
 }
 
 export function getAiRequestTimeoutMs(settings: Settings): number {
   const value = Number(settings.aiRequestTimeoutSeconds ?? DEFAULT_REQUEST_TIMEOUT_SECONDS);
-  const seconds = Number.isFinite(value) ? value : DEFAULT_REQUEST_TIMEOUT_SECONDS;
+  const seconds = Number.isFinite(value) ? Math.round(value) : DEFAULT_REQUEST_TIMEOUT_SECONDS;
   return Math.min(600, Math.max(5, seconds)) * 1000;
 }
 
@@ -53,7 +58,9 @@ async function fetchWithTimeout(
   outerSignal?: AbortSignal,
 ): Promise<Response> {
   const ctrl = new AbortController();
+  let timedOut = false;
   const timeout = setTimeout(() => {
+    timedOut = true;
     ctrl.abort(new DOMException('请求超时', 'TimeoutError'));
   }, timeoutMs);
   const onAbort = () => ctrl.abort(outerSignal?.reason ?? new DOMException('已取消', 'AbortError'));
@@ -62,7 +69,7 @@ async function fetchWithTimeout(
     return await fetch(input, { ...init, signal: ctrl.signal });
   } catch (e) {
     if (outerSignal?.aborted) throw e;
-    if ((e as Error).name === 'AbortError') {
+    if (timedOut || (e as Error).name === 'TimeoutError') {
       throw new Error(`API 请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
     }
     throw e;
@@ -196,7 +203,7 @@ export async function chat(
       if (res.status === 408 || res.status === 429 || res.status >= 500) {
         lastError = new Error(`API ${res.status}: ${await res.text().catch(() => '')}`);
         if (attempt < maxRetries) {
-          const delayMs = BASE_DELAY_MS * 2 ** attempt;
+          const delayMs = retryDelayMs(attempt);
           opts.onRetry?.({ attempt: attempt + 1, maxRetries, delayMs, reason: lastError.message });
           await sleep(delayMs, opts.signal);
         }
@@ -225,7 +232,7 @@ export async function chat(
       if (e instanceof TypeError || /超时|timeout|network|failed to fetch/i.test((e as Error).message)) {
         lastError = e instanceof Error ? e : new Error(String(e));
         if (attempt < maxRetries) {
-          const delayMs = BASE_DELAY_MS * 2 ** attempt;
+          const delayMs = retryDelayMs(attempt);
           opts.onRetry?.({ attempt: attempt + 1, maxRetries, delayMs, reason: lastError.message });
           await sleep(delayMs, opts.signal);
         }

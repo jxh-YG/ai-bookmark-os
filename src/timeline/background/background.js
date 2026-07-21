@@ -2431,6 +2431,32 @@ const FOLDER_EVIDENCE_STOP_WORDS = new Set([
   'bookmark', 'bookmarks', 'folder', 'folders', 'other', 'misc', 'new', 'work', 'personal',
   '书签', '收藏', '文件夹', '其他', '杂项', '资料', '归档', '临时'
 ]);
+const MAX_FOLDER_MATCH_SAMPLES = 10;
+
+function sampleFolderBookmarks(storedBookmarks, random = Math.random) {
+  const grouped = new Map();
+  for (const item of storedBookmarks || []) {
+    const path = normalizeBookmarkFolderPath(item?.folderPath);
+    if (!path) continue;
+    if (!grouped.has(path)) grouped.set(path, []);
+    grouped.get(path).push(item);
+  }
+
+  const sampled = [];
+  for (const items of grouped.values()) {
+    if (items.length <= MAX_FOLDER_MATCH_SAMPLES) {
+      sampled.push(...items);
+      continue;
+    }
+    const pool = [...items];
+    for (let index = pool.length - 1; index > 0; index--) {
+      const swapIndex = Math.floor(Math.max(0, Math.min(0.999999999999, Number(random()) || 0)) * (index + 1));
+      [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
+    }
+    sampled.push(...pool.slice(0, MAX_FOLDER_MATCH_SAMPLES));
+  }
+  return sampled;
+}
 
 function tokenizeFolderEvidence(value) {
   const text = String(value || '').toLowerCase();
@@ -2460,8 +2486,10 @@ function getBookmarkFolderEvidenceText(bookmark, aiSuggestion) {
     bookmark?.domain,
     bookmark?.metaDesc,
     bookmark?.excerpt,
+    bookmark?.contentExcerpt,
     bookmark?.contentTitle,
     bookmark?.contentText,
+    bookmark?.contentMetaDesc,
     bookmark?.ogDescription,
     aiSuggestion?.summary,
     aiSuggestion?.reason,
@@ -2530,13 +2558,19 @@ function collectBookmarkTokenWeights(bookmark, tags = [], aiSuggestion = null) {
   addText(strong, getUrlPathEvidence(bookmark?.url), 4);
   addText(strong, bookmark?.metaDesc, 3);
   addText(strong, bookmark?.excerpt, 3);
+  addText(strong, bookmark?.contentExcerpt, 3);
   addText(strong, bookmark?.contentTitle, 4);
   addText(strong, bookmark?.contentText, 2);
+  addText(strong, bookmark?.contentMetaDesc, 3);
   addText(strong, bookmark?.ogDescription, 3);
   addText(strong, aiSuggestion?.summary, 3);
   addText(strong, aiSuggestion?.reason, 4);
   for (const value of Array.isArray(bookmark?.headings) ? bookmark.headings : []) addText(strong, value, 3);
+  for (const value of Array.isArray(bookmark?.contentHeadings) ? bookmark.contentHeadings : []) addText(strong, value, 3);
   for (const value of Array.isArray(bookmark?.metaKeywords) ? bookmark.metaKeywords : []) addText(strong, value, 3);
+  for (const value of Array.isArray(bookmark?.contentMetaKeywords) ? bookmark.contentMetaKeywords : []) addText(strong, value, 3);
+  for (const value of Array.isArray(bookmark?.structuredTypes) ? bookmark.structuredTypes : []) addText(strong, value, 2);
+  for (const value of Array.isArray(bookmark?.contentStructuredTypes) ? bookmark.contentStructuredTypes : []) addText(strong, value, 2);
   for (const value of Array.isArray(aiSuggestion?.evidence) ? aiSuggestion.evidence : []) addText(strong, value, 3);
   for (const tag of normalizeTagList(tags)) addText(weak, tag, 3);
   for (const tag of normalizeTagList(aiSuggestion?.tags)) addText(weak, tag, 2);
@@ -2952,6 +2986,7 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
   if (options.preloaded !== true && typeof preloadSmartTaggerCaches === 'function') await preloadSmartTaggerCaches();
   const folderOptions = options.folderOptions || await loadBookmarkFolderOptions().catch(() => []);
   const storedBookmarks = options.storedBookmarks || await getStoredBookmarks().catch(() => []);
+  const folderMatchBookmarks = sampleFolderBookmarks(storedBookmarks);
   const ruleTags = typeof autoTagBookmark === 'function'
     ? await autoTagBookmark(bookmark, { skipAI: true })
     : [];
@@ -2971,11 +3006,11 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
   const initialLocalTags = core.rankCandidates(tagCandidates);
   const tagNames = initialLocalTags.map(item => item.tag);
 
-  const historyCandidates = scoreHistoricalFolderCandidates(storedBookmarks, tagNames, bookmark, null, folderOptions)
+  const historyCandidates = scoreHistoricalFolderCandidates(folderMatchBookmarks, tagNames, bookmark, null, folderOptions)
     .map(item => withRecommendationEvidence(item, 'history'));
   const existingCandidates = scoreExistingFolderCandidates(folderOptions, tagNames, bookmark, null)
     .map(item => withRecommendationEvidence(item, 'existing'));
-  const profileCandidates = scoreFolderProfileCandidates(storedBookmarks, folderOptions, bookmark, tagNames, null)
+  const profileCandidates = scoreFolderProfileCandidates(folderMatchBookmarks, folderOptions, bookmark, tagNames, null)
     .map(item => withRecommendationEvidence(item, 'profile'));
   let folderCandidates = [...learned.folderCandidates, ...historyCandidates, ...existingCandidates, ...profileCandidates];
   addReliableFolderProfileTagEvidence(tagCandidates, folderCandidates, core);
@@ -3047,11 +3082,11 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
     // The AI explanation is additional evidence for every known folder, not a
     // privileged path selection. This lets the local scorer compare the full taxonomy.
     folderCandidates.push(
-      ...scoreHistoricalFolderCandidates(storedBookmarks, aiCandidateTags, bookmark, aiSuggestion, folderOptions)
+      ...scoreHistoricalFolderCandidates(folderMatchBookmarks, aiCandidateTags, bookmark, aiSuggestion, folderOptions)
         .map(item => withRecommendationEvidence(item, 'history')),
       ...scoreExistingFolderCandidates(folderOptions, aiCandidateTags, bookmark, aiSuggestion)
         .map(item => withRecommendationEvidence(item, 'existing')),
-      ...scoreFolderProfileCandidates(storedBookmarks, folderOptions, bookmark, aiCandidateTags, aiSuggestion)
+      ...scoreFolderProfileCandidates(folderMatchBookmarks, folderOptions, bookmark, aiCandidateTags, aiSuggestion)
         .map(item => withRecommendationEvidence(item, 'profile')),
     );
     summary = core.summarizeRecommendation(tagCandidates, folderCandidates);
@@ -3560,11 +3595,15 @@ async function injectBookmarkConfirmPanel(tabId, state) {
       const folderCandidates = Array.isArray(panelState.folderCandidates) ? panelState.folderCandidates.slice(0, 3) : [];
       const isChinese = String(panelState.panelLanguage || '').toLowerCase().startsWith('zh');
       const copy = isChinese ? {
-        title: '智能分类建议', analyzingPage: '正在分析当前页面', loading: '正在分析页面并生成分类建议...', cancel: '取消收藏', titleLabel: '标题', aiCategory: '目录候选', existingCategory: '已有目录', newCategory: '新目录候选', newPrefix: '新建：', newCategoryLabel: '新建分类', searchCategory: '搜索已有分类，例如 公司 / 项目 / 文档', matchingCategories: '匹配的已有分类', selectCategory: '选择书签分类', useExisting: '沿用已有：', selectExisting: '选择已有分类...', manualPath: '手动输入路径...', pathExample: '例如：工作/公司/项目', categoryHint: '仅高置信建议会预选；也可以搜索已有目录或输入新路径。', tags: '标签', tagHint: '用逗号分隔', recommendedPath: '推荐路径', summary: '摘要说明', summaryHint: '可手动补充摘要', reason: '归类理由', reasonHint: '可手动补充归类理由', aiReady: 'AI 已在低置信或冲突时参与校验，你可以继续确认或修改。', localReady: '当前建议由本地规则与目录画像生成。', noRecommendation: '当前证据不足，暂不预选分类。', retry: '重新分析', reject: '不采用建议', rejected: '已记录拒绝，请手动选择分类或直接收藏。', high: '高置信', medium: '中置信', low: '低置信', confirm: '确认收藏', duplicateTitle: '该页面已收藏', duplicateNote: '该页面已收藏在“$1”（$2）。请选择将它移动到当前目标，或在当前目标保留一份副本。', copy: '保留副本', move: '移动到此处', saving: '正在收藏...', saved: '已收藏', duplicateError: '该页面已经在书签中。', saveFailed: '收藏失败：', unknown: '未知错误', searchMatches: '匹配 $1 个已有分类，可点击结果或按 Enter 选中', searchHint: '可直接下拉选择，也可搜索 $1 个已有分类'
+        title: '智能分类建议', analyzingPage: '正在分析当前页面', loading: '正在分析页面并生成分类建议...', cancel: '取消收藏', titleLabel: '标题', aiCategory: '目录候选', existingCategory: '已有目录', newCategory: '新目录候选', newPrefix: '新建：', newCategoryLabel: '新建分类', searchCategory: '搜索已有分类，例如 公司 / 项目 / 文档', matchingCategories: '匹配的已有分类', selectCategory: '选择书签分类', useExisting: '沿用已有：', selectExisting: '选择已有分类...', manualPath: '手动输入路径...', pathExample: '例如：工作/公司/项目', categoryHint: '仅高置信建议会预选；也可以搜索已有目录或输入新路径。', tags: '标签', tagHint: '用逗号分隔', recommendedPath: '推荐路径', summary: '摘要说明', summaryHint: '可手动补充摘要', reason: '归类理由', reasonHint: '可手动补充归类理由', contentReady: '已读取页面正文（$1 字）并用于本地分类。', contentFallback: '未读取到可用正文，本次使用标题、URL 与目录画像判断。', aiReady: 'AI 已在低置信或冲突时参与校验，你可以继续确认或修改。', localReady: '当前建议由本地规则与目录画像生成。', noRecommendation: '当前证据不足，暂不预选分类。', retry: '重新分析', reject: '不采用建议', rejected: '已记录拒绝，请手动选择分类或直接收藏。', high: '高置信', medium: '中置信', low: '低置信', confirm: '确认收藏', duplicateTitle: '该页面已收藏', duplicateNote: '该页面已收藏在“$1”（$2）。请选择将它移动到当前目标，或在当前目标保留一份副本。', copy: '保留副本', move: '移动到此处', saving: '正在收藏...', saved: '已收藏', duplicateError: '该页面已经在书签中。', saveFailed: '收藏失败：', unknown: '未知错误', searchMatches: '匹配 $1 个已有分类，可点击结果或按 Enter 选中', searchHint: '可直接下拉选择，也可搜索 $1 个已有分类'
       } : {
-        title: 'Smart folder suggestion', analyzingPage: 'Analyzing the current page', loading: 'Analyzing the page and preparing suggestions...', cancel: 'Cancel bookmark', titleLabel: 'Title', aiCategory: 'Folder candidates', existingCategory: 'Existing folder', newCategory: 'New folder candidate', newPrefix: 'Create: ', newCategoryLabel: 'Create new folder', searchCategory: 'Search folders, e.g. Work / Projects / Docs', matchingCategories: 'Matching folders', selectCategory: 'Choose bookmark folder', useExisting: 'Use existing: ', selectExisting: 'Choose an existing folder...', manualPath: 'Enter a path manually...', pathExample: 'Example: Work/Company/Project', categoryHint: 'Only high-confidence suggestions are preselected. You can search or enter another path.', tags: 'Tags', tagHint: 'Separate with commas', recommendedPath: 'Suggested path', summary: 'Summary', summaryHint: 'Add a summary', reason: 'Why this folder', reasonHint: 'Add a reason', aiReady: 'AI was used to verify a low-confidence or conflicting result.', localReady: 'Suggestions are based on local rules and folder profiles.', noRecommendation: 'Evidence is insufficient, so no folder was preselected.', retry: 'Analyze again', reject: 'Reject suggestion', rejected: 'Rejection recorded. Choose a folder manually or save without one.', high: 'High', medium: 'Medium', low: 'Low', confirm: 'Save bookmark', duplicateTitle: 'This page is already bookmarked', duplicateNote: 'This page is already in “$1” ($2). Move it to the current destination or keep a copy there.', copy: 'Keep a copy', move: 'Move here', saving: 'Saving...', saved: 'Saved', duplicateError: 'This page is already bookmarked.', saveFailed: 'Could not save: ', unknown: 'Unknown error', searchMatches: '$1 matching folders. Click a result or press Enter to select it.', searchHint: 'Choose from the list or search $1 existing folders'
+        title: 'Smart folder suggestion', analyzingPage: 'Analyzing the current page', loading: 'Analyzing the page and preparing suggestions...', cancel: 'Cancel bookmark', titleLabel: 'Title', aiCategory: 'Folder candidates', existingCategory: 'Existing folder', newCategory: 'New folder candidate', newPrefix: 'Create: ', newCategoryLabel: 'Create new folder', searchCategory: 'Search folders, e.g. Work / Projects / Docs', matchingCategories: 'Matching folders', selectCategory: 'Choose bookmark folder', useExisting: 'Use existing: ', selectExisting: 'Choose an existing folder...', manualPath: 'Enter a path manually...', pathExample: 'Example: Work/Company/Project', categoryHint: 'Only high-confidence suggestions are preselected. You can search or enter another path.', tags: 'Tags', tagHint: 'Separate with commas', recommendedPath: 'Suggested path', summary: 'Summary', summaryHint: 'Add a summary', reason: 'Why this folder', reasonHint: 'Add a reason', contentReady: 'Page content was read ($1 characters) and used for local classification.', contentFallback: 'No usable page content was read; this result uses the title, URL, and folder profiles.', aiReady: 'AI was used to verify a low-confidence or conflicting result.', localReady: 'Suggestions are based on local rules and folder profiles.', noRecommendation: 'Evidence is insufficient, so no folder was preselected.', retry: 'Analyze again', reject: 'Reject suggestion', rejected: 'Rejection recorded. Choose a folder manually or save without one.', high: 'High', medium: 'Medium', low: 'Low', confirm: 'Save bookmark', duplicateTitle: 'This page is already bookmarked', duplicateNote: 'This page is already in “$1” ($2). Move it to the current destination or keep a copy there.', copy: 'Keep a copy', move: 'Move here', saving: 'Saving...', saved: 'Saved', duplicateError: 'This page is already bookmarked.', saveFailed: 'Could not save: ', unknown: 'Unknown error', searchMatches: '$1 matching folders. Click a result or press Enter to select it.', searchHint: 'Choose from the list or search $1 existing folders'
       };
       const format = (text, ...values) => values.reduce((result, value, index) => result.replace(`$${index + 1}`, value), text);
+      const contentLength = String(panelState.contentText || '').trim().length;
+      const contentStatusText = contentLength >= 80
+        ? format(copy.contentReady, contentLength)
+        : copy.contentFallback;
       const localizeRootPath = (path) => {
         if (isChinese) return String(path || '');
         const rootNames = {
@@ -3658,6 +3697,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           #${ROOT_ID} .ab-destination-path{color:#1d1d1f;word-break:break-word}
           #${ROOT_ID} .ab-new-folder{display:${recommendedExists ? 'none' : 'block'};margin-top:8px}
           #${ROOT_ID} .ab-note{margin-top:12px;padding:10px 12px;border-radius:14px;background:${panelState.aiError ? 'rgba(255,59,48,.1)' : 'rgba(10,132,255,.1)'};color:${panelState.aiError ? '#c42b1c' : '#0756a8'};font-size:12px;line-height:1.45}
+          #${ROOT_ID} .ab-content-status{margin-top:12px;font-size:11px;line-height:1.45;color:${contentLength >= 80 ? '#188038' : '#9a6700'}}
           #${ROOT_ID} .ab-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
           #${ROOT_ID} button{border:0;border-radius:999px;padding:9px 16px;font:inherit;font-size:13px;font-weight:650;cursor:pointer;transition:.16s transform,.16s background,.16s opacity;min-height:36px}
           #${ROOT_ID} button:active{transform:scale(.98)} #${ROOT_ID} button:disabled{opacity:.55;cursor:not-allowed;transform:none}
@@ -3698,6 +3738,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
             <div class="ab-grid"><div><label>${copy.tags}</label><input id="abTagsInput" value="${esc(tags.join(', '))}" placeholder="${copy.tagHint}">${tagCandidateHtml ? `<div class="ab-tag-candidates" role="group" aria-label="${copy.tags}">${tagCandidateHtml}</div>` : ''}</div><div><label>${copy.recommendedPath}</label><input value="${esc(recommendedPath)}" disabled></div></div>
             <label>${copy.summary}</label><textarea id="abSummaryInput" placeholder="${copy.summaryHint}">${esc(panelState.summary || '')}</textarea>
             <label>${copy.reason}</label><textarea id="abReasonInput" placeholder="${copy.reasonHint}">${esc(panelState.reason || '')}</textarea>
+            <div class="ab-content-status">${esc(contentStatusText)}</div>
             <div class="ab-note">${esc(panelState.aiError || (panelState.aiAvailable ? copy.aiReady : (panelState.abstained ? copy.noRecommendation : copy.localReady)))}</div>
             <div class="ab-actions"><button class="ab-secondary" data-act="retry">${copy.retry}</button><button class="ab-secondary" data-act="reject">${copy.reject}</button><button class="ab-secondary" data-act="cancel">${copy.cancel}</button><button class="ab-primary" data-act="confirm">${copy.confirm}</button></div>
           `}
@@ -4092,17 +4133,6 @@ async function addSingleBookmark(id) {
       item.tags = pending.tags;
       item.tagsAuto = pending.tags;
     }
-    if (item.tags.length === 0 && typeof autoTagBookmark === 'function') {
-      try {
-        const localTags = normalizeTagList(
-          (await autoTagBookmark(item, { skipAI: true })).map(tag => tag.tag),
-        );
-        item.tags = localTags;
-        item.tagsAuto = localTags;
-      } catch (error) {
-        console.warn('Local bookmark tagging failed:', error);
-      }
-    }
     if (pending) {
       item.contentText = pending.contentText || '';
       item.contentTitle = pending.contentTitle || pending.title || '';
@@ -4116,6 +4146,17 @@ async function addSingleBookmark(id) {
       item.contentFailureReason = pending.contentFailureReason || '';
       item.contentSource = pending.contentSource || '';
     }
+    if (item.tags.length === 0 && typeof autoTagBookmark === 'function') {
+      try {
+        const localTags = normalizeTagList(
+          (await autoTagBookmark(item, { skipAI: true })).map(tag => tag.tag),
+        );
+        item.tags = localTags;
+        item.tagsAuto = localTags;
+      } catch (error) {
+        console.warn('Local bookmark tagging failed:', error);
+      }
+    }
 
     let duplicate = false;
     await mutateStoredBookmarks((existing) => {
@@ -4127,25 +4168,51 @@ async function addSingleBookmark(id) {
     let contentTask = Promise.resolve(item);
     if (!pending?.contentText && item.url) {
       contentTask = fetchBookmarkContent(item.url, { forceRefresh: false }).then(async (content) => {
+        const contentPatch = {
+          contentText: content.textContent || '',
+          contentTitle: content.title || item.contentTitle || '',
+          contentExcerpt: content.excerpt || '',
+          contentMetaDesc: content.metaDesc || '',
+          contentMetaKeywords: content.metaKeywords || [],
+          contentHeadings: content.headings || [],
+          contentStructuredTypes: content.structuredTypes || [],
+          contentFetchedAt: content.fetchedAt || Date.now(),
+          contentStatus: content.status || 'failed',
+          contentFailureReason: content.failureReason || '',
+          contentSource: content.source || '',
+        };
+        let refreshedLocalTags = null;
+        const hasExtractedPageSignals = contentPatch.contentText.length >= 80
+          || !!contentPatch.contentMetaDesc
+          || !!contentPatch.contentExcerpt
+          || contentPatch.contentMetaKeywords.length > 0
+          || contentPatch.contentHeadings.length > 0
+          || contentPatch.contentStructuredTypes.length > 0;
+        if (!pending && hasExtractedPageSignals && typeof autoTagBookmark === 'function') {
+          try {
+            refreshedLocalTags = normalizeTagList(
+              (await autoTagBookmark({ ...item, ...contentPatch }, { skipAI: true })).map(tag => tag.tag),
+            );
+          } catch (error) {
+            console.warn('Content-enriched local bookmark tagging failed:', error);
+          }
+        }
         let enrichedItem = item;
         await mutateStoredBookmarks((bookmarks) => bookmarks.map((stored) => {
           if (stored.id !== item.id && (stored.url !== item.url || stored.dateAdded !== item.dateAdded)) return stored;
           enrichedItem = {
             ...stored,
-            contentText: content.textContent || '',
-            contentTitle: content.title || stored.contentTitle || '',
-            contentExcerpt: content.excerpt || '',
-            contentMetaDesc: content.metaDesc || '',
-            contentMetaKeywords: content.metaKeywords || [],
-            contentHeadings: content.headings || [],
-            contentStructuredTypes: content.structuredTypes || [],
-            contentFetchedAt: content.fetchedAt || Date.now(),
-            contentStatus: content.status || 'failed',
-            contentFailureReason: content.failureReason || '',
-            contentSource: content.source || '',
+            ...contentPatch,
+            contentTitle: contentPatch.contentTitle || stored.contentTitle || '',
           };
+          if (refreshedLocalTags) {
+            Object.assign(enrichedItem, applyLocalAutoTags(stored.tags, stored.tagsAuto, refreshedLocalTags));
+          }
           return enrichedItem;
         }));
+        if (refreshedLocalTags) {
+          chrome.runtime.sendMessage({ action: 'tagsUpdated', bookmarkId: item.id }).catch(() => {});
+        }
         return enrichedItem;
       }).catch(err => {
         console.warn('Bookmark content backfill failed:', err);
@@ -6307,8 +6374,9 @@ async function suggestBookmarkFolder(url, title, suggestedTags, bookmarkContext 
     const folderOptions = await loadBookmarkFolderOptions().catch(() => []);
     const existingCandidates = scoreExistingFolderCandidates(folderOptions, suggestedTags, bookmarkEvidence);
     const stored = await getStoredBookmarks();
-    const historyCandidates = scoreHistoricalFolderCandidates(stored, suggestedTags, bookmarkEvidence, null, folderOptions);
-    const profileCandidates = scoreFolderProfileCandidates(stored, folderOptions, bookmarkEvidence, suggestedTags, null);
+    const folderMatchBookmarks = sampleFolderBookmarks(stored);
+    const historyCandidates = scoreHistoricalFolderCandidates(folderMatchBookmarks, suggestedTags, bookmarkEvidence, null, folderOptions);
+    const profileCandidates = scoreFolderProfileCandidates(folderMatchBookmarks, folderOptions, bookmarkEvidence, suggestedTags, null);
 
     const best = chooseBestBookmarkFolderCandidate([...historyCandidates, ...existingCandidates, ...profileCandidates]);
     if (best) return { id: best.id || await findFolderIdByPath(best.folderPath), title: best.folderName || best.title, path: best.folderPath || best.path };
@@ -6328,8 +6396,9 @@ async function suggestBookmarkFolderReadOnly(url, title, suggestedTags, bookmark
     const existingCandidates = scoreExistingFolderCandidates(folderOptions, suggestedTags, bookmarkEvidence);
 
     const stored = await getStoredBookmarks();
-    const historyCandidates = scoreHistoricalFolderCandidates(stored, suggestedTags, bookmarkEvidence, null, folderOptions);
-    const profileCandidates = scoreFolderProfileCandidates(stored, folderOptions, bookmarkEvidence, suggestedTags, null);
+    const folderMatchBookmarks = sampleFolderBookmarks(stored);
+    const historyCandidates = scoreHistoricalFolderCandidates(folderMatchBookmarks, suggestedTags, bookmarkEvidence, null, folderOptions);
+    const profileCandidates = scoreFolderProfileCandidates(folderMatchBookmarks, folderOptions, bookmarkEvidence, suggestedTags, null);
     const best = chooseBestBookmarkFolderCandidate([...historyCandidates, ...existingCandidates, ...profileCandidates]);
     if (best) return { id: best.id || await findFolderIdByPath(best.folderPath), title: best.folderName || best.title, path: best.folderPath || best.path };
 

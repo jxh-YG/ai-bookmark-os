@@ -122,7 +122,7 @@ export async function saveClassifyResult(result: ClassifyResult): Promise<void> 
 
 function retryMessage(attempt: number, maxRetries: number, delayMs: number, timeoutSeconds: number): string {
   const seconds = Number((delayMs / 1000).toFixed(1));
-  return `AI 连接失败，${seconds} 秒后重连（第 ${attempt}/${maxRetries} 次重连；单次超时 ${timeoutSeconds} 秒）`;
+  return `当前批次 AI 连接失败，${seconds} 秒后重连（该批次第 ${attempt}/${maxRetries} 次重连；单次连接超时 ${timeoutSeconds} 秒）`;
 }
 
 /** 是否参照原有书签夹（默认开启） */

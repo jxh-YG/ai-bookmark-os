@@ -41,7 +41,7 @@ try {
     return {
       status: 200,
       ok: true,
-      json: async () => ({ choices: [{ message: { content: 'OK' } }] }),
+      text: async () => JSON.stringify({ choices: [{ message: { content: 'OK' } }] }),
     };
   };
   const retries = [];
@@ -84,6 +84,25 @@ try {
   );
   assert.equal(calls, 1, '配置 0 次重连时超时后不得再次连接');
   assert.ok(timerDelays.includes(7000), '超时计时器应使用配置的 7 秒');
+
+  timerDelays.length = 0;
+  calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls += 1;
+    return {
+      status: 200,
+      ok: true,
+      text: () => new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new DOMException('body aborted', 'AbortError')), { once: true });
+      }),
+    };
+  };
+  await assert.rejects(
+    () => chat({ ...settings, aiRetryCount: 0, aiRequestTimeoutSeconds: 9 }, [{ role: 'user', content: 'test' }]),
+    /9 秒|timeout/i,
+  );
+  assert.equal(calls, 1, '响应头已返回但正文挂起时也必须受单次超时限制');
+  assert.ok(timerDelays.includes(9000), '正文读取阶段必须继续使用配置的超时计时器');
   assert.equal(getAiRetryCount({ ...settings, aiRetryCount: 2.6 }), 3, '运行时归一化应与设置页显示一致');
   assert.equal(getAiRequestTimeoutMs({ ...settings, aiRequestTimeoutSeconds: 7.6 }), 8000);
 } finally {

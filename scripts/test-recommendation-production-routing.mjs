@@ -77,7 +77,7 @@ const recommendationStart = background.indexOf('async function buildBookmarkReco
 const recommendationEnd = background.indexOf('async function reevaluateBookmarkRecommendations(', recommendationStart);
 const recommendationSource = background.slice(recommendationStart, recommendationEnd);
 assert.match(recommendationSource, /await autoTagBookmark\(bookmark, \{ skipAI: true \}\)/);
-assert.match(recommendationSource, /const folderMatchBookmarks = sampleFolderBookmarks\(storedBookmarks\)/, 'each recommendation must sample existing bookmarks per folder');
+assert.match(recommendationSource, /const folderMatchBookmarks = await hydrateFolderSamplesFromContentCache\(sampleFolderBookmarks\(samplePool\)\)/, 'each recommendation must sample existing bookmarks per folder and reuse cached content');
 assert.match(recommendationSource, /scoreFolderProfileCandidates\(folderMatchBookmarks,/, 'folder profiles must use the bounded sample');
 assert.doesNotMatch(recommendationSource, /autoTagBookmarkSync\s*\(/);
 assert.match(recommendationSource, /async function queueNewBookmarkRecommendation/);

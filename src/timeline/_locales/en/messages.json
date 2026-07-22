@@ -723,6 +723,14 @@
     "message": "Maximum wait time per AI request",
     "description": "AI timeout description"
   },
+  "aiRetryCount": {
+    "message": "Failure retries",
+    "description": "AI retry count label"
+  },
+  "aiRetryCountDesc": {
+    "message": "Retries after timeout, network errors, 408, 429, or server errors; the first request is not included",
+    "description": "AI retry count description"
+  },
   "aiStatus": {
     "message": "Status",
     "description": "AI status label"

@@ -100,6 +100,7 @@ const aiProviderSelect = document.getElementById('aiProviderSelect');
 const aiApiKeyInput = document.getElementById('aiApiKeyInput');
 const aiModelInput = document.getElementById('aiModelInput');
 const aiTimeoutInput = document.getElementById('aiTimeoutInput');
+const aiRetryCountInput = document.getElementById('aiRetryCountInput');
 const aiTestBtn = document.getElementById('aiTestBtn');
 const aiClearCacheBtn = document.getElementById('aiClearCacheBtn');
 const aiStatusDesc = document.getElementById('aiStatusDesc');
@@ -608,6 +609,7 @@ async function loadAISettings() {
       aiModelInput.placeholder = (ASSIST_PROVIDERS[provider] && ASSIST_PROVIDERS[provider].defaultModel) || 'agnes-2.0-flash';
     }
     aiTimeoutInput.value = String(cfg.timeout ?? 8);
+    if (aiRetryCountInput) aiRetryCountInput.value = String(Math.max(0, Math.min(5, Math.round(Number(cfg.retryCount ?? 2)))));
     if (aiAssistLogicToggle) aiAssistLogicToggle.checked = cfg.assistClassificationEnabled !== false;
     if (aiPageContentToggle) aiPageContentToggle.checked = cfg.allowPageContentForAi !== false;
     if (aiAssistPromptInput) aiAssistPromptInput.value = cfg.assistPrompt || DEFAULT_AI_ASSIST_PROMPT;
@@ -688,6 +690,7 @@ function buildAIConfigFromUI() {
     apiKey: aiApiKeyInput.value.trim(),
     model: aiModelInput.value.trim(),
     timeout: Math.max(3, Math.min(30, parseInt(aiTimeoutInput.value, 10) || 8)),
+    retryCount: Math.max(0, Math.min(5, parseInt(aiRetryCountInput?.value, 10) || 0)),
     customFormat: aiCustomFormatSelect ? aiCustomFormatSelect.value : 'openai',
     customEndpoint: aiCustomEndpointInput ? aiCustomEndpointInput.value.trim() : '',
     customFullUrl: !!(aiFullUrlToggle && aiFullUrlToggle.checked),
@@ -1339,6 +1342,9 @@ if (aiModelInput) {
 }
 if (aiTimeoutInput) {
   aiTimeoutInput.addEventListener('change', saveAIConfig);
+}
+if (aiRetryCountInput) {
+  aiRetryCountInput.addEventListener('change', saveAIConfig);
 }
 if (aiAssistLogicToggle) {
   aiAssistLogicToggle.addEventListener('change', saveAIConfig);
@@ -2455,6 +2461,67 @@ function extractTreeTestSample(style, payloadText) {
   }
 }
 
+function treeTestRetryDelayMs(attempt) {
+  return Math.min(30000, 1500 * (2 ** attempt));
+}
+
+function isRetryableTreeTestError(error) {
+  return error?.name === 'AbortError'
+    || error?.name === 'TimeoutError'
+    || error instanceof TypeError
+    || /timeout|超时|network|failed to fetch/i.test(String(error?.message || error || ''));
+}
+
+async function fetchTreeTestAttempt(req, timeoutMs) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    const response = await fetch(req.url, {
+      method: 'POST',
+      headers: req.headers,
+      body: JSON.stringify(req.body),
+      signal: controller.signal,
+    });
+    return { response, text: await response.text() };
+  } catch (error) {
+    if (timedOut) {
+      const timeoutError = new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+      timeoutError.name = 'TimeoutError';
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchTreeTestWithRetry(req, settings, onRetry) {
+  const timeoutMs = clampTreeNumber(settings.aiRequestTimeoutSeconds, DEFAULT_TREE_SETTINGS.aiRequestTimeoutSeconds, 5, 600) * 1000;
+  const maxRetries = clampTreeNumber(settings.aiRetryCount, DEFAULT_TREE_SETTINGS.aiRetryCount, 0, 20);
+  let lastResult = null;
+  let lastError = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await fetchTreeTestAttempt(req, timeoutMs);
+      lastResult = result;
+      const retryableStatus = result.response.status === 408 || result.response.status === 429 || result.response.status >= 500;
+      if (!retryableStatus || attempt >= maxRetries) return result;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableTreeTestError(error) || attempt >= maxRetries) throw error;
+    }
+    const delayMs = treeTestRetryDelayMs(attempt);
+    onRetry?.({ attempt: attempt + 1, maxRetries, delayMs, timeoutMs });
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  if (lastError) throw lastError;
+  return lastResult;
+}
+
 async function testTreeConnection() {
   if (!treeTestBtn) return;
 
@@ -2492,18 +2559,11 @@ async function testTreeConnection() {
   treeTestBtn.textContent = (typeof i18n === 'function' ? (i18n('aiTesting') || '测试中...') : '测试中...');
   setTreeStatus('测试中...');
 
-  const timeoutMs = clampTreeNumber(settings.aiRequestTimeoutSeconds, DEFAULT_TREE_SETTINGS.aiRequestTimeoutSeconds, 5, 600) * 1000;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
-    const res = await fetch(req.url, {
-      method: 'POST',
-      headers: req.headers,
-      body: JSON.stringify(req.body),
-      signal: controller.signal,
+    const { response: res, text } = await fetchTreeTestWithRetry(req, settings, (info) => {
+      const seconds = Number((info.delayMs / 1000).toFixed(1));
+      setTreeStatus(`连接失败，${seconds} 秒后重连（第 ${info.attempt}/${info.maxRetries} 次；单次超时 ${Math.round(info.timeoutMs / 1000)} 秒）`);
     });
-    const text = await res.text();
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${text.slice(0, 180)}`);
     }
@@ -2517,13 +2577,10 @@ async function testTreeConnection() {
       showToast(sample ? `连接成功：${sample.slice(0, 40)}` : '连接成功', 'success');
     }
   } catch (e) {
-    const readable = e && e.name === 'AbortError'
-      ? `请求超时（${Math.round(timeoutMs / 1000)} 秒）`
-      : ((e && e.message) || String(e));
+    const readable = (e && e.message) || String(e);
     setTreeStatus(`连接失败：${readable}`, 'err');
     if (typeof showToast === 'function') showToast(`连接失败：${readable}`, 'error');
   } finally {
-    clearTimeout(timeoutId);
     treeTestBtn.disabled = false;
     treeTestBtn.textContent = originalText || (typeof i18n === 'function' ? (i18n('aiTest') || '测试连接') : '测试连接');
   }

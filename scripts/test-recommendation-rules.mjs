@@ -262,6 +262,45 @@ assert.equal(autoTagBookmarkSync({
   domain: 'neutral.example',
   contentMetaDesc: '人工智能 大语言模型 机器学习 深度学习 Transformer RAG 智能体',
 })[0]?.tag, 'AI', '已保存的页面描述字段必须参与本地分类');
+
+const publicServiceBookmark = {
+  title: '模型公益服务',
+  url: 'https://neutral.example/public-service',
+  domain: 'neutral.example',
+  excerpt: '一个不盈利的公益站，免费开放全系模型，统一接口，让每个人都能平等使用。',
+  headings: ['模型公益站 畅用所有模型', '一个接口，接入所有模型', '最新动态', '面向开发者', '加入社区'],
+  contentText: [
+    '模型公益站 畅用所有模型',
+    '一个不盈利的公益站，免费开放全系模型，统一接口，让每个人都能平等使用。',
+    '全系模型免费开放，零成本使用。',
+    '面向开发者，使用 curl 和 Python SDK 三分钟接入应用，下面提供代码示例与 API 请求响应。',
+    '```bash curl https://neutral.example/v1/chat/completions```',
+    '```python from openai import OpenAI```',
+    '```javascript const client = new Client()```',
+    '加入社区，反馈与提问。',
+  ].join('\n'),
+};
+const publicServiceTagResults = Array.from(autoTagBookmarkSync(publicServiceBookmark), item => ({
+  tag: item.tag,
+  score: item.score,
+  signals: Array.from(item.signals || []),
+}));
+const publicServiceApiTag = publicServiceTagResults.find(item => item.tag === 'API');
+const publicServiceDevelopmentTag = publicServiceTagResults.find(item => item.tag === '开发');
+assert.ok(publicServiceApiTag, `统一接口服务应识别为 API，实际为 ${JSON.stringify(publicServiceTagResults)}`);
+assert.ok(
+  !publicServiceDevelopmentTag || publicServiceApiTag.score > publicServiceDevelopmentTag.score,
+  `后部代码示例不能让开发标签压过首屏接口服务主题：${JSON.stringify(publicServiceTagResults)}`,
+);
+assert.ok(
+  !publicServiceDevelopmentTag?.signals.includes('content-fingerprint:开发'),
+  '代码块必须得到至少两类首屏开发语义交叉支持后才能产生开发指纹',
+);
+assert.deepEqual(
+  Array.from(await autoTagBookmark(publicServiceBookmark, { skipAI: true }), item => item.tag),
+  publicServiceTagResults.map(item => item.tag),
+  '首屏正文降噪规则在异步和同步标签路径中必须一致',
+);
 context.classifyWithAI = async () => [{ tag: '法律', confidence: 1 }, { tag: '其他', confidence: 1 }];
 assert.equal((await autoTagBookmark(directTitle))[0]?.tag, '开发', 'AI 只能补充，不能改写直接本地分类');
 context.classifyWithAI = async () => [{ tag: '企业协同', confidence: 1 }, { tag: '24', confidence: 1 }];

@@ -727,6 +727,14 @@
     "message": "单次 AI 请求最大等待时间",
     "description": "AI 请求超时说明"
   },
+  "aiRetryCount": {
+    "message": "失败重连次数",
+    "description": "AI 重连次数标签"
+  },
+  "aiRetryCountDesc": {
+    "message": "仅在超时、网络错误、408、429 或服务端错误后重连，不包含首次请求",
+    "description": "AI 重连次数说明"
+  },
   "aiStatus": {
     "message": "状态",
     "description": "AI 状态标签"

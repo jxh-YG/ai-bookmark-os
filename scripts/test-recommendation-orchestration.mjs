@@ -11,10 +11,13 @@ let store = { rules: [] };
 let localTags = [];
 let aiConfig = { enabled: true, apiKey: 'test-key', assistClassificationEnabled: true };
 let aiResult = null;
+let aiFailure = null;
 let aiCalls = 0;
 let nextRecommendationId = 0;
 let existingFolderCandidates = [];
 let profileFolderCandidates = [];
+let sampleCalls = 0;
+let scoredSampleReferences = [];
 
 const context = {
   Array,
@@ -37,6 +40,7 @@ const context = {
   getCanonicalCategoryTerms: value => value === 'API' ? ['API', '接口'] : [value],
   getAIConfig: async () => aiConfig,
   getStoredBookmarks: async () => [],
+  hydrateFolderSamplesFromContentCache: async samples => samples,
   keywordMatchesWhole: (keyword, text) => text.split(/\s+/).includes(keyword),
   loadBookmarkFolderOptions: async () => [],
   isCanonicalCategoryTag: value => ['AI', 'API', '开发', '设计'].includes(value),
@@ -45,13 +49,29 @@ const context = {
   normalizeBookmarkFolderPath: path => String(path || '').split('/').map(part => part.trim()).filter(Boolean).join('/'),
   persistRecommendationSnapshot: async () => null,
   preloadSmartTaggerCaches: async () => undefined,
+  enqueueFolderSampleContentBackfill: async () => 0,
   scoreExistingFolderCandidates: () => existingFolderCandidates,
   scoreFolderPathEvidence: () => ({ score: 60, reasons: ['local-tag:ai'] }),
-  scoreFolderProfileCandidates: () => profileFolderCandidates,
-  scoreHistoricalFolderCandidates: () => [],
-  sampleFolderBookmarks: bookmarks => bookmarks,
+  collectBookmarkTokenWeights: bookmark => ({
+    pageContentUsed: String(bookmark?.contentText || '').trim().length >= 2,
+    pageFields: String(bookmark?.contentText || '').trim() ? ['page_body'] : [],
+  }),
+  getPageBodyFolderLeafMatches: (_path, features) => features.pageContentUsed ? ['ai'] : [],
+  scoreFolderProfileCandidates: samples => {
+    scoredSampleReferences.push(samples);
+    return profileFolderCandidates;
+  },
+  scoreHistoricalFolderCandidates: samples => {
+    scoredSampleReferences.push(samples);
+    return [];
+  },
+  sampleFolderBookmarks: bookmarks => {
+    sampleCalls += 1;
+    return bookmarks;
+  },
   suggestBookmarkWithAI: async () => {
     aiCalls += 1;
+    if (aiFailure) throw aiFailure;
     return aiResult;
   },
 };
@@ -78,15 +98,20 @@ store = {
   }],
 };
 aiCalls = 0;
+sampleCalls = 0;
+scoredSampleReferences = [];
 let recommendation = await context.buildBookmarkRecommendation(bookmark, {
   folderOptions: [{ id: 'folder-ai', title: 'AI', path: '工作/AI' }],
-  storedBookmarks: [],
+  storedBookmarks: [{ id: 'sample-1', folderPath: '工作/AI' }],
   persist: false,
 });
 assert.equal(recommendation.folders[0].confidence, 'high');
 assert.equal(recommendation.ai.triggered, false);
 assert.equal(recommendation.ai.reason, 'local_high_confidence');
 assert.equal(aiCalls, 0, '高置信已有目录不得调用 AI');
+assert.equal(sampleCalls, 1, '同一次推荐只能执行一次目录随机抽样');
+assert.ok(scoredSampleReferences.length >= 2);
+assert.ok(scoredSampleReferences.every(samples => samples === scoredSampleReferences[0]), '同一次推荐的历史与画像评分必须复用同一批样本');
 
 store = { rules: [] };
 localTags = [{ tag: 'AI', score: 30, confidence: 0.4, signals: ['domain'] }];
@@ -102,6 +127,18 @@ assert.equal(recommendation.ai.triggered, true);
 assert.equal(recommendation.ai.reason, 'new_folder_needed');
 assert.equal(recommendation.ai.status, 'unavailable');
 assert.equal(recommendation.tags[0].tag, 'AI', 'AI 无结果时应保留本地候选');
+
+aiFailure = new Error('AI 请求超时（3 秒）');
+aiCalls = 0;
+recommendation = await context.buildBookmarkRecommendation(bookmark, {
+  folderOptions: [],
+  storedBookmarks: [],
+  persist: false,
+});
+assert.equal(aiCalls, 1);
+assert.equal(recommendation.ai.status, 'failed');
+assert.equal(recommendation.ai.error, 'AI 请求超时（3 秒）');
+aiFailure = null;
 
 aiConfig = { enabled: false, apiKey: '', assistClassificationEnabled: true };
 aiCalls = 0;
@@ -130,11 +167,23 @@ recommendation = await context.buildBookmarkRecommendation(bookmark, {
 });
 assert.equal(aiCalls, 1);
 assert.equal(recommendation.ai.status, 'succeeded');
+assert.equal(recommendation.folders.length, 0, 'AI 摘要和理由不得自行形成新目录的独立高置信证据');
+
+aiCalls = 0;
+recommendation = await context.buildBookmarkRecommendation({
+  ...bookmark,
+  contentText: 'AI 模型目录与人工智能资料',
+}, {
+  folderOptions: [],
+  storedBookmarks: [],
+  persist: false,
+});
+assert.equal(aiCalls, 1);
 assert.equal(recommendation.folders[0].folderPath, '工作/AI');
 assert.equal(recommendation.folders[0].exists, false);
 assert.equal(recommendation.folders[0].confidence, 'high');
 assert.ok(recommendation.folders[0].positiveFamilies.includes('ai'));
-assert.ok(recommendation.folders[0].positiveFamilies.some(family => family !== 'ai'));
+assert.ok(recommendation.folders[0].positiveFamilies.includes('page_content'));
 
 aiConfig = { enabled: false, apiKey: '', assistClassificationEnabled: true };
 localTags = [{ tag: 'API', score: 30, confidence: 0.4, signals: ['domain'] }];

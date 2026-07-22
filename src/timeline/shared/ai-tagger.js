@@ -8,6 +8,10 @@ const AI_CACHE_KEY = 'ai_tag_cache';
 const AI_CACHE_VERSION = 2;
 const AI_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 天
 const AI_MAX_CACHE = 500;
+const AI_DEFAULT_RETRY_COUNT = 2;
+const AI_MAX_RETRY_COUNT = 5;
+const AI_RETRY_BASE_DELAY_MS = 1000;
+const AI_RETRY_MAX_DELAY_MS = 8000;
 
 const DEFAULT_AI_ASSIST_PROMPT = `你是 AI 书签辅助分类助手。请根据单个书签的标题、URL、域名、页面摘要、原文件夹和规则引擎候选标签，判断它最适合的用途与分类标签。
 
@@ -260,6 +264,7 @@ async function getAIConfig() {
     apiKey: '',
     model: '',
     timeout: 8,
+    retryCount: AI_DEFAULT_RETRY_COUNT,
     customFormat: 'openai',
     customEndpoint: '',
     customFullUrl: false,
@@ -274,6 +279,12 @@ async function getAIConfig() {
 
 function normalizeAIAssistPrompt(prompt) {
   return String(prompt || '').trim() || DEFAULT_AI_ASSIST_PROMPT;
+}
+
+function getAIAssistRetryCount(config) {
+  const value = Number(config?.retryCount ?? AI_DEFAULT_RETRY_COUNT);
+  if (!Number.isFinite(value)) return AI_DEFAULT_RETRY_COUNT;
+  return Math.min(AI_MAX_RETRY_COUNT, Math.max(0, Math.round(value)));
 }
 
 async function setAIConfig(config) {
@@ -548,7 +559,28 @@ function parseAIClassification(raw, validTags) {
 }
 
 // ===== 收藏前 AI 建议 =====
-function buildBookmarkSuggestionPrompt(bookmark, candidateTags, tagDescriptions, assistPrompt, folderOptions = [], allowPageContentForAi = true) {
+function prioritizeBookmarkFolderOptions(folderOptions, preferredFolderPaths) {
+  const preferred = new Map((Array.isArray(preferredFolderPaths) ? preferredFolderPaths : [])
+    .map(normalizeSuggestedFolderPath)
+    .filter(Boolean)
+    .map((path, index) => [path.toLowerCase(), index]));
+  return (Array.isArray(folderOptions) ? folderOptions : [])
+    .map((folder, index) => ({ folder, index, path: normalizeSuggestedFolderPath(folder?.path) }))
+    .filter(item => item.path)
+    .sort((left, right) => {
+      const leftRank = preferred.get(left.path.toLowerCase());
+      const rightRank = preferred.get(right.path.toLowerCase());
+      if (leftRank !== undefined || rightRank !== undefined) {
+        if (leftRank === undefined) return 1;
+        if (rightRank === undefined) return -1;
+        return leftRank - rightRank;
+      }
+      return left.index - right.index;
+    })
+    .map(item => ({ ...item.folder, path: item.path }));
+}
+
+function buildBookmarkSuggestionPrompt(bookmark, candidateTags, tagDescriptions, assistPrompt, folderOptions = [], allowPageContentForAi = true, preferredFolderPaths = []) {
   const tagList = Object.entries(tagDescriptions)
     .map(([tag, desc]) => `  ${tag}: ${desc}`)
     .join('\n');
@@ -568,9 +600,8 @@ Structured content types: ${pageSignals.types || '(not extracted)'}` : '';
   页面摘要: ${bookmark.metaDesc || bookmark.excerpt || bookmark.contentText || ''}
   页面正文摘录: ${readableBookmarkContent(bookmark)}` : '';
 
-  const existingFolders = (Array.isArray(folderOptions) ? folderOptions : [])
+  const existingFolders = prioritizeBookmarkFolderOptions(folderOptions, preferredFolderPaths)
     .map(folder => String(folder?.path || '').trim())
-    .filter(Boolean)
     .slice(0, 120)
     .map(path => `  - ${path}`)
     .join('\n') || '  （无）';
@@ -635,10 +666,11 @@ async function suggestBookmarkWithAI(bookmark, candidateTags, signals) {
   if (config.assistClassificationEnabled === false) return null;
 
   const resolved = resolveProvider(config);
-  if (!resolved) return null;
+  if (!resolved) throw new Error('AI 服务配置无效，请检查服务商、协议和接口地址');
 
   const tagDescriptions = typeof TAG_PROTOTYPES !== 'undefined' ? TAG_PROTOTYPES : {};
   const folderOptions = Array.isArray(signals?.folderOptions) ? signals.folderOptions : [];
+  const preferredFolderPaths = Array.isArray(signals?.preferredFolderPaths) ? signals.preferredFolderPaths : [];
   const prompt = buildBookmarkSuggestionPrompt(
     bookmark,
     candidateTags || [],
@@ -646,6 +678,7 @@ async function suggestBookmarkWithAI(bookmark, candidateTags, signals) {
     config.assistPrompt,
     folderOptions,
     config.allowPageContentForAi !== false,
+    preferredFolderPaths,
   );
   const body = resolved.buildBody(prompt, resolved.model);
   const timeoutMs = Math.max(3000, (config.timeout || 8) * 1000);
@@ -654,18 +687,15 @@ async function suggestBookmarkWithAI(bookmark, candidateTags, signals) {
 
   try {
     await updateAIStats({ totalTriggered: 1 });
-    const { ok, status, text } = await _doFetch(resolved.endpoint, resolved.buildHeaders(config.apiKey), body, timeoutMs);
+    const { ok, status, text } = await _requestAIWithRetry(
+      resolved.endpoint,
+      resolved.buildHeaders(config.apiKey),
+      body,
+      timeoutMs,
+      getAIAssistRetryCount(config),
+    );
     if (!ok) {
-      await updateAIStats({ failCount: 1 });
-      _logIfReady({
-        type: 'classify_fail',
-        provider: config.provider,
-        url: bookmark.url,
-        duration: Date.now() - startTime,
-        success: false,
-        error: `HTTP ${status}: ${text.slice(0, 160)}`
-      });
-      return null;
+      throw new Error(`AI 请求失败 (HTTP ${status}): ${text.slice(0, 160)}`);
     }
 
     let json;
@@ -673,16 +703,7 @@ async function suggestBookmarkWithAI(bookmark, candidateTags, signals) {
     const raw = json ? resolved.parseResponse(json) : text;
     const parsed = parseBookmarkSuggestion(raw, Object.keys(tagDescriptions));
     if (!parsed) {
-      await updateAIStats({ failCount: 1 });
-      _logIfReady({
-        type: 'classify_fail',
-        provider: config.provider,
-        url: bookmark.url,
-        duration: Date.now() - startTime,
-        success: false,
-        error: 'Could not parse pre-save suggestion'
-      });
-      return null;
+      throw new Error('AI 返回内容无法解析为收藏建议');
     }
 
     await updateAIStats({
@@ -708,9 +729,9 @@ async function suggestBookmarkWithAI(bookmark, candidateTags, signals) {
       url: bookmark.url,
       duration: Date.now() - startTime,
       success: false,
-      error: err?.name === 'AbortError' ? 'Request timeout' : (err?.message || 'Unknown error')
+      error: err?.message || 'AI 请求失败'
     });
-    return null;
+    throw err;
   } finally {
     release();
   }
@@ -778,7 +799,11 @@ function shouldTriggerAI(candidateTags, signals) {
 // ===== 统一 API 调用 =====
 async function _doFetch(endpoint, headers, body, timeoutMs) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   try {
     const resp = await fetch(endpoint, {
       method: 'POST',
@@ -786,12 +811,55 @@ async function _doFetch(endpoint, headers, body, timeoutMs) {
       body: JSON.stringify(body),
       signal: controller.signal
     });
-    clearTimeout(timeoutId);
-    return { ok: resp.ok, status: resp.status, text: await resp.text().catch(() => '') };
+    const text = await resp.text();
+    return { ok: resp.ok, status: resp.status, text };
   } catch (err) {
-    clearTimeout(timeoutId);
+    if (timedOut) {
+      const timeoutError = new Error(`AI 请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+      timeoutError.name = 'TimeoutError';
+      throw timeoutError;
+    }
     throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
+}
+
+function _isRetryableAIStatus(status) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function _isRetryableAIError(error) {
+  const name = String(error?.name || '');
+  const message = String(error?.message || error || '');
+  return name === 'AbortError'
+    || name === 'TimeoutError'
+    || error instanceof TypeError
+    || /timeout|超时|network|failed to fetch/i.test(message);
+}
+
+function _waitForAIRetry(delayMs) {
+  return new Promise(resolve => setTimeout(resolve, delayMs));
+}
+
+async function _requestAIWithRetry(endpoint, headers, body, timeoutMs, retryCount) {
+  const maxRetries = Math.min(AI_MAX_RETRY_COUNT, Math.max(0, Math.round(Number(retryCount) || 0)));
+  let lastResult = null;
+  let lastError = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await _doFetch(endpoint, headers, body, timeoutMs);
+      lastResult = result;
+      if (!_isRetryableAIStatus(result.status) || attempt >= maxRetries) return result;
+    } catch (error) {
+      lastError = error;
+      if (!_isRetryableAIError(error) || attempt >= maxRetries) throw error;
+    }
+    const delayMs = Math.min(AI_RETRY_MAX_DELAY_MS, AI_RETRY_BASE_DELAY_MS * (2 ** attempt));
+    await _waitForAIRetry(delayMs);
+  }
+  if (lastError) throw lastError;
+  return lastResult;
 }
 
 async function callAI(bookmark, candidateTags, tagDescriptions) {
@@ -816,7 +884,13 @@ async function callAI(bookmark, candidateTags, tagDescriptions) {
   const startTime = Date.now();
 
   try {
-    const { ok, status, text } = await _doFetch(resolved.endpoint, resolved.buildHeaders(config.apiKey), body, timeoutMs);
+    const { ok, status, text } = await _requestAIWithRetry(
+      resolved.endpoint,
+      resolved.buildHeaders(config.apiKey),
+      body,
+      timeoutMs,
+      getAIAssistRetryCount(config),
+    );
 
     if (!ok) {
       console.warn(`AI provider ${config.provider} error: HTTP ${status}`, text);
@@ -875,7 +949,7 @@ async function callAI(bookmark, candidateTags, tagDescriptions) {
 
     return parsed;
   } catch (err) {
-    const isTimeout = err.name === 'AbortError';
+    const isTimeout = err.name === 'AbortError' || err.name === 'TimeoutError';
     if (isTimeout) {
       console.warn('AI request timeout');
     } else {
@@ -956,7 +1030,13 @@ async function testAIConnection(config) {
   const timeoutMs = Math.max(3000, (config.timeout || 8) * 1000);
 
   try {
-    const { ok, status, text } = await _doFetch(resolved.endpoint, resolved.buildHeaders(config.apiKey), body, timeoutMs);
+    const { ok, status, text } = await _requestAIWithRetry(
+      resolved.endpoint,
+      resolved.buildHeaders(config.apiKey),
+      body,
+      timeoutMs,
+      getAIAssistRetryCount(config),
+    );
 
     if (!ok) {
       const snippet = text.slice(0, 300);
@@ -981,7 +1061,7 @@ async function testAIConnection(config) {
     }
     return { ok: true, model: actualModel, sampleTag: null, warning: 'Response received but no valid tags returned' };
   } catch (err) {
-    return { ok: false, error: err.name === 'AbortError' ? 'Request timeout' : err.message };
+    return { ok: false, error: err.name === 'AbortError' || err.name === 'TimeoutError' ? err.message || 'Request timeout' : err.message };
   }
 }
 

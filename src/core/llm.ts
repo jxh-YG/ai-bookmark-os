@@ -56,7 +56,7 @@ async function fetchWithTimeout(
   init: RequestInit,
   timeoutMs: number,
   outerSignal?: AbortSignal,
-): Promise<Response> {
+): Promise<{ ok: boolean; status: number; text: string }> {
   const ctrl = new AbortController();
   let timedOut = false;
   const timeout = setTimeout(() => {
@@ -66,7 +66,9 @@ async function fetchWithTimeout(
   const onAbort = () => ctrl.abort(outerSignal?.reason ?? new DOMException('已取消', 'AbortError'));
   outerSignal?.addEventListener('abort', onAbort, { once: true });
   try {
-    return await fetch(input, { ...init, signal: ctrl.signal });
+    const response = await fetch(input, { ...init, signal: ctrl.signal });
+    const text = await response.text();
+    return { ok: response.ok, status: response.status, text };
   } catch (e) {
     if (outerSignal?.aborted) throw e;
     if (timedOut || (e as Error).name === 'TimeoutError') {
@@ -201,7 +203,7 @@ export async function chat(
       }, timeoutMs, opts.signal);
 
       if (res.status === 408 || res.status === 429 || res.status >= 500) {
-        lastError = new Error(`API ${res.status}: ${await res.text().catch(() => '')}`);
+        lastError = new Error(`API ${res.status}: ${res.text}`);
         if (attempt < maxRetries) {
           const delayMs = retryDelayMs(attempt);
           opts.onRetry?.({ attempt: attempt + 1, maxRetries, delayMs, reason: lastError.message });
@@ -210,10 +212,15 @@ export async function chat(
         continue;
       }
       if (!res.ok) {
-        throw new Error(`API 请求失败 (${res.status}): ${await res.text().catch(() => '')}`);
+        throw new Error(`API 请求失败 (${res.status}): ${res.text}`);
       }
 
-      const data = await res.json();
+      let data: any;
+      try {
+        data = JSON.parse(res.text);
+      } catch {
+        throw new Error('API 返回的 JSON 格式无效');
+      }
       let content = normalizeMessageContent(spec.extract(data));
       // 部分兼容网关把文本放在 output / result / data 字段
       if (!content) {

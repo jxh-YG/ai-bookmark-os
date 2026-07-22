@@ -1,7 +1,7 @@
 'use strict';
 
 (function exposeRecommendationCore(root) {
-  const RULE_VERSION = 'bookmark-recommendation-v2';
+  const RULE_VERSION = 'bookmark-recommendation-v3';
   const CONFIDENCE_THRESHOLDS = Object.freeze({
     high: 0.78,
     medium: 0.58,
@@ -13,8 +13,11 @@
     user_rule: 1,
     curated_domain: 0.90,
     learned_rule: 0.85,
+    folder_sample: 0.75,
     history_profile: 0.70,
     folder_leaf: 0.70,
+    page_content: 0.65,
+    folder_name: 0.50,
     domain_path: 0.65,
     domain: 0.40,
     title_metadata: 0.35,
@@ -89,13 +92,40 @@
     return `folder:${path ? path.toLowerCase() : id}`;
   }
 
+  function mergeLocalEvidence(left, right) {
+    if (!left && !right) return undefined;
+    const values = [left, right].filter(Boolean);
+    return {
+      pageContentUsed: values.some(item => item.pageContentUsed === true),
+      pageFields: [...new Set(values.flatMap(item => item.pageFields || []))],
+      matchedTerms: [...new Set(values.flatMap(item => item.matchedTerms || []))].slice(0, 8),
+      sampledCount: Math.max(0, ...values.map(item => Number(item.sampledCount) || 0)),
+      contentSampleCount: Math.max(0, ...values.map(item => Number(item.contentSampleCount) || 0)),
+      matchedSampleCount: Math.max(0, ...values.map(item => Number(item.matchedSampleCount) || 0)),
+      matchedSampleTitles: [...new Set(values.flatMap(item => item.matchedSampleTitles || []))].filter(Boolean).slice(0, 3),
+      folderNameMatched: values.some(item => item.folderNameMatched === true),
+    };
+  }
+
   function confidenceFor(support, margin, positiveFamilies, options = {}) {
     const families = new Set(positiveFamilies || []);
     const explicit = families.has('user_rule') || families.has('curated_domain');
+    const learned = families.has('learned_rule');
     const independent = [...families].filter(family => family !== 'ai').length;
+    const candidate = options.candidate;
+    const localEvidence = candidate?.localEvidence;
+    const localHighConfidenceEligible = candidate?.kind === 'tag'
+      || explicit
+      || learned
+      || families.has('ai')
+      || !!(localEvidence?.pageContentUsed && (
+        localEvidence.folderNameMatched
+        || Number(localEvidence.matchedSampleCount || 0) >= 2
+      ));
     if (support >= CONFIDENCE_THRESHOLDS.high
       && margin >= CONFIDENCE_THRESHOLDS.highMargin
-      && (explicit || independent >= 2 || (families.has('ai') && independent >= 1))) return 'high';
+      && localHighConfidenceEligible
+      && (explicit || learned || independent >= 2 || (families.has('ai') && independent >= 1))) return 'high';
     if (support >= CONFIDENCE_THRESHOLDS.medium
       && margin >= CONFIDENCE_THRESHOLDS.mediumMargin) return 'medium';
     if (support >= CONFIDENCE_THRESHOLDS.low) return 'low';
@@ -119,6 +149,7 @@
       current.path = current.path || raw.path || raw.folderPath || '';
       current.folderPath = current.folderPath || raw.folderPath || raw.path || '';
       current.exists = current.exists || !!raw.exists;
+      current.localEvidence = mergeLocalEvidence(current.localEvidence, raw.localEvidence);
       current.evidence.push(...(Array.isArray(raw.evidence) ? raw.evidence : []));
       current.reasons.push(...(Array.isArray(raw.reasons) ? raw.reasons : []));
       if (raw.source) current.sources.push(String(raw.source));
@@ -153,7 +184,7 @@
       const nextSupport = limited[index + 1]?.support || 0;
       const margin = Math.max(0, candidate.support - nextSupport);
       const confidence = index === 0
-        ? confidenceFor(candidate.support, margin, candidate.positiveFamilies)
+        ? confidenceFor(candidate.support, margin, candidate.positiveFamilies, { candidate })
         : (candidate.support >= CONFIDENCE_THRESHOLDS.medium ? 'medium' : 'low');
       return { ...candidate, rank: index + 1, margin, confidence };
     });

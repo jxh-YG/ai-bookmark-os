@@ -75,7 +75,7 @@ Chrome 114 或更高版本可用。先按以下两种来源之一确定“要选
 
 ### 方式 A：使用 GitHub Release 扩展包（推荐）
 
-1. 在 [v1.0.4 Release](https://github.com/jxh-YG/ai-bookmark-os/releases/tag/v1.0.4) 下载 `ai-bookmark-os-v1.0.4-chrome-extension.zip`。
+1. 在 [v1.0.5 Release](https://github.com/jxh-YG/ai-bookmark-os/releases/tag/v1.0.5) 下载 `ai-bookmark-os-v1.0.5-chrome-extension.zip`。
 2. 将 ZIP **完整解压**到任意本地文件夹。
 3. 在解压结果中找到直接包含 `manifest.json`、`background/`、`pages/`、`ai/` 和 `icons/` 的文件夹；**这个解压后的根文件夹就是要加载的扩展目录**。
 

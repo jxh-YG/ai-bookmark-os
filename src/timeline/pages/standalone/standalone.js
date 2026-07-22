@@ -358,6 +358,21 @@ async function refreshBookmarkData({ keepFilter = true } = {}) {
   filterBookmarks(saSearchInput.value);
 }
 
+let focusRefreshInFlight = null;
+let lastFocusRefreshAt = 0;
+function refreshBookmarkDataOnFocus() {
+  if (document.hidden || Date.now() - lastFocusRefreshAt < 1000) return;
+  if (!focusRefreshInFlight) {
+    lastFocusRefreshAt = Date.now();
+    focusRefreshInFlight = refreshBookmarkData({ keepFilter: true })
+      .catch(() => {})
+      .finally(() => { focusRefreshInFlight = null; });
+  }
+}
+
+window.addEventListener('focus', refreshBookmarkDataOnFocus);
+document.addEventListener('visibilitychange', refreshBookmarkDataOnFocus);
+
 async function syncAll() {
   saSyncBtn.classList.add('spinning');
   try {
@@ -1149,11 +1164,9 @@ document.addEventListener('click', (e) => {
       const { id, url, title } = bookmarkMenuEl._context;
       if (action === 'open') {
         chrome.tabs.create({ url });
-        chrome.runtime.sendMessage({ action: 'recordClick', url }).catch(() => {});
       } else if (action === 'openInWindow') {
         if (!openBookmarkInWindow(url, title)) {
           chrome.tabs.create({ url });
-          chrome.runtime.sendMessage({ action: 'recordClick', url }).catch(() => {});
         }
       } else if (action === 'edit') {
         const bookmark = allBookmarks.find(b => b.id === id);
@@ -1194,7 +1207,6 @@ saContent.addEventListener('click', (e) => {
   // Ctrl/Cmd+Click: 在新标签页打开
   if (e.ctrlKey || e.metaKey) {
     chrome.tabs.create({ url });
-    chrome.runtime.sendMessage({ action: 'recordClick', url }).catch(() => {});
     return;
   }
 
@@ -1203,7 +1215,6 @@ saContent.addEventListener('click', (e) => {
 
   // MDI 未启用，在新标签页打开
   chrome.tabs.create({ url });
-  chrome.runtime.sendMessage({ action: 'recordClick', url }).catch(() => {});
 });
 
 // 中键点击：始终在新标签页打开
@@ -1213,7 +1224,6 @@ saContent.addEventListener('auxclick', (e) => {
   if (!itemEl) return;
   e.preventDefault();
   chrome.tabs.create({ url: itemEl.dataset.url });
-  chrome.runtime.sendMessage({ action: 'recordClick', url: itemEl.dataset.url }).catch(() => {});
 });
 
 // Favicon 错误处理
@@ -2339,7 +2349,6 @@ function openBookmarkInWindow(url, title) {
   let faviconUrl = '';
   try { faviconUrl = new URL(url).origin + '/favicon.ico'; } catch {}
   mdiManager.openWindow(url, title || url, faviconUrl);
-  chrome.runtime.sendMessage({ action: 'recordClick', url }).catch(() => {});
   return true;
 }
 

@@ -806,6 +806,16 @@
 
           <div class="setting-row">
             <div class="setting-main">
+              <div class="setting-label" data-i18n="aiRetryCount">Failure retries</div>
+              <div class="setting-desc" data-i18n="aiRetryCountDesc">Retries after timeout, network errors, 408, 429, or server errors; the first request is not included</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" id="aiRetryCountInput" class="tagrule-input" style="width: 80px;" min="0" max="5" value="2">
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-main">
               <div class="setting-label">启用 AI 辅助分类逻辑</div>
               <div class="setting-desc">控制低置信度 AI 标签增强与收藏前 AI 分类建议。关闭后仍保留本地规则分类与手动确认流程。</div>
             </div>

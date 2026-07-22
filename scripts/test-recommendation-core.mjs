@@ -7,13 +7,16 @@ vm.createContext(context);
 vm.runInContext(readFileSync('src/timeline/shared/recommendation-core.js', 'utf8'), context);
 const core = context.BookmarkRecommendationCore;
 
-assert.equal(core.RULE_VERSION, 'bookmark-recommendation-v2');
+assert.equal(core.RULE_VERSION, 'bookmark-recommendation-v3');
 assert.deepEqual({ ...core.EVIDENCE_RELIABILITY }, {
   user_rule: 1,
   curated_domain: 0.90,
   learned_rule: 0.85,
+  folder_sample: 0.75,
   history_profile: 0.70,
   folder_leaf: 0.70,
+  page_content: 0.65,
+  folder_name: 0.50,
   domain_path: 0.65,
   domain: 0.40,
   title_metadata: 0.35,
@@ -67,7 +70,41 @@ assert.equal(curatedDomain[0].confidence, 'high');
 const learnedDomain = core.rankCandidates([
   { kind: 'tag', tag: 'AI', evidence: [{ family: 'learned_rule', strength: 1 }] },
 ]);
-assert.equal(learnedDomain[0].confidence, 'medium');
+assert.equal(learnedDomain[0].confidence, 'high');
+
+const unconfirmedContent = core.rankCandidates([{
+  kind: 'folder',
+  folderId: 'folder-content-only',
+  folderPath: 'AI/API中转',
+  exists: true,
+  localEvidence: {
+    pageContentUsed: true,
+    matchedSampleCount: 0,
+    folderNameMatched: false,
+  },
+  evidence: [
+    { family: 'folder_sample', strength: 1 },
+    { family: 'page_content', strength: 1 },
+  ],
+}]);
+assert.notEqual(unconfirmedContent[0].confidence, 'high', '正文未与目录名或至少两条样本交叉印证时不得高置信预选');
+
+const confirmedContent = core.rankCandidates([{
+  kind: 'folder',
+  folderId: 'folder-confirmed-content',
+  folderPath: 'AI/API中转',
+  exists: true,
+  localEvidence: {
+    pageContentUsed: true,
+    matchedSampleCount: 2,
+    folderNameMatched: false,
+  },
+  evidence: [
+    { family: 'folder_sample', strength: 1 },
+    { family: 'page_content', strength: 1 },
+  ],
+}]);
+assert.equal(confirmedContent[0].confidence, 'high', '正文与至少两条目录样本匹配时允许高置信预选');
 
 const highLocal = { folders: explicit, tags: [] };
 assert.deepEqual({ ...core.shouldTriggerAI(highLocal) }, { trigger: false, reason: 'local_high_confidence' });

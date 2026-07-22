@@ -464,7 +464,8 @@ const KEYWORD_TAG_MAP = {
            '私域', '公域', '流量', '涨粉', '变现'],
   '文章': ['article', 'blog post', 'longform', '专栏文章', '技术文章', '深度报道'],
   '项目': ['repository', 'source code', 'open source project', '代码仓库', '开源项目', '项目主页'],
-  'API': ['api', 'api reference', 'sdk reference', 'endpoint', '接口文档', '开发接口', 'webhook'],
+  'API': ['api', 'api reference', 'sdk reference', 'api gateway', 'endpoint', '接口文档',
+          '开发接口', '统一接口', '接口服务', '接口网关', 'webhook'],
   '学习': ['course', 'lesson', 'curriculum', '学习', '课程', '课堂', '练习题', '在线教育'],
   '教程': ['tutorial', 'how to', 'getting started', 'quickstart', '教程', '入门指南', '操作步骤'],
   '文档': ['documentation', 'manual', 'reference guide', '文档', '手册', '知识库', '帮助中心'],
@@ -1131,6 +1132,7 @@ function hasDirectLocalSignal(signals, tag) {
     s.startsWith('semantic-title:') ||
     s.startsWith('semantic-summary:') ||
     s.startsWith('semantic-url:') ||
+    s.startsWith('content-lead-keyword:') ||
     s.startsWith('regex:') ||
     s.startsWith('keyword:') ||
     s.startsWith('ngram:')
@@ -1423,14 +1425,42 @@ function extractPageFingerprintFromText(text) {
   return { leadingText, codeBlocks, images, tables, headings, techStack };
 }
 
-function extractTagsFromPageContent(contentText) {
-  const text = String(contentText || '').replace(/\s+/g, ' ').trim().slice(0, 1500);
-  if (text.length < 80) return [];
-  const qualityFactor = Math.min(1, Math.max(0.5, text.length / 800));
-  return extractTagsFromTitle(text)
-    .slice(0, 2)
-    .map(item => ({ tag: item.tag, score: Math.min(item.score, 18) * qualityFactor }))
-    .filter(item => item.score >= 4);
+function buildSalientPageText(bookmark, fingerprint, headings) {
+  const pageLead = [
+    bookmark?.excerpt || bookmark?.contentExcerpt || '',
+    bookmark?.metaDesc || bookmark?.contentMetaDesc || '',
+    bookmark?.ogDescription || '',
+    ...(headings || []).slice(0, 2),
+  ].map(value => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const values = [
+    cleanTitle(bookmark?.title || ''),
+    ...pageLead,
+    pageLead.length === 0 ? String(fingerprint?.leadingText || '').slice(0, 500) : '',
+  ].filter(Boolean);
+  return [...new Set(values)].join(' ').slice(0, 1800);
+}
+
+function extractTagsFromPageContent(contentText, salientText = '') {
+  const bodyText = String(contentText || '').replace(/\s+/g, ' ').trim().slice(0, 1500);
+  const leadText = String(salientText || bodyText).replace(/\s+/g, ' ').trim().slice(0, 1200);
+  if (Math.max(bodyText.length, leadText.length) < 80) return [];
+
+  const scores = new Map();
+  const qualityFactor = Math.min(1, Math.max(0.75, leadText.length / 800));
+  for (const item of extractTagsFromTitle(leadText).slice(0, 2)) {
+    scores.set(item.tag, { score: Math.min(item.score, 18) * qualityFactor, source: 'lead' });
+  }
+
+  // 正文后部只提供弱补充，避免代码示例、页脚和次要功能压过首屏主题。
+  for (const item of extractTagsFromTitle(bodyText).slice(0, 2)) {
+    if (scores.has(item.tag)) continue;
+    scores.set(item.tag, { score: Math.min(item.score * 0.25, 4.5) * qualityFactor, source: 'body' });
+  }
+
+  return [...scores]
+    .map(([tag, item]) => ({ tag, ...item }))
+    .filter(item => item.score >= 3)
+    .sort((left, right) => right.score - left.score);
 }
 
 // ===== 标签原型 BM25 语义匹配 =====
@@ -1468,11 +1498,19 @@ function computePrototypeBm25Scores(text, prototypes) {
 }
 
 // ===== 内容指纹信号评分 =====
-function scoreContentFingerprint(fingerprint) {
+function scoreContentFingerprint(fingerprint, salientText = '') {
   const scores = {};
   const { codeBlocks, images, tables, techStack, leadingText } = fingerprint;
-  if (codeBlocks >= 3) scores['开发'] = (scores['开发'] || 0) + 10;
-  else if (codeBlocks >= 1) scores['开发'] = (scores['开发'] || 0) + 4;
+  const developmentPatterns = [
+    /(开发者|developer|programmer)/i,
+    /(编程|programming|source code|源码|代码仓库|repository)/i,
+    /(框架|framework|library|组件库)/i,
+    /(调试|debug|编译|build|部署|deploy)/i,
+    /(教程|指南|documentation|quickstart|getting started)/i,
+  ];
+  const developmentContext = developmentPatterns.filter(pattern => pattern.test(salientText)).length >= 2;
+  if (developmentContext && codeBlocks >= 3) scores['开发'] = (scores['开发'] || 0) + 4;
+  else if (developmentContext && codeBlocks >= 1) scores['开发'] = (scores['开发'] || 0) + 2;
 
   if (images >= 10 && codeBlocks === 0) scores['设计'] = (scores['设计'] || 0) + 6;
   if (tables >= 2) {
@@ -1481,11 +1519,13 @@ function scoreContentFingerprint(fingerprint) {
   }
   if (techStack.includes('academic')) scores['学术'] = (scores['学术'] || 0) + 12;
   if (techStack.includes('ai')) scores['AI'] = (scores['AI'] || 0) + 8;
-  if (techStack.includes('github')) scores['开发'] = (scores['开发'] || 0) + 6;
+  if (techStack.includes('github') && /(github|代码仓库|repository|开源项目)/i.test(salientText)) {
+    scores['开发'] = (scores['开发'] || 0) + 4;
+  }
 
   if (leadingText) {
     const tutorialRe = /(教程|指南|入门|快速开始|quickstart|getting started|how to|step by step|step-by-step|最佳实践|实战)/i;
-    const docRe = /(文档|documentation|reference|manual|api|sdk|手册)/i;
+    const docRe = /(文档|documentation|reference(?:\s+guide)?|manual|手册|api\s+(?:docs?|documentation|reference)|sdk\s+(?:docs?|documentation|reference))/i;
     const newsRe = /(新闻|news|报道|快讯|融资|发布|宣布|收购|财报|资讯)/i;
     if (tutorialRe.test(leadingText)) scores['教程'] = (scores['教程'] || 0) + 8;
     if (docRe.test(leadingText)) scores['文档'] = (scores['文档'] || 0) + 6;
@@ -2037,7 +2077,8 @@ async function autoTagBookmark(bookmark, options = {}) {
     ? extractPageFingerprintFromText(contentText)
     : (bookmark.html ? extractPageFingerprintFromHtml(bookmark.html) : extractPageFingerprintFromText(''));
   const headings = [...new Set([...(fingerprint.headings || []), ...extractedHeadings])];
-  for (const summary of [metaDesc, excerpt, ogDescription, ...headings]) {
+  const salientContentText = buildSalientPageText(bookmark, fingerprint, headings);
+  for (const summary of [metaDesc, excerpt, ogDescription, ...headings.slice(0, 2)]) {
     for (const { tag, score, signal } of extractLocalSemanticTags(summary)) {
       addScore(tag, score * 0.8, signal.replace('semantic-title:', 'semantic-summary:'));
     }
@@ -2047,11 +2088,7 @@ async function autoTagBookmark(bookmark, options = {}) {
     cleanTitle(bookmark.title || ''),
     bookmark.url || '',
     bookmark.domain || '',
-    metaDesc,
-    excerpt,
-    ogDescription,
-    fingerprint.leadingText,
-    ...headings,
+    salientContentText,
     ...metaKeywords,
     ...structuredTypes
   ].filter(Boolean).join(' ');
@@ -2064,13 +2101,14 @@ async function autoTagBookmark(bookmark, options = {}) {
   const contentDamp = anyStrongSignal ? 0.3 : 1.0;
 
   // Layer 4.5: 内容指纹信号（代码块、图片、表格、技术栈、体裁）
-  const fingerprintScores = scoreContentFingerprint(fingerprint);
+  const fingerprintScores = scoreContentFingerprint(fingerprint, salientContentText);
   for (const [tag, score] of Object.entries(fingerprintScores)) {
     addScore(tag, score * contentDamp, `content-fingerprint:${tag}`);
   }
 
-  for (const { tag, score } of extractTagsFromPageContent(contentText)) {
-    addScore(tag, score * contentDamp, `content-keyword:${tag}`);
+  for (const { tag, score, source } of extractTagsFromPageContent(contentText, salientContentText)) {
+    const signal = source === 'lead' ? `content-lead-keyword:${tag}` : `content-keyword:${tag}`;
+    addScore(tag, score * contentDamp, signal);
   }
 
   // Layer 4.6: meta description 关键词命中（仅保留前两名，避免噪声扩散）
@@ -2152,7 +2190,7 @@ async function autoTagBookmark(bookmark, options = {}) {
     const baseTop1Score = baseTop1 ? baseTop1[1] : 0;
     const needContent = !hasDomainRule || !baseTop1Strong || baseTop1Score < 40;
     if (needContent) {
-      const contentSnippet = contentText.slice(0, 1500);
+      const contentSnippet = salientContentText.slice(0, 1200);
       const contentFull = `${cleanTitle(bookmark.title || '')} ${metaDesc} ${contentSnippet} ${bookmark.url || ''} ${bookmark.domain || ''}`;
       const contentTfIdf = computeTfIdfScores(contentFull, df, totalDocs, totalTokenLen);
       const qualityFactor = Math.min(contentText.length / 800, 1); // 短正文降权，800字以上才满权
@@ -2316,7 +2354,8 @@ function autoTagBookmarkSync(bookmark) {
     ? extractPageFingerprintFromText(contentText)
     : (bookmark.html ? extractPageFingerprintFromHtml(bookmark.html) : extractPageFingerprintFromText(''));
   const headings = [...new Set([...(fingerprint.headings || []), ...extractedHeadings])];
-  for (const summary of [metaDesc, excerpt, ogDescription, ...headings]) {
+  const salientContentText = buildSalientPageText(bookmark, fingerprint, headings);
+  for (const summary of [metaDesc, excerpt, ogDescription, ...headings.slice(0, 2)]) {
     for (const { tag, score, signal } of extractLocalSemanticTags(summary)) {
       addScore(tag, score * 0.8, signal.replace('semantic-title:', 'semantic-summary:'));
     }
@@ -2326,11 +2365,7 @@ function autoTagBookmarkSync(bookmark) {
     cleanTitle(bookmark.title || ''),
     bookmark.url || '',
     bookmark.domain || '',
-    metaDesc,
-    excerpt,
-    ogDescription,
-    fingerprint.leadingText,
-    ...headings,
+    salientContentText,
     ...metaKeywords,
     ...structuredTypes
   ].filter(Boolean).join(' ');
@@ -2343,13 +2378,14 @@ function autoTagBookmarkSync(bookmark) {
   const contentDamp = anyStrongSignal ? 0.3 : 1.0;
 
   // Layer 4.5: 内容指纹信号（代码块、图片、表格、技术栈、体裁）
-  const fingerprintScores = scoreContentFingerprint(fingerprint);
+  const fingerprintScores = scoreContentFingerprint(fingerprint, salientContentText);
   for (const [tag, score] of Object.entries(fingerprintScores)) {
     addScore(tag, score * contentDamp, `content-fingerprint:${tag}`);
   }
 
-  for (const { tag, score } of extractTagsFromPageContent(contentText)) {
-    addScore(tag, score * contentDamp, `content-keyword:${tag}`);
+  for (const { tag, score, source } of extractTagsFromPageContent(contentText, salientContentText)) {
+    const signal = source === 'lead' ? `content-lead-keyword:${tag}` : `content-keyword:${tag}`;
+    addScore(tag, score * contentDamp, signal);
   }
 
   // Layer 4.6: meta description 关键词命中（仅保留前两名，避免噪声扩散）
@@ -2387,7 +2423,7 @@ function autoTagBookmarkSync(bookmark) {
       const baseTop1Score = baseTop1 ? baseTop1[1] : 0;
       const needContent = !hasDomainRule || !baseTop1Strong || baseTop1Score < 40;
       if (needContent) {
-        const contentSnippet = contentText.slice(0, 1500);
+        const contentSnippet = salientContentText.slice(0, 1200);
         const contentFull = `${cleanTitle(bookmark.title || '')} ${metaDesc} ${contentSnippet} ${bookmark.url || ''} ${bookmark.domain || ''}`;
         const contentTfIdf = computeTfIdfScores(contentFull, _docFreqCache, _totalDocsCache, _totalTokenLenCache);
         const qualityFactor = Math.min(contentText.length / 800, 1);

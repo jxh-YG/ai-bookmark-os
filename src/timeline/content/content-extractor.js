@@ -64,6 +64,17 @@
       .filter(Boolean);
   }
 
+  function extractLeadExcerpt(root) {
+    const container = root || document.body;
+    const blocks = [...(container?.querySelectorAll?.('h1,h2,h3,p') || [])]
+      .map(node => ({ tag: node.tagName?.toLowerCase() || '', text: normalizeText(node.innerText || '') }))
+      .filter(item => item.text.length >= 2);
+    const firstHeading = blocks.findIndex(item => /^h[1-3]$/.test(item.tag));
+    const candidates = firstHeading >= 0 ? blocks.slice(firstHeading + 1) : blocks;
+    const paragraph = candidates.find(item => item.tag === 'p' && item.text.length >= 20 && item.text.length <= 500);
+    return paragraph?.text || '';
+  }
+
   function extractStructuredTypes() {
     const types = [];
     for (const node of document.querySelectorAll('script[type="application/ld+json"]')) {
@@ -99,10 +110,12 @@
         .map(value => normalizeText(value))
         .filter(Boolean)
         .slice(0, 20);
-      const headings = [...document.querySelectorAll('article h1, article h2, article h3, main h1, main h2, main h3, [role="main"] h1, [role="main"] h2, [role="main"] h3')]
+      const contentRoot = document.querySelector('article, main, [role="main"]') || document.body;
+      const headings = [...(contentRoot?.querySelectorAll('h1,h2,h3') || [])]
         .map(node => normalizeText(node.innerText || node.textContent || ''))
         .filter(text => text.length >= 2)
         .slice(0, 20);
+      const leadExcerpt = extractLeadExcerpt(contentRoot);
       const structuredTypes = extractStructuredTypes();
       const doc = cloneReadableDocument();
       const article = typeof Readability === 'function' ? new Readability(doc).parse() : null;
@@ -110,7 +123,7 @@
       const fallbackText = normalizeText(document.querySelector('article, main, [role="main"]')?.innerText || document.body?.innerText || '');
       const textContent = normalizeText(articleText || article?.textContent || fallbackText);
       const title = article?.title || document.querySelector('meta[property="og:title"]')?.content || document.title || '';
-      const excerpt = article?.excerpt || metaDesc || textContent.slice(0, 240);
+      const excerpt = leadExcerpt || article?.excerpt || metaDesc || textContent.slice(0, 240);
       const status = textContent.length >= 80 ? 'success' : (bodyTextLength() > 0 ? 'empty' : 'failed');
       const failureReason = status === 'success'
         ? ''

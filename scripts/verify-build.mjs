@@ -213,7 +213,8 @@ if (/BookmarkPilot|Markline/i.test(popup)) {
 }
 
 // Full smart tagger
-const taggerSize = readFileSync(join(dist, 'shared/smart-tagger.js')).length;
+const smartTaggerJs = readFileSync(join(dist, 'shared/smart-tagger.js'), 'utf8');
+const taggerSize = smartTaggerJs.length;
 console.log('smart-tagger bytes', taggerSize);
 if (taggerSize < 50000) {
   console.error('smart-tagger looks truncated');
@@ -291,6 +292,8 @@ if (!popupJsFull.includes('window.close()')) {
 const settingsHtml = readFileSync(join(dist, 'pages/settings/settings.html'), 'utf8');
 const settingsJs = readFileSync(join(dist, 'pages/settings/settings.js'), 'utf8');
 const settingsCss = readFileSync(join(dist, 'pages/settings/settings.css'), 'utf8');
+const assistAiJs = readFileSync(join(dist, 'shared/ai-tagger.js'), 'utf8');
+const backgroundJs = readFileSync(join(dist, 'background/background.js'), 'utf8');
 for (const id of ['workspaceBtn', 'bookmarkNavBtn', 'aiClassifyBtn', 'checkerBtn', 'graphBtn', 'settingsBtn']) {
   if (!settingsHtml.includes(id) || !settingsJs.includes(id)) {
     console.error('settings missing unified navigation entry:', id);
@@ -302,6 +305,29 @@ if (!settingsHtml.includes('shared/page-router.js') || !settingsJs.includes('AIB
   ok = false;
 } else {
   console.log('OK settings unified page navigation');
+}
+if (!settingsHtml.includes('aiRetryCountInput')
+  || !settingsJs.includes('fetchTreeTestWithRetry')
+  || !assistAiJs.includes('_requestAIWithRetry')
+  || !assistAiJs.includes('const text = await resp.text()')
+  || !assistAiJs.includes('preferredFolderPaths')
+  || !backgroundJs.includes('page-content-folder-alignment')
+  || !backgroundJs.includes('scoreFolderPathEvidence(aiPath, bookmark, aiCandidateTags, pageFeatures)')) {
+  console.error('AI assist retry, full-response timeout, folder priority, or independent evidence logic missing');
+  ok = false;
+} else {
+  console.log('OK AI assist request and evidence safeguards');
+}
+const contentExtractorJs = readFileSync(join(dist, 'content/content-extractor.js'), 'utf8');
+if (!contentExtractorJs.includes('function extractLeadExcerpt')
+  || !backgroundJs.includes('const leadTokens = new Map()')
+  || !backgroundJs.includes("value.startsWith('content-lead-keyword:')")
+  || !smartTaggerJs.includes('function buildSalientPageText')
+  || !smartTaggerJs.includes('content-lead-keyword:${tag}')) {
+  console.error('lead content extraction, folder evidence, or tag noise controls missing');
+  ok = false;
+} else {
+  console.log('OK lead content extraction and classification safeguards');
 }
 if (!settingsHtml.includes('aiTreeOpenSidepanelBtn') || !settingsJs.includes('openAiTreeClassifyPanel')) {
   console.error('settings AI tree side panel entry missing');
@@ -350,7 +376,8 @@ if (sideJs.includes('healthCheckDup') && sideJs.includes('HealthPanel')) {
 
 // AI classify reconnect / timeout controls should ship in built assets
 if (
-  !sideJs.includes('AI 连接失败') ||
+  !sideJs.includes('当前批次 AI 连接失败') ||
+  !sideJs.includes('API 返回的 JSON 格式无效') ||
   !sideJs.includes('aiRetryCount') ||
   !sideJs.includes('aiRequestTimeoutSeconds')
 ) {

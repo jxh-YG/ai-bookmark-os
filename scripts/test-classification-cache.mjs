@@ -255,8 +255,7 @@ async function testLabelingUsesTheSameSignatureAsEstimate() {
     return {
       ok: true,
       status: 200,
-      json: async () => ({ choices: [{ message: { content } }] }),
-      text: async () => '',
+      text: async () => JSON.stringify({ choices: [{ message: { content } }] }),
     };
   };
 
@@ -282,8 +281,7 @@ async function testIncompleteSplitDoesNotPersistDraft() {
     return {
       ok: true,
       status: 200,
-      json: async () => ({ choices: [{ message: { content: '[]' } }] }),
-      text: async () => '',
+      text: async () => JSON.stringify({ choices: [{ message: { content: '[]' } }] }),
     };
   };
   const bookmarks = Array.from({ length: 11 }, (_, index) => ({

@@ -719,8 +719,6 @@ timelineContent.addEventListener('click', (e) => {
 
   closeBookmarkMenu();
   chrome.tabs.create({ url });
-  // 异步记录点击（无需等待结果）
-  chrome.runtime.sendMessage({ action: 'recordClick', url }).catch(() => {});
 });
 
 // ===== 单本操作菜单（极简三点弹出） =====
@@ -818,7 +816,6 @@ function handleBookmarkMenuItemClick(action) {
   const itemEl = document.querySelector(`.bookmark-item[data-id="${CSS.escape(id)}"]`);
   if (action === 'open') {
     chrome.tabs.create({ url });
-    chrome.runtime.sendMessage({ action: 'recordClick', url }).catch(() => {});
   } else if (action === 'edit') {
     const bookmark = allBookmarks.find(b => b.id === id);
     openEditModal(id, title, url, bookmark?.tags || [], bookmark);
@@ -2307,7 +2304,6 @@ function selectPaletteItem(idx) {
   const item = paletteItems[idx];
   if (!item) return;
   chrome.tabs.create({ url: item.url });
-  chrome.runtime.sendMessage({ action: 'recordClick', url: item.url }).catch(() => {});
   closeCommandPalette();
 }
 

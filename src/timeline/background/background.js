@@ -309,16 +309,15 @@ async function extractActiveTabContent(tabId, url) {
   if (!isContentUrl(url)) return makeContentResult(url, { status: 'failed', failureReason: 'unsupported_scheme', source: 'rendered-page' });
 
   try {
-    const cached = await getCachedContent(url);
-    if (cached && cached.status === 'success') return cached;
-  } catch {}
-
-  try {
     const result = await extractRenderedTabContent(tabId, url);
     if (result.status === 'success') return result;
   } catch (err) {
     console.warn('Content extraction failed:', err);
   }
+  try {
+    const cached = await getCachedContent(url);
+    if (cached && cached.status === 'success') return cached;
+  } catch {}
   return fetchStaticPageContent(url);
 }
 
@@ -764,6 +763,16 @@ async function persistRecommendationSnapshot(recommendation, bookmark) {
     folders: (recommendation.folders || []).map(item => ({
       id: item.id || item.folderId || '', folderPath: item.folderPath || item.path || '', existing: !!item.exists,
       support: item.support, confidence: item.confidence,
+      localEvidence: item.localEvidence ? {
+        pageContentUsed: item.localEvidence.pageContentUsed === true,
+        pageFields: (item.localEvidence.pageFields || []).slice(0, 12),
+        matchedTerms: (item.localEvidence.matchedTerms || []).slice(0, 8),
+        sampledCount: Number(item.localEvidence.sampledCount) || 0,
+        contentSampleCount: Number(item.localEvidence.contentSampleCount) || 0,
+        matchedSampleCount: Number(item.localEvidence.matchedSampleCount) || 0,
+        matchedSampleTitles: (item.localEvidence.matchedSampleTitles || []).slice(0, 3),
+        folderNameMatched: item.localEvidence.folderNameMatched === true,
+      } : undefined,
     })),
     selectedTags: normalizeTagList(recommendation.selectedTags || (
       recommendation.tags?.[0]?.confidence === 'high' ? [recommendation.tags[0].tag] : []
@@ -840,7 +849,7 @@ async function submitLegacyTagReviewFeedback(queueItem, confirmedTags, reviewAct
   const recommendation = {
     version: 2,
     recommendationId,
-    ruleVersion: self.BookmarkRecommendationCore?.RULE_VERSION || 'bookmark-recommendation-v2',
+    ruleVersion: self.BookmarkRecommendationCore?.RULE_VERSION || 'bookmark-recommendation-v3',
     tags: suggestedTags.map((tag, index) => ({
       tag,
       support: Math.max(0.35, Number(queueItem.confidence) || 0.35),
@@ -2137,8 +2146,9 @@ async function syncAllBookmarksOnce() {
       }
     }
 
-    // 从 Chrome 历史记录获取真实点击次数
-    await enrichClickCounts(merged, 10);
+    // 从 Chrome 历史记录获取真实访问次数，并应用到本次同步快照。
+    const clickCountUpdates = await enrichClickCounts(merged, 10);
+    applyClickCountUpdates(merged, clickCountUpdates);
 
     // 排序：置顶在前，再按时间倒序
     merged.sort((a, b) => {
@@ -2167,8 +2177,8 @@ async function syncAllBookmarksOnce() {
           ...item,
           pinned: !!current.pinned,
           pinnedAt: current.pinnedAt || null,
-          clickCount: current.clickCount || 0,
-          lastClickedAt: current.lastClickedAt || null,
+          clickCount: item.clickCount || 0,
+          lastClickedAt: item.lastClickedAt || null,
           tags,
           tagsAuto,
           contentText: current.contentText || item.contentText,
@@ -2429,9 +2439,18 @@ function matchBookmarkFolderOption(folderOptions, path) {
 
 const FOLDER_EVIDENCE_STOP_WORDS = new Set([
   'bookmark', 'bookmarks', 'folder', 'folders', 'other', 'misc', 'new', 'work', 'personal',
-  '书签', '收藏', '文件夹', '其他', '杂项', '资料', '归档', '临时'
+  'the', 'and', 'for', 'with', 'from', 'this', 'that', 'your', 'our', 'home', 'page',
+  'http', 'https', 'www', 'com', 'org', 'net', 'io', 'app', 'dev', 'test',
+  '书签', '收藏', '文件夹', '其他', '杂项', '资料', '归档', '临时', '页面', '网站',
+  '的是', '一个', '以及', '可以', '用于', '提供', '相关', '内容', '平台', '工具'
 ]);
 const MAX_FOLDER_MATCH_SAMPLES = 10;
+const FOLDER_SAMPLE_MATCH_THRESHOLD = 0.015;
+const FOLDER_CONTENT_BACKFILL_LIMIT = 10;
+const FOLDER_CONTENT_BACKFILL_CONCURRENCY = 2;
+const FOLDER_CONTENT_FAILURE_COOLDOWN = 24 * 60 * 60 * 1000;
+const FOLDER_CONTENT_BACKFILL_QUEUE_KEY = 'folder_content_backfill_queue';
+const FOLDER_CONTENT_BACKFILL_ALARM = 'folder-content-backfill';
 
 function sampleFolderBookmarks(storedBookmarks, random = Math.random) {
   const grouped = new Map();
@@ -2458,6 +2477,97 @@ function sampleFolderBookmarks(storedBookmarks, random = Math.random) {
   return sampled;
 }
 
+function hasStoredPageContent(item) {
+  return String(item?.contentText || '').trim().length >= 80
+    || !!String(item?.contentExcerpt || item?.contentMetaDesc || '').trim()
+    || (Array.isArray(item?.contentMetaKeywords) && item.contentMetaKeywords.length > 0)
+    || (Array.isArray(item?.contentHeadings) && item.contentHeadings.length > 0)
+    || (Array.isArray(item?.contentStructuredTypes) && item.contentStructuredTypes.length > 0);
+}
+
+function contentPatchFromResult(content, fallback = {}) {
+  return {
+    contentText: content?.textContent || fallback.contentText || '',
+    contentTitle: content?.title || fallback.contentTitle || '',
+    contentExcerpt: content?.excerpt || fallback.contentExcerpt || '',
+    contentMetaDesc: content?.metaDesc || fallback.contentMetaDesc || '',
+    contentMetaKeywords: content?.metaKeywords || fallback.contentMetaKeywords || [],
+    contentHeadings: content?.headings || fallback.contentHeadings || [],
+    contentStructuredTypes: content?.structuredTypes || fallback.contentStructuredTypes || [],
+    contentFetchedAt: content?.fetchedAt || fallback.contentFetchedAt || Date.now(),
+    contentStatus: content?.status || fallback.contentStatus || 'failed',
+    contentFailureReason: content?.failureReason || '',
+    contentSource: content?.source || fallback.contentSource || '',
+  };
+}
+
+async function hydrateFolderSamplesFromContentCache(samples) {
+  const cache = await getPageContentCache().catch(() => ({}));
+  return (samples || []).map((item) => {
+    if (hasStoredPageContent(item)) return item;
+    const cached = cache[item?.url];
+    if (!cached || cached.status !== 'success') return item;
+    return { ...item, ...contentPatchFromResult(cached, item) };
+  });
+}
+
+async function enqueueFolderSampleContentBackfill(samples, preferredFolderPaths = []) {
+  const preferred = new Set((preferredFolderPaths || []).map(normalizeBookmarkFolderPath).filter(Boolean));
+  const cache = await getPageContentCache().catch(() => ({}));
+  const now = Date.now();
+  const candidates = (samples || [])
+    .filter(item => item?.id && item?.url && isContentUrl(item.url) && !hasStoredPageContent(item))
+    .filter((item) => {
+      const failedAt = Number(cache[item.url]?.fetchedAt || item.contentFetchedAt) || 0;
+      const failed = cache[item.url]?.status === 'failed' || item.contentStatus === 'failed';
+      return !failed || now - failedAt >= FOLDER_CONTENT_FAILURE_COOLDOWN;
+    })
+    .sort((left, right) => {
+      const leftPreferred = preferred.has(normalizeBookmarkFolderPath(left.folderPath)) ? 1 : 0;
+      const rightPreferred = preferred.has(normalizeBookmarkFolderPath(right.folderPath)) ? 1 : 0;
+      return rightPreferred - leftPreferred || String(left.id).localeCompare(String(right.id));
+    })
+    .slice(0, FOLDER_CONTENT_BACKFILL_LIMIT)
+    .map(item => ({ id: item.id, url: item.url, folderPath: normalizeBookmarkFolderPath(item.folderPath), queuedAt: now }));
+  if (candidates.length === 0) return 0;
+  await mutateStorageResource(FOLDER_CONTENT_BACKFILL_QUEUE_KEY, (current) => {
+    const byId = new Map((Array.isArray(current) ? current : []).filter(item => item?.id).map(item => [item.id, item]));
+    for (const item of candidates) if (!byId.has(item.id)) byId.set(item.id, item);
+    return [...byId.values()].sort((left, right) => left.queuedAt - right.queuedAt).slice(0, 100);
+  });
+  chrome.alarms.create(FOLDER_CONTENT_BACKFILL_ALARM, { when: Date.now() + 1000 });
+  return candidates.length;
+}
+
+async function processFolderSampleContentBackfill() {
+  let claimed = [];
+  await mutateStorageResource(FOLDER_CONTENT_BACKFILL_QUEUE_KEY, (current) => {
+    const queue = Array.isArray(current) ? current : [];
+    claimed = queue.slice(0, FOLDER_CONTENT_BACKFILL_LIMIT);
+    return queue.slice(claimed.length);
+  });
+  if (claimed.length === 0) return;
+
+  const results = await runWithConcurrency(claimed, FOLDER_CONTENT_BACKFILL_CONCURRENCY, async (entry) => ({
+    entry,
+    content: await fetchStaticPageContent(entry.url),
+  }));
+  const patches = new Map(results.map(({ entry, content }) => [entry.id, {
+    url: entry.url,
+    patch: contentPatchFromResult(content),
+  }]));
+  await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
+    const update = patches.get(item.id);
+    if (!update || update.url !== item.url) return item;
+    return { ...item, ...update.patch };
+  }));
+
+  const remaining = await chrome.storage.local.get(FOLDER_CONTENT_BACKFILL_QUEUE_KEY);
+  if ((remaining[FOLDER_CONTENT_BACKFILL_QUEUE_KEY] || []).length > 0) {
+    chrome.alarms.create(FOLDER_CONTENT_BACKFILL_ALARM, { when: Date.now() + 60 * 1000 });
+  }
+}
+
 function tokenizeFolderEvidence(value) {
   const text = String(value || '').toLowerCase();
   const tokens = text
@@ -2467,10 +2577,12 @@ function tokenizeFolderEvidence(value) {
   const chinese = [];
   for (const phrase of text.match(/[\u4e00-\u9fa5]{2,}/g) || []) {
     chinese.push(phrase);
-    for (let index = 0; index + 1 < phrase.length; index += 2) {
+    for (let index = 0; index + 1 < phrase.length; index++) {
       chinese.push(phrase.slice(index, index + 2));
     }
-    if (phrase.length > 2 && phrase.length % 2 === 1) chinese.push(phrase.slice(-2));
+    for (let index = 0; index + 2 < phrase.length; index++) {
+      chinese.push(phrase.slice(index, index + 3));
+    }
   }
   return [...new Set([...tokens, ...chinese])];
 }
@@ -2479,7 +2591,7 @@ function escapeFolderEvidenceRegExp(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function getBookmarkFolderEvidenceText(bookmark, aiSuggestion) {
+function getBookmarkFolderEvidenceText(bookmark) {
   return [
     bookmark?.title,
     bookmark?.url,
@@ -2491,15 +2603,12 @@ function getBookmarkFolderEvidenceText(bookmark, aiSuggestion) {
     bookmark?.contentText,
     bookmark?.contentMetaDesc,
     bookmark?.ogDescription,
-    aiSuggestion?.summary,
-    aiSuggestion?.reason,
     ...(Array.isArray(bookmark?.headings) ? bookmark.headings : []),
     ...(Array.isArray(bookmark?.contentHeadings) ? bookmark.contentHeadings : []),
     ...(Array.isArray(bookmark?.metaKeywords) ? bookmark.metaKeywords : []),
     ...(Array.isArray(bookmark?.contentMetaKeywords) ? bookmark.contentMetaKeywords : []),
     ...(Array.isArray(bookmark?.structuredTypes) ? bookmark.structuredTypes : []),
     ...(Array.isArray(bookmark?.contentStructuredTypes) ? bookmark.contentStructuredTypes : []),
-    ...(Array.isArray(aiSuggestion?.evidence) ? aiSuggestion.evidence : []),
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
@@ -2534,7 +2643,7 @@ function getTagTokens(tags) {
 function addWeightedToken(target, token, weight) {
   const normalized = String(token || '').toLowerCase().trim();
   if (!normalized || FOLDER_EVIDENCE_STOP_WORDS.has(normalized)) return;
-  target.set(normalized, (target.get(normalized) || 0) + weight);
+  target.set(normalized, Math.max(target.get(normalized) || 0, weight));
 }
 
 function getUrlPathEvidence(url) {
@@ -2547,46 +2656,113 @@ function getUrlPathEvidence(url) {
   }
 }
 
-function collectBookmarkTokenWeights(bookmark, tags = [], aiSuggestion = null) {
-  const strong = new Map();
-  const weak = new Map();
-  const addText = (target, value, weight) => {
-    const text = String(value || '').slice(0, 4000);
-    for (const token of tokenizeFolderEvidence(text)) addWeightedToken(target, token, weight);
+function collectBookmarkTokenWeights(bookmark, tags = []) {
+  const tokens = new Map();
+  const bodyTokens = new Map();
+  const leadTokens = new Map();
+  const tokenSources = new Map();
+  const pageFields = new Set();
+  const addText = (value, weight, source, maxChars = 1200) => {
+    const text = String(value || '').trim().slice(0, maxChars);
+    if (!text) return;
+    if (source.startsWith('page_')) pageFields.add(source);
+    for (const token of tokenizeFolderEvidence(text).slice(0, 800)) {
+      if (FOLDER_EVIDENCE_STOP_WORDS.has(token)) continue;
+      addWeightedToken(tokens, token, weight);
+      if (!tokenSources.has(token)) tokenSources.set(token, new Set());
+      tokenSources.get(token).add(source);
+    }
   };
-  addText(strong, bookmark?.title, 5);
-  addText(strong, getUrlPathEvidence(bookmark?.url), 4);
-  addText(strong, bookmark?.metaDesc, 3);
-  addText(strong, bookmark?.excerpt, 3);
-  addText(strong, bookmark?.contentExcerpt, 3);
-  addText(strong, bookmark?.contentTitle, 4);
-  addText(strong, bookmark?.contentText, 2);
-  addText(strong, bookmark?.contentMetaDesc, 3);
-  addText(strong, bookmark?.ogDescription, 3);
-  addText(strong, aiSuggestion?.summary, 3);
-  addText(strong, aiSuggestion?.reason, 4);
-  for (const value of Array.isArray(bookmark?.headings) ? bookmark.headings : []) addText(strong, value, 3);
-  for (const value of Array.isArray(bookmark?.contentHeadings) ? bookmark.contentHeadings : []) addText(strong, value, 3);
-  for (const value of Array.isArray(bookmark?.metaKeywords) ? bookmark.metaKeywords : []) addText(strong, value, 3);
-  for (const value of Array.isArray(bookmark?.contentMetaKeywords) ? bookmark.contentMetaKeywords : []) addText(strong, value, 3);
-  for (const value of Array.isArray(bookmark?.structuredTypes) ? bookmark.structuredTypes : []) addText(strong, value, 2);
-  for (const value of Array.isArray(bookmark?.contentStructuredTypes) ? bookmark.contentStructuredTypes : []) addText(strong, value, 2);
-  for (const value of Array.isArray(aiSuggestion?.evidence) ? aiSuggestion.evidence : []) addText(strong, value, 3);
-  for (const tag of normalizeTagList(tags)) addText(weak, tag, 3);
-  for (const tag of normalizeTagList(aiSuggestion?.tags)) addText(weak, tag, 2);
-  return { strong, weak, domain: String(bookmark?.domain || extractDomain(bookmark?.url || '') || '').toLowerCase() };
+  const addLeadText = (value, weight) => {
+    for (const token of tokenizeFolderEvidence(String(value || '').slice(0, 1200)).slice(0, 500)) {
+      if (FOLDER_EVIDENCE_STOP_WORDS.has(token)) continue;
+      addWeightedToken(leadTokens, token, weight);
+    }
+  };
+  const headings = [...new Set([
+    ...(Array.isArray(bookmark?.headings) ? bookmark.headings : []),
+    ...(Array.isArray(bookmark?.contentHeadings) ? bookmark.contentHeadings : []),
+  ].map(value => String(value || '').trim()).filter(Boolean))];
+  addText(bookmark?.contentTitle, 1, 'page_content_title');
+  headings.forEach((value, index) => addText(value, index === 0 ? 1 : (index === 1 ? 0.9 : 0.65), 'page_headings'));
+  for (const value of Array.isArray(bookmark?.metaKeywords) ? bookmark.metaKeywords : []) addText(value, 1, 'page_meta_keywords');
+  for (const value of Array.isArray(bookmark?.contentMetaKeywords) ? bookmark.contentMetaKeywords : []) addText(value, 1, 'page_meta_keywords');
+  addText(bookmark?.metaDesc, 0.9, 'page_meta_description');
+  addText(bookmark?.contentMetaDesc, 0.9, 'page_meta_description');
+  addText(bookmark?.excerpt, 0.9, 'page_excerpt');
+  addText(bookmark?.contentExcerpt, 0.9, 'page_excerpt');
+  addText(bookmark?.ogDescription, 0.9, 'page_meta_description');
+  const bodyText = String(bookmark?.contentText || '').slice(0, 4000);
+  addText(bodyText.slice(0, 1000), 0.8, 'page_body');
+  addText(bodyText.slice(1000), 0.45, 'page_body_tail', 3000);
+  for (const token of tokenizeFolderEvidence(bodyText.slice(0, 1000)).slice(0, 500)) {
+    addWeightedToken(bodyTokens, token, 0.8);
+  }
+  for (const token of tokenizeFolderEvidence(bodyText.slice(1000)).slice(0, 500)) {
+    addWeightedToken(bodyTokens, token, 0.45);
+  }
+  addLeadText(bookmark?.contentTitle, 1);
+  addLeadText(headings[0], 1);
+  addLeadText(headings[1], 0.9);
+  addLeadText(bookmark?.excerpt || bookmark?.contentExcerpt || bookmark?.metaDesc || bookmark?.contentMetaDesc, 0.95);
+  addText(bookmark?.title, 0.75, 'bookmark_title');
+  addText(getUrlPathEvidence(bookmark?.url), 0.55, 'url_path');
+  addText(bookmark?.domain || extractDomain(bookmark?.url || ''), 0.55, 'domain');
+  for (const value of Array.isArray(bookmark?.structuredTypes) ? bookmark.structuredTypes : []) addText(value, 0.55, 'page_structured_type');
+  for (const value of Array.isArray(bookmark?.contentStructuredTypes) ? bookmark.contentStructuredTypes : []) addText(value, 0.55, 'page_structured_type');
+  for (const tag of normalizeTagList(tags)) addText(tag, 0.4, 'tag');
+  return {
+    tokens,
+    bodyTokens,
+    leadTokens,
+    tokenSources,
+    pageFields: [...pageFields],
+    pageContentUsed: bodyTokens.size >= 2,
+    bodyText,
+    domain: String(bookmark?.domain || extractDomain(bookmark?.url || '') || '').toLowerCase(),
+  };
 }
 
-function weightedTokenOverlap(left, right) {
-  let score = 0;
-  let count = 0;
-  for (const [token, leftWeight] of left) {
+function weightedTokenJaccard(left, right, idf = new Map()) {
+  const allTokens = new Set([...left.keys(), ...right.keys()]);
+  const matches = [];
+  let intersection = 0;
+  let union = 0;
+  for (const token of allTokens) {
+    const leftWeight = left.get(token) || 0;
     const rightWeight = right.get(token) || 0;
-    if (rightWeight <= 0) continue;
-    score += Math.min(leftWeight, rightWeight);
-    count += 1;
+    const importance = idf.get(token) || 1;
+    const overlap = Math.min(leftWeight, rightWeight) * importance;
+    intersection += overlap;
+    union += Math.max(leftWeight, rightWeight) * importance;
+    if (overlap > 0) matches.push({ token, contribution: overlap });
   }
-  return { score, count };
+  matches.sort((a, b) => b.contribution - a.contribution || a.token.localeCompare(b.token, 'zh'));
+  return {
+    similarity: union > 0 ? intersection / union : 0,
+    matchedTerms: matches.map(item => item.token),
+  };
+}
+
+function getPageBodyFolderLeafMatches(folderPath, bookmarkFeatures) {
+  if (!bookmarkFeatures?.pageContentUsed) return [];
+  const leaf = normalizeBookmarkFolderPath(folderPath).split('/').filter(Boolean).slice(-1)[0] || '';
+  const compactLeaf = leaf.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '');
+  const bodyText = String(bookmarkFeatures.bodyText || '').toLowerCase();
+  const segments = bodyText.split(/[\n\r\u3002\uff01\uff1f\uff0c\uff1b.!?,;]+/).filter(Boolean);
+  if (compactLeaf.length >= 2 && segments.some(segment => (
+    segment.replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '').includes(compactLeaf)
+  ))) return [leaf];
+
+  const leafTokens = [...new Set(tokenizeFolderEvidence(leaf)
+    .filter(token => !FOLDER_EVIDENCE_STOP_WORDS.has(token)))];
+  if (leafTokens.length < 2) return [];
+  let best = [];
+  for (const segment of segments) {
+    const matches = leafTokens.filter(token => folderEvidenceTokenMatchesText(token, segment));
+    if (matches.length > best.length) best = matches;
+  }
+  return best.length >= 2 ? best : [];
 }
 
 function buildFolderProfiles(storedBookmarks, folderOptions = []) {
@@ -2603,43 +2779,97 @@ function buildFolderProfiles(storedBookmarks, folderOptions = []) {
         title: matchedFolder.title || item.folderName || path.split('/').filter(Boolean).slice(-1)[0] || '',
         folderName: matchedFolder.title || item.folderName || path.split('/').filter(Boolean).slice(-1)[0] || '',
         folderPath: path,
-        strong: new Map(),
-        weak: new Map(),
+        samples: [],
         domains: new Map(),
         count: 0
       });
     }
     const profile = profiles.get(path);
-    const tokens = collectBookmarkTokenWeights(item, item.tags || []);
-    for (const [token, weight] of tokens.strong) addWeightedToken(profile.strong, token, Math.min(weight, 6));
-    for (const [token, weight] of tokens.weak) addWeightedToken(profile.weak, token, Math.min(weight, 3));
-    if (tokens.domain) profile.domains.set(tokens.domain, (profile.domains.get(tokens.domain) || 0) + 1);
+    const features = collectBookmarkTokenWeights(item, item.tags || []);
+    profile.samples.push({ item, features });
+    if (features.domain) profile.domains.set(features.domain, (profile.domains.get(features.domain) || 0) + 1);
     profile.count += 1;
   }
   return profiles;
 }
 
-function scoreFolderProfileCandidates(storedBookmarks, folderOptions, bookmark, suggestedTags, aiSuggestion) {
-  const bookmarkTokens = collectBookmarkTokenWeights(bookmark, suggestedTags, aiSuggestion);
+function buildFolderTokenIdf(profiles) {
+  const folderFrequency = new Map();
+  for (const profile of profiles) {
+    const folderTokens = new Set(profile.samples.flatMap(sample => [...sample.features.tokens.keys()]));
+    for (const token of folderTokens) folderFrequency.set(token, (folderFrequency.get(token) || 0) + 1);
+  }
+  const totalFolders = Math.max(1, profiles.length);
+  return new Map([...folderFrequency].map(([token, count]) => {
+    const idf = 1 + Math.log((totalFolders + 1) / (count + 1));
+    return [token, count / totalFolders >= 0.8 ? idf * 0.2 : idf];
+  }));
+}
+
+function mergeMatchedTerms(matches) {
+  const weighted = new Map();
+  for (const match of matches) {
+    const rankWeight = Math.max(0.1, match.similarity);
+    for (const term of match.matchedTerms.slice(0, 12)) {
+      weighted.set(term, (weighted.get(term) || 0) + rankWeight);
+    }
+  }
+  return [...weighted]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh'))
+    .slice(0, 8)
+    .map(([term]) => term);
+}
+
+function scoreFolderProfileCandidates(storedBookmarks, folderOptions, bookmark, suggestedTags) {
+  const bookmarkFeatures = collectBookmarkTokenWeights(bookmark, suggestedTags);
   const candidates = [];
   const profiles = [...buildFolderProfiles(storedBookmarks, folderOptions).values()];
-  const domainFolderCount = bookmarkTokens.domain
-    ? profiles.filter(profile => (profile.domains.get(bookmarkTokens.domain) || 0) > 0).length
+  const idf = buildFolderTokenIdf(profiles);
+  const domainFolderCount = bookmarkFeatures.domain
+    ? profiles.filter(profile => (profile.domains.get(bookmarkFeatures.domain) || 0) > 0).length
     : 0;
   for (const profile of profiles) {
-    const strongOverlap = weightedTokenOverlap(profile.strong, bookmarkTokens.strong);
-    const weakOverlap = weightedTokenOverlap(profile.weak, bookmarkTokens.weak);
-    const tagToContentOverlap = weightedTokenOverlap(profile.weak, bookmarkTokens.strong);
-    const sameDomainCount = bookmarkTokens.domain ? (profile.domains.get(bookmarkTokens.domain) || 0) : 0;
-    const hasReliableSimilarity = sameDomainCount > 0 || strongOverlap.count >= 2;
+    const similarities = profile.samples.map((sample) => {
+      const fullSimilarity = weightedTokenJaccard(bookmarkFeatures.tokens, sample.features.tokens, idf);
+      const leadSimilarity = weightedTokenJaccard(bookmarkFeatures.leadTokens, sample.features.tokens, idf);
+      const bodySimilarity = weightedTokenJaccard(bookmarkFeatures.bodyTokens, sample.features.tokens, idf);
+      const similarity = bookmarkFeatures.leadTokens.size >= 2
+        ? fullSimilarity.similarity * 0.45 + leadSimilarity.similarity * 0.55
+        : fullSimilarity.similarity;
+      return {
+        similarity,
+        matchedTerms: [...new Set([...leadSimilarity.matchedTerms, ...fullSimilarity.matchedTerms])],
+        leadSimilarity: leadSimilarity.similarity,
+        bodySimilarity: bodySimilarity.similarity,
+        bodyMatchedTerms: bodySimilarity.matchedTerms,
+        item: sample.item,
+      };
+    }).sort((left, right) => right.similarity - left.similarity);
+    const matchedSamples = similarities.filter(item => item.similarity >= FOLDER_SAMPLE_MATCH_THRESHOLD && item.matchedTerms.length >= 2);
+    const topMatches = matchedSamples.slice(0, 3);
+    const bodyMatchedSamples = similarities
+      .filter(item => item.bodySimilarity >= FOLDER_SAMPLE_MATCH_THRESHOLD && item.bodyMatchedTerms.length >= 2)
+      .sort((left, right) => right.bodySimilarity - left.bodySimilarity);
+    const bestSimilarity = topMatches[0]?.similarity || 0;
+    const topAverage = topMatches.length > 0
+      ? topMatches.reduce((sum, item) => sum + item.similarity, 0) / topMatches.length
+      : 0;
+    const aggregateSimilarity = bestSimilarity * 0.6 + topAverage * 0.4;
+    const sameDomainCount = bookmarkFeatures.domain ? (profile.domains.get(bookmarkFeatures.domain) || 0) : 0;
+    const hasReliableSimilarity = sameDomainCount > 0 || matchedSamples.length > 0;
     if (!hasReliableSimilarity) continue;
     const ambiguityDamp = domainFolderCount > 1 ? 1 / domainFolderCount : 1;
-    const domainScore = sameDomainCount > 0 ? Math.min(42, Math.log2(sameDomainCount + 1) * 28) * ambiguityDamp : 0;
-    const contentScore = Math.min(42, strongOverlap.score * 5 + tagToContentOverlap.score * 2);
-    const tagScore = Math.min(20, weakOverlap.score * 3);
-    const sizeDamp = 1 + Math.max(0, Math.log2(profile.count + 1) - 2) * 0.08;
-    const score = (domainScore + contentScore + tagScore) / sizeDamp;
+    const domainScore = sameDomainCount > 0 ? Math.min(30, Math.log2(sameDomainCount + 1) * 20) * ambiguityDamp : 0;
+    const contentScore = Math.min(85, aggregateSimilarity * 1200);
+    const score = Math.min(100, domainScore + contentScore);
     if (score <= 0) continue;
+    const pathEvidence = scoreFolderPathEvidence(profile.folderPath, bookmark, suggestedTags, bookmarkFeatures);
+    const contentSampleCount = profile.samples.filter(sample => sample.features.pageContentUsed).length;
+    const matchedTerms = mergeMatchedTerms(topMatches.length > 0
+      ? topMatches
+      : bodyMatchedSamples.map(item => ({ ...item, similarity: item.bodySimilarity, matchedTerms: item.bodyMatchedTerms })).slice(0, 3));
+    const bodyLeafMatches = getPageBodyFolderLeafMatches(profile.folderPath, bookmarkFeatures);
+    const folderNameMatched = bodyLeafMatches.length > 0;
     candidates.push({
       id: profile.id,
       title: profile.title,
@@ -2649,11 +2879,24 @@ function scoreFolderProfileCandidates(storedBookmarks, folderOptions, bookmark, 
       exists: true,
       score,
       count: profile.count,
+      leafTagMatches: pathEvidence.leafTagMatches || 0,
+      leafContentMatches: pathEvidence.leafContentMatches || 0,
+      leafExactContentMatches: pathEvidence.leafExactContentMatches || 0,
       reasons: [
-        ...(sameDomainCount > 0 ? [`domain-history:${bookmarkTokens.domain}`] : []),
-        ...(strongOverlap.count > 0 ? [`profile-content:${strongOverlap.count}`] : []),
-        ...(weakOverlap.count > 0 ? [`profile-tag:${weakOverlap.count}`] : [])
-      ]
+        ...(sameDomainCount > 0 ? [`domain-history:${bookmarkFeatures.domain}`] : []),
+        ...(matchedSamples.length > 0 ? [`profile-content:${matchedSamples.length}`] : []),
+        ...pathEvidence.reasons,
+      ],
+      localEvidence: {
+        pageContentUsed: bookmarkFeatures.pageContentUsed,
+        pageFields: bookmarkFeatures.pageFields,
+        matchedTerms,
+        sampledCount: profile.samples.length,
+        contentSampleCount,
+        matchedSampleCount: matchedSamples.length,
+        matchedSampleTitles: matchedSamples.map(item => item.item?.title || item.item?.url || '').filter(Boolean).slice(0, 3),
+        folderNameMatched,
+      },
     });
   }
   return candidates.sort((a, b) => b.score - a.score || b.count - a.count || a.folderPath.localeCompare(b.folderPath, 'zh'));
@@ -2665,12 +2908,13 @@ function folderTokenMatchesTag(token, tagTokens) {
   return tagTokens.has(normalized);
 }
 
-function scoreFolderPathEvidence(folderPath, bookmark, ruleTags, aiSuggestion) {
+function scoreFolderPathEvidence(folderPath, bookmark, ruleTags, bookmarkFeatures = null) {
   const normalized = normalizeBookmarkFolderPath(folderPath);
   if (!normalized) return { score: 0, reasons: [] };
-  const evidenceText = getBookmarkFolderEvidenceText(bookmark, aiSuggestion);
+  const evidenceText = getBookmarkFolderEvidenceText(bookmark);
+  const bodyLeafTokens = new Set(getPageBodyFolderLeafMatches(normalized, bookmarkFeatures || collectBookmarkTokenWeights(bookmark, ruleTags))
+    .flatMap(tokenizeFolderEvidence));
   const localTagTokens = getTagTokens(ruleTags);
-  const aiTagTokens = getTagTokens(aiSuggestion?.tags);
   const reasons = [];
   let score = 0;
 
@@ -2689,19 +2933,13 @@ function scoreFolderPathEvidence(folderPath, bookmark, ruleTags, aiSuggestion) {
       matched = true;
       if (isLeaf) leafTagMatches.add(token);
     }
-    if (folderTokenMatchesTag(token, aiTagTokens)) {
-      score += isLeaf ? 16 : 3;
-      reasons.push(`ai-tag:${token}`);
-      matched = true;
-      if (isLeaf) leafTagMatches.add(token);
-    }
     if (folderEvidenceTokenMatchesText(token, evidenceText)) {
       score += isLeaf ? 36 : 8;
       reasons.push(`content:${token}`);
       matched = true;
       if (isLeaf) {
-        leafContentMatches.add(token);
-        if (isWholeSegment) leafExactContentMatches.add(token);
+        if (bodyLeafTokens.has(token)) leafContentMatches.add(token);
+        if (isWholeSegment && bodyLeafTokens.has(token)) leafExactContentMatches.add(token);
       }
     }
     if (matched && leafTokens.has(token)) leafMatched = true;
@@ -2723,6 +2961,16 @@ function scoreHistoricalFolderCandidates(storedBookmarks, suggestedTags, bookmar
   if (tags.length === 0) return [];
   const tagSet = new Set(tags);
   const folderScore = new Map();
+  const bookmarkFeatures = collectBookmarkTokenWeights(bookmark, suggestedTags);
+  const sampleStats = new Map();
+  for (const item of storedBookmarks || []) {
+    const path = normalizeBookmarkFolderPath(item?.folderPath);
+    if (!path) continue;
+    const stats = sampleStats.get(path) || { sampledCount: 0, contentSampleCount: 0 };
+    stats.sampledCount += 1;
+    if (collectBookmarkTokenWeights(item, item.tags || []).pageContentUsed) stats.contentSampleCount += 1;
+    sampleStats.set(path, stats);
+  }
   for (const item of storedBookmarks || []) {
     if (!item?.folderPath) continue;
     const normalizedPath = normalizeBookmarkFolderPath(item.folderPath);
@@ -2731,13 +2979,23 @@ function scoreHistoricalFolderCandidates(storedBookmarks, suggestedTags, bookmar
     if (!matchedFolder) continue;
     const overlap = normalizeTagList(item.tags).filter(tag => tagSet.has(tag)).length;
     if (overlap <= 0) continue;
-    const evidence = scoreFolderPathEvidence(matchedFolder.path, bookmark, tags, aiSuggestion);
+    const evidence = scoreFolderPathEvidence(matchedFolder.path, bookmark, tags, bookmarkFeatures);
     if (evidence.score <= 0) continue;
     const key = matchedFolder.path;
     if (!key) continue;
     if (!folderScore.has(key)) {
       const folderName = matchedFolder.title || item.folderName || key.split('/').filter(Boolean).slice(-1)[0] || '';
-      folderScore.set(key, { count: 0, score: 0, folderName, folderPath: key, reasons: new Set(), leafTagMatches: 0, leafContentMatches: 0, leafExactContentMatches: 0 });
+      folderScore.set(key, {
+        count: 0,
+        score: 0,
+        folderName,
+        folderPath: key,
+        reasons: new Set(),
+        leafTagMatches: 0,
+        leafContentMatches: 0,
+        leafExactContentMatches: 0,
+        matchedSampleTitles: new Set(),
+      });
     }
     const candidate = folderScore.get(key);
     candidate.count += overlap;
@@ -2745,23 +3003,43 @@ function scoreHistoricalFolderCandidates(storedBookmarks, suggestedTags, bookmar
     candidate.leafTagMatches = Math.max(candidate.leafTagMatches, evidence.leafTagMatches || 0);
     candidate.leafContentMatches = Math.max(candidate.leafContentMatches, evidence.leafContentMatches || 0);
     candidate.leafExactContentMatches = Math.max(candidate.leafExactContentMatches, evidence.leafExactContentMatches || 0);
+    candidate.matchedSampleTitles.add(item.title || item.url || '');
     for (const reason of evidence.reasons) candidate.reasons.add(reason);
   }
   return [...folderScore.values()]
-    .map(item => ({ ...item, reasons: [...item.reasons] }))
+    .map(item => {
+      const stats = sampleStats.get(item.folderPath) || { sampledCount: 0, contentSampleCount: 0 };
+      const bodyLeafMatches = getPageBodyFolderLeafMatches(item.folderPath, bookmarkFeatures);
+      return {
+        ...item,
+        reasons: [...item.reasons],
+        localEvidence: {
+          pageContentUsed: bookmarkFeatures.pageContentUsed,
+          pageFields: bookmarkFeatures.pageFields,
+          matchedTerms: bodyLeafMatches,
+          sampledCount: stats.sampledCount,
+          contentSampleCount: stats.contentSampleCount,
+          matchedSampleCount: 0,
+          matchedSampleTitles: [],
+          folderNameMatched: bodyLeafMatches.length > 0,
+        },
+      };
+    })
     .sort((a, b) => b.score - a.score || b.count - a.count || a.folderPath.localeCompare(b.folderPath, 'zh'));
 }
 
-function scoreExistingFolderCandidates(folderOptions, suggestedTags, bookmark, aiSuggestion) {
+function scoreExistingFolderCandidates(folderOptions, suggestedTags, bookmark) {
   const tags = normalizeTagList(suggestedTags);
+  const bookmarkFeatures = collectBookmarkTokenWeights(bookmark, suggestedTags);
   const candidates = [];
   const seen = new Set();
   for (const folder of Array.isArray(folderOptions) ? folderOptions : []) {
     const path = normalizeBookmarkFolderPath(folder?.path);
     if (!path || seen.has(path)) continue;
     seen.add(path);
-    const evidence = scoreFolderPathEvidence(path, bookmark, tags, aiSuggestion);
+    const evidence = scoreFolderPathEvidence(path, bookmark, tags, bookmarkFeatures);
     if (evidence.score <= 0) continue;
+    const bodyLeafMatches = getPageBodyFolderLeafMatches(path, bookmarkFeatures);
     candidates.push({
       id: folder.id || '',
       title: folder.title || path.split('/').filter(Boolean).slice(-1)[0] || '',
@@ -2775,9 +3053,34 @@ function scoreExistingFolderCandidates(folderOptions, suggestedTags, bookmark, a
       leafTagMatches: evidence.leafTagMatches || 0,
       leafContentMatches: evidence.leafContentMatches || 0,
       leafExactContentMatches: evidence.leafExactContentMatches || 0,
+      localEvidence: {
+        pageContentUsed: bookmarkFeatures.pageContentUsed,
+        pageFields: bookmarkFeatures.pageFields,
+        matchedTerms: bodyLeafMatches,
+        sampledCount: 0,
+        contentSampleCount: 0,
+        matchedSampleCount: 0,
+        matchedSampleTitles: [],
+        folderNameMatched: bodyLeafMatches.length > 0,
+      },
     });
   }
   return candidates.sort((a, b) => b.score - a.score || a.folderPath.localeCompare(b.folderPath, 'zh'));
+}
+
+function mergeLocalFolderEvidence(left, right) {
+  if (!left && !right) return null;
+  const values = [left, right].filter(Boolean);
+  return {
+    pageContentUsed: values.some(item => item.pageContentUsed === true),
+    pageFields: [...new Set(values.flatMap(item => item.pageFields || []))],
+    matchedTerms: [...new Set(values.flatMap(item => item.matchedTerms || []))].slice(0, 8),
+    sampledCount: Math.max(0, ...values.map(item => Number(item.sampledCount) || 0)),
+    contentSampleCount: Math.max(0, ...values.map(item => Number(item.contentSampleCount) || 0)),
+    matchedSampleCount: Math.max(0, ...values.map(item => Number(item.matchedSampleCount) || 0)),
+    matchedSampleTitles: [...new Set(values.flatMap(item => item.matchedSampleTitles || []))].filter(Boolean).slice(0, 3),
+    folderNameMatched: values.some(item => item.folderNameMatched === true),
+  };
 }
 
 function chooseBestBookmarkFolderCandidate(candidates) {
@@ -2794,6 +3097,7 @@ function chooseBestBookmarkFolderCandidate(candidates) {
     current.id = current.id || item.id || '';
     current.title = current.title || item.title || item.folderName || '';
     current.folderName = current.folderName || item.folderName || item.title || '';
+    current.localEvidence = mergeLocalFolderEvidence(current.localEvidence, item.localEvidence);
     for (const reason of item.reasons || []) current.reasons.add(reason);
     byPath.set(path, current);
   }
@@ -2807,12 +3111,12 @@ function chooseBestBookmarkFolderCandidate(candidates) {
 }
 
 
-function chooseAISuggestedFolder(aiFolderPath, folderOptions, bookmark, ruleTags, aiSuggestion) {
+function chooseAISuggestedFolder(aiFolderPath, folderOptions, bookmark, ruleTags) {
   const normalized = normalizeBookmarkFolderPath(aiFolderPath);
   if (!normalized) return null;
   const matched = matchBookmarkFolderOption(folderOptions, normalized);
   if (!matched) return null;
-  const evidence = scoreFolderPathEvidence(matched.path, bookmark, ruleTags, aiSuggestion);
+  const evidence = scoreFolderPathEvidence(matched.path, bookmark, ruleTags);
   if (evidence.score <= 0) return null;
   return { path: matched.path, id: matched.id || '', exists: true, score: evidence.score, reasons: evidence.reasons };
 }
@@ -2832,6 +3136,7 @@ function recommendationEvidenceFromTagResult(result) {
     else if (value === 'learned-domain') family = 'learned_rule';
     else if (value === 'domain' || value === 'subdomain') family = 'domain';
     else if (value.startsWith('ai:')) family = 'ai';
+    else if (value.startsWith('content-lead-keyword:')) family = 'page_content';
     else if (value.startsWith('content-') || value.startsWith('prototype-') || value.startsWith('tfidf:') || value.startsWith('bayesian:')) family = 'content_semantic';
     evidence.push({ family, strength: 1, reason: value, source: 'local-rule' });
   }
@@ -2841,8 +3146,17 @@ function recommendationEvidenceFromTagResult(result) {
 function recommendationEvidenceFromFolderCandidate(candidate, source) {
   const evidence = [];
   const normalizedScore = Math.min(1, Math.max(0.35, Number(candidate?.score || 0) / 100));
-  if (source === 'history' || source === 'profile') {
-    evidence.push({ family: 'history_profile', strength: normalizedScore, reason: source === 'profile' ? 'folder-profile' : 'confirmed-folder-history', source });
+  const localEvidence = candidate?.localEvidence;
+  if (source === 'profile' && Number(localEvidence?.matchedSampleCount || 0) > 0) {
+    evidence.push({ family: 'folder_sample', strength: normalizedScore, reason: `folder-sample:${localEvidence.matchedSampleCount}`, source });
+  } else if (source === 'history') {
+    evidence.push({ family: 'history_profile', strength: normalizedScore, reason: 'confirmed-folder-history', source });
+  }
+  if (localEvidence?.pageContentUsed && (localEvidence.matchedTerms || []).length > 0) {
+    evidence.push({ family: 'page_content', strength: normalizedScore, reason: `page-content:${localEvidence.matchedTerms.slice(0, 3).join(',')}`, source });
+  }
+  if (localEvidence?.folderNameMatched) {
+    evidence.push({ family: 'folder_name', strength: normalizedScore, reason: 'folder-name-match', source });
   }
   if (Number(candidate?.leafExactContentMatches || 0) > 0 || Number(candidate?.leafContentMatches || 0) >= 2) {
     evidence.push({
@@ -2856,7 +3170,11 @@ function recommendationEvidenceFromFolderCandidate(candidate, source) {
     const value = String(reason || '');
     if (value.startsWith('domain-history:')) {
       evidence.push({ family: 'history_profile', strength: 1, reason: value, source });
-    } else if (value.startsWith('profile-content:') || value.startsWith('content:')) {
+    } else if (value.startsWith('profile-content:')) {
+      if (!evidence.some(item => item.family === 'folder_sample')) {
+        evidence.push({ family: 'folder_sample', strength: normalizedScore, reason: value, source });
+      }
+    } else if (value.startsWith('content:')) {
       evidence.push({ family: 'content_semantic', strength: normalizedScore, reason: value, source });
     } else if (value.startsWith('local-tag:') || value.startsWith('profile-tag:')) {
       evidence.push({ family: 'title_metadata', strength: normalizedScore, reason: value, source });
@@ -2986,7 +3304,8 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
   if (options.preloaded !== true && typeof preloadSmartTaggerCaches === 'function') await preloadSmartTaggerCaches();
   const folderOptions = options.folderOptions || await loadBookmarkFolderOptions().catch(() => []);
   const storedBookmarks = options.storedBookmarks || await getStoredBookmarks().catch(() => []);
-  const folderMatchBookmarks = sampleFolderBookmarks(storedBookmarks);
+  const samplePool = storedBookmarks.filter(item => !bookmark?.id || item.id !== bookmark.id);
+  const folderMatchBookmarks = await hydrateFolderSamplesFromContentCache(sampleFolderBookmarks(samplePool));
   const ruleTags = typeof autoTagBookmark === 'function'
     ? await autoTagBookmark(bookmark, { skipAI: true })
     : [];
@@ -3028,6 +3347,11 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
   let aiSuggestion = null;
   let aiError = '';
   let aiAttempted = false;
+  const preferredFolderPaths = [
+    ...summary.folders,
+    ...[...folderCandidates].sort((left, right) => Number(right?.score || 0) - Number(left?.score || 0)),
+  ].map(item => normalizeBookmarkFolderPath(item?.folderPath || item?.path))
+    .filter((path, index, paths) => path && paths.indexOf(path) === index);
 
   let aiEnabled = false;
   if (options.allowAI !== false && gate.trigger && typeof getAIConfig === 'function') {
@@ -3037,7 +3361,7 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
   if (aiEnabled && typeof suggestBookmarkWithAI === 'function') {
     aiAttempted = true;
     try {
-      aiSuggestion = await suggestBookmarkWithAI(bookmark, aiCandidateTags, { folderOptions });
+      aiSuggestion = await suggestBookmarkWithAI(bookmark, aiCandidateTags, { folderOptions, preferredFolderPaths });
     } catch (error) {
       aiError = error?.message || String(error || 'AI request failed');
     }
@@ -3054,19 +3378,31 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
     const aiPath = normalizeBookmarkFolderPath(aiSuggestion.folderPath);
     if (aiPath) {
       const matched = matchBookmarkFolderOption(folderOptions, aiPath);
-      const pathEvidence = scoreFolderPathEvidence(aiPath, bookmark, aiCandidateTags, aiSuggestion);
+      const pageFeatures = collectBookmarkTokenWeights(bookmark, aiCandidateTags);
+      const pathEvidence = scoreFolderPathEvidence(aiPath, bookmark, aiCandidateTags, pageFeatures);
+      const bodyLeafMatches = getPageBodyFolderLeafMatches(aiPath, pageFeatures);
+      const localEvidence = {
+        pageContentUsed: pageFeatures.pageContentUsed,
+        pageFields: pageFeatures.pageFields,
+        matchedTerms: bodyLeafMatches,
+        sampledCount: 0,
+        contentSampleCount: 0,
+        matchedSampleCount: 0,
+        matchedSampleTitles: [],
+        folderNameMatched: bodyLeafMatches.length > 0,
+      };
       const evidence = [{ family: 'ai', strength: 1, reason: 'ai-folder', source: 'ai' }];
       if (pathEvidence.reasons.some(reason => reason.startsWith('local-tag:'))) {
-        evidence.push({ family: 'domain_path', strength: 1, reason: 'local-tag-folder-alignment', source: 'local-rule' });
+        evidence.push({ family: 'title_metadata', strength: 1, reason: 'local-tag-folder-alignment', source: 'local-rule' });
       }
-      if (pathEvidence.reasons.some(reason => reason.startsWith('content:'))) {
-        evidence.push({ family: 'content_semantic', strength: 1, reason: 'content-folder-alignment', source: 'local-rule' });
+      if (bodyLeafMatches.length > 0) {
+        evidence.push({ family: 'page_content', strength: 1, reason: 'page-content-folder-alignment', source: 'local-rule' });
       }
       if (matched) {
         folderCandidates.push({
           kind: 'folder', id: matched.id || '', folderId: matched.id || '', title: matched.title || '',
           folderName: matched.title || '', path: matched.path, folderPath: matched.path,
-          exists: true, evidence, source: 'ai',
+          exists: true, evidence, localEvidence, source: 'ai',
         });
       } else {
         const validation = core.validateNewFolderPath(aiPath, folderOptions);
@@ -3074,21 +3410,11 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
           folderCandidates.push({
             kind: 'folder', id: '', folderId: '', title: aiPath.split('/').slice(-1)[0] || '',
             folderName: aiPath.split('/').slice(-1)[0] || '', path: aiPath, folderPath: aiPath,
-            exists: false, evidence, source: 'ai',
+            exists: false, evidence, localEvidence, source: 'ai',
           });
         }
       }
     }
-    // The AI explanation is additional evidence for every known folder, not a
-    // privileged path selection. This lets the local scorer compare the full taxonomy.
-    folderCandidates.push(
-      ...scoreHistoricalFolderCandidates(folderMatchBookmarks, aiCandidateTags, bookmark, aiSuggestion, folderOptions)
-        .map(item => withRecommendationEvidence(item, 'history')),
-      ...scoreExistingFolderCandidates(folderOptions, aiCandidateTags, bookmark, aiSuggestion)
-        .map(item => withRecommendationEvidence(item, 'existing')),
-      ...scoreFolderProfileCandidates(folderMatchBookmarks, folderOptions, bookmark, aiCandidateTags, aiSuggestion)
-        .map(item => withRecommendationEvidence(item, 'profile')),
-    );
     summary = core.summarizeRecommendation(tagCandidates, folderCandidates);
   }
 
@@ -3123,6 +3449,10 @@ async function buildBookmarkRecommendation(bookmark, options = {}) {
     ruleTags: aiCandidateTags,
     aiSuggestion,
   };
+  await enqueueFolderSampleContentBackfill(
+    folderMatchBookmarks,
+    summary.folders.map(item => item.folderPath || item.path || ''),
+  ).catch(() => {});
   if (options.persist !== false) await persistRecommendationSnapshot(recommendation, bookmark);
   return recommendation;
 }
@@ -3150,7 +3480,7 @@ async function queueBookmarkMoveObservation(bookmark, fromFolderPath, toFolderId
   const recommendation = {
     version: 2,
     recommendationId: makeRecommendationId('move_observation'),
-    ruleVersion: self.BookmarkRecommendationCore?.RULE_VERSION || 'bookmark-recommendation-v2',
+    ruleVersion: self.BookmarkRecommendationCore?.RULE_VERSION || 'bookmark-recommendation-v3',
     tags: [],
     folders: [{
       id: String(toFolderId || ''),
@@ -3273,6 +3603,125 @@ async function getBookmarkFolderInfo(bookmark) {
   return folder || { id: bookmark.parentId, path: '', title: '' };
 }
 
+function splitLocalSummarySentences(text) {
+  const normalized = normalizeExtractedText(text);
+  if (!normalized) return [];
+  const sentences = [];
+  for (const paragraph of normalized.split(/\n+/)) {
+    const chunks = paragraph.match(/[^。！？!?；;]+[。！？!?；;]?/g) || [paragraph];
+    for (const chunk of chunks) {
+      const sentence = normalizeExtractedText(chunk);
+      if (sentence.length >= 12) sentences.push(sentence);
+    }
+  }
+  return sentences.slice(0, 80);
+}
+
+function buildLocalPageSummary(tempItem) {
+  const bodyText = normalizeExtractedText(tempItem?.contentText || '');
+  const compactBodyText = bodyText.replace(/\s+/g, ' ');
+  const leadExcerpt = [tempItem?.excerpt, tempItem?.contentExcerpt]
+    .map(value => normalizeExtractedText(value).replace(/\s+/g, ' '))
+    .find(value => value.length >= 20 && compactBodyText.includes(value));
+  if (leadExcerpt) return leadExcerpt.slice(0, 240);
+  const sentences = splitLocalSummarySentences(bodyText);
+  if (sentences.length > 0) {
+    const referenceTokens = new Set(tokenizeFolderEvidence([
+      tempItem?.contentTitle,
+      tempItem?.title,
+      ...(Array.isArray(tempItem?.headings) ? tempItem.headings : []),
+      ...(Array.isArray(tempItem?.contentHeadings) ? tempItem.contentHeadings : []),
+    ].filter(Boolean).join(' ')).filter(token => !FOLDER_EVIDENCE_STOP_WORDS.has(token)));
+    const frequency = new Map();
+    const candidates = sentences.map((sentence, index) => {
+      const tokens = [...new Set(tokenizeFolderEvidence(sentence)
+        .filter(token => !FOLDER_EVIDENCE_STOP_WORDS.has(token)))];
+      for (const token of tokens) frequency.set(token, (frequency.get(token) || 0) + 1);
+      return { sentence, index, tokens };
+    });
+    for (const candidate of candidates) {
+      const referenceMatches = candidate.tokens.filter(token => referenceTokens.has(token)).length;
+      const topicWeight = candidate.tokens.reduce((sum, token) => sum + Math.log1p(frequency.get(token) || 0), 0);
+      const density = (referenceMatches * 4 + topicWeight) / Math.sqrt(Math.max(1, candidate.tokens.length));
+      const readableLength = candidate.sentence.length >= 20 && candidate.sentence.length <= 180 ? 1 : 0;
+      candidate.score = density + readableLength + 1 / (candidate.index + 1);
+    }
+    const selected = candidates
+      .sort((left, right) => right.score - left.score || left.index - right.index)
+      .slice(0, 2)
+      .sort((left, right) => left.index - right.index)
+      .map(item => item.sentence);
+    const summary = normalizeExtractedText(selected.join(' '));
+    if (summary) return summary.slice(0, 240);
+  }
+  if (bodyText) return bodyText.slice(0, 240);
+  return normalizeExtractedText(
+    tempItem?.excerpt
+    || tempItem?.metaDesc
+    || tempItem?.contentExcerpt
+    || tempItem?.contentMetaDesc
+    || '',
+  ).slice(0, 240);
+}
+
+function buildLocalClassificationReason(candidate, language = 'zh', fallbackEvidence = null, pageSummary = '') {
+  const evidence = candidate?.localEvidence || fallbackEvidence || {};
+  const chinese = String(language).toLowerCase().startsWith('zh');
+  const parts = [];
+  const terms = (evidence.matchedTerms || []).filter(Boolean).slice(0, 5);
+  const sampledCount = Number(evidence.sampledCount) || 0;
+  const matchedSampleCount = Number(evidence.matchedSampleCount) || 0;
+  const folderName = candidate?.folderName
+    || candidate?.title
+    || normalizeBookmarkFolderPath(candidate?.folderPath || candidate?.path || '').split('/').filter(Boolean).slice(-1)[0]
+    || '';
+
+  const summary = normalizeExtractedText(pageSummary).slice(0, 160);
+  if (evidence.pageContentUsed && summary) {
+    parts.push(chinese ? `正文概要：“${summary}”` : `Content summary: “${summary}”`);
+  }
+  if (evidence.pageContentUsed && terms.length > 0) {
+    parts.push(chinese
+      ? `页面正文命中 ${terms.join('、')}`
+      : `Page content matched ${terms.join(', ')}`);
+  } else if (evidence.pageContentUsed && !summary) {
+    parts.push(chinese ? '页面正文已参与本地分类' : 'Page content was used for local classification');
+  }
+  if (sampledCount > 0) {
+    parts.push(chinese
+      ? `与该目录随机抽取的 ${sampledCount} 条书签中 ${matchedSampleCount} 条形成正文相似匹配`
+      : `Content matched ${matchedSampleCount} of ${sampledCount} randomly sampled bookmarks in this folder`);
+  }
+  if (evidence.folderNameMatched && folderName) {
+    parts.push(chinese
+      ? `目录叶子名称命中 ${folderName}`
+      : `The folder leaf name matched ${folderName}`);
+  }
+  const reliableRule = (candidate?.positiveFamilies || []).some(family => ['user_rule', 'curated_domain', 'learned_rule'].includes(family));
+  if (reliableRule) {
+    parts.push(chinese
+      ? '命中用户确认、人工配置或高可靠学习规则'
+      : 'Matched a user-confirmed, curated, or reliable learned rule');
+  }
+  if (parts.length > 0) {
+    const hasClassificationEvidence = terms.length > 0 || matchedSampleCount > 0 || evidence.folderNameMatched || reliableRule;
+    if (!hasClassificationEvidence) {
+      parts.push(candidate
+        ? (chinese ? '该目录候选仍需手动确认' : 'This folder candidate still needs manual confirmation')
+        : (chinese ? '正文与目录候选之间的交叉证据不足，请手动确认分类' : 'Cross-evidence between the content and folder candidates is insufficient; confirm the folder manually'));
+    }
+    return `${parts.join(chinese ? '；' : '; ')}${chinese ? '。' : '.'}`;
+  }
+  if (evidence.pageContentUsed) {
+    return chinese
+      ? '已读取页面正文，但正文与目录名称或目录样本之间的交叉证据不足，请手动确认分类。'
+      : 'Page content was read, but it did not have enough cross-evidence with the folder name or samples. Confirm the folder manually.';
+  }
+  return chinese
+    ? '未读取到可用正文，本次仅使用目录名称、标题、URL 与现有本地规则判断。'
+    : 'No usable page content was read; this result uses the folder name, title, URL, and existing local rules.';
+}
+
 function buildLocalBookmarkSuggestion(tempItem, ruleTags, suggestedFolder, aiSuggestion, aiError) {
   const ruleTagNames = normalizeTagList(ruleTags);
   const aiTagNames = normalizeTagList(aiSuggestion?.tags);
@@ -3280,6 +3729,20 @@ function buildLocalBookmarkSuggestion(tempItem, ruleTags, suggestedFolder, aiSug
     ? mergeAITags(ruleTags, aiSuggestion.tags, 3)
     : ruleTags;
   const finalTags = normalizeTagList(mergedTags).slice(0, 3);
+  const localPageSummary = buildLocalPageSummary(tempItem);
+  const pageFeatures = suggestedFolder?.localEvidence ? null : collectBookmarkTokenWeights(tempItem);
+  const localEvidence = suggestedFolder?.localEvidence || {
+    pageContentUsed: pageFeatures.pageContentUsed,
+    pageFields: pageFeatures.pageFields,
+    matchedTerms: [],
+    sampledCount: 0,
+    contentSampleCount: 0,
+    matchedSampleCount: 0,
+    matchedSampleTitles: [],
+    folderNameMatched: false,
+  };
+  const localReason = buildLocalClassificationReason(suggestedFolder, 'zh', localEvidence, localPageSummary);
+  const localReasonEn = buildLocalClassificationReason(suggestedFolder, 'en', localEvidence, localPageSummary);
   return {
     title: tempItem.title || tempItem.url,
     url: tempItem.url,
@@ -3288,9 +3751,12 @@ function buildLocalBookmarkSuggestion(tempItem, ruleTags, suggestedFolder, aiSug
     folderName: suggestedFolder?.title || '',
     folderPath: suggestedFolder?.path || '',
     folderId: suggestedFolder?.id || '',
-    summary: aiSuggestion?.summary || tempItem.excerpt || tempItem.metaDesc || '',
-    reason: aiSuggestion?.reason || (aiError ? 'AI 建议生成失败，可手动选择分类后继续收藏。' : '根据标题、域名、页面内容与本地规则生成建议。'),
-    evidence: aiSuggestion?.evidence || [],
+    summary: aiSuggestion?.summary || localPageSummary,
+    localPageSummary,
+    reason: aiSuggestion?.reason || (aiError && !suggestedFolder ? 'AI 建议生成失败，当前本地证据不足，请手动选择分类。' : localReason),
+    reasonEn: aiSuggestion?.reasonEn || (aiError && !suggestedFolder ? 'The AI suggestion failed and local evidence is insufficient. Choose a folder manually.' : localReasonEn),
+    evidence: (aiSuggestion?.evidence?.length ? aiSuggestion.evidence : suggestedFolder?.evidence) || [],
+    localEvidence,
     aiAvailable: !!aiSuggestion,
     aiError: aiError || '',
     ruleTags: ruleTagNames,
@@ -3341,11 +3807,7 @@ async function prepareBookmarkSuggestion(tab) {
   const draft = buildLocalBookmarkSuggestion(
     tempItem,
     recommendation.ruleTags,
-    selectedFolder ? {
-      id: selectedFolder.id || selectedFolder.folderId || '',
-      title: selectedFolder.title || selectedFolder.folderName || '',
-      path: selectedFolder.folderPath || selectedFolder.path || '',
-    } : null,
+    selectedFolder,
     aiSuggestion,
     recommendation.ai.error,
   );
@@ -3366,9 +3828,11 @@ async function prepareBookmarkSuggestion(tab) {
   draft.folderPath = draft.recommendedFolderPath;
   draft.folderId = selectedFolder?.id || selectedFolder?.folderId || '';
   draft.folderName = selectedFolder?.folderName || selectedFolder?.title || draft.folderName;
-  draft.reason = aiSuggestion?.reason
-    || selectedFolder?.reasons?.join('；')
-    || (recommendation.abstained ? '当前证据不足，暂不自动推荐分类。' : '根据本地规则与已有目录画像生成建议。');
+  draft.localEvidence = selectedFolder?.localEvidence || draft.localEvidence || null;
+  if (!aiSuggestion) {
+    draft.reason = buildLocalClassificationReason(selectedFolder, 'zh', draft.localEvidence, draft.localPageSummary);
+    draft.reasonEn = buildLocalClassificationReason(selectedFolder, 'en', draft.localEvidence, draft.localPageSummary);
+  }
   draft.folderOptions = folderOptions;
   if (duplicate) {
     const existingFolder = await getBookmarkFolderInfo(duplicate);
@@ -3519,7 +3983,22 @@ async function saveConfirmedBookmark(draft) {
       tags: finalTags,
       tagsAuto: finalTags,
       contentText: draft.contentText || item.contentText || '',
+      contentTitle: draft.contentTitle || item.contentTitle || '',
       contentExcerpt: draft.excerpt || draft.summary || item.contentExcerpt || '',
+      contentMetaDesc: draft.metaDesc || item.contentMetaDesc || '',
+      contentMetaKeywords: Array.isArray(draft.metaKeywords) && draft.metaKeywords.length > 0
+        ? draft.metaKeywords
+        : (item.contentMetaKeywords || []),
+      contentHeadings: Array.isArray(draft.headings) && draft.headings.length > 0
+        ? draft.headings
+        : (item.contentHeadings || []),
+      contentStructuredTypes: Array.isArray(draft.structuredTypes) && draft.structuredTypes.length > 0
+        ? draft.structuredTypes
+        : (item.contentStructuredTypes || []),
+      contentFetchedAt: draft.contentFetchedAt || item.contentFetchedAt || null,
+      contentStatus: draft.contentStatus || item.contentStatus || (draft.contentText ? 'success' : 'failed'),
+      contentFailureReason: draft.contentFailureReason || '',
+      contentSource: draft.contentSource || item.contentSource || '',
       aiSuggestion: {
         tags: finalTags,
         summary: draft.summary || '',
@@ -3601,9 +4080,60 @@ async function injectBookmarkConfirmPanel(tabId, state) {
       };
       const format = (text, ...values) => values.reduce((result, value, index) => result.replace(`$${index + 1}`, value), text);
       const contentLength = String(panelState.contentText || '').trim().length;
-      const contentStatusText = contentLength >= 80
+      const contentStatusText = panelState.localEvidence?.pageContentUsed === true && contentLength > 0
         ? format(copy.contentReady, contentLength)
         : copy.contentFallback;
+      const candidateEvidenceText = (candidate) => {
+        const evidence = candidate?.localEvidence || {};
+        const terms = (evidence.matchedTerms || []).filter(Boolean).slice(0, 3);
+        const details = [];
+        if (evidence.pageContentUsed && terms.length > 0) {
+          details.push(isChinese ? `正文命中：${terms.join('、')}` : `Content: ${terms.join(', ')}`);
+        }
+        if (Number(evidence.sampledCount) > 0) {
+          details.push(isChinese
+            ? `样本 ${Number(evidence.matchedSampleCount) || 0}/${Number(evidence.sampledCount)}`
+            : `Samples ${Number(evidence.matchedSampleCount) || 0}/${Number(evidence.sampledCount)}`);
+        }
+        if (evidence.folderNameMatched) details.push(isChinese ? '目录叶子命中' : 'Folder leaf matched');
+        if (details.length === 0 && (candidate?.positiveFamilies || []).some(family => ['user_rule', 'curated_domain', 'learned_rule'].includes(family))) {
+          details.push(isChinese ? '命中已确认的本地规则' : 'Confirmed local rule matched');
+        }
+        return details.join(' · ');
+      };
+      const candidateClassificationReason = (candidate) => {
+        const evidence = candidate?.localEvidence || {};
+        const details = [];
+        const localSummary = String(panelState.localPageSummary || (!panelState.aiAvailable ? panelState.summary : '') || '').trim().slice(0, 160);
+        const pageContentUsed = evidence.pageContentUsed === true || panelState.localEvidence?.pageContentUsed === true;
+        const terms = (evidence.matchedTerms || []).filter(Boolean).slice(0, 5);
+        const sampledCount = Number(evidence.sampledCount) || 0;
+        const matchedSampleCount = Number(evidence.matchedSampleCount) || 0;
+        const folderPath = String(candidate?.folderPath || candidate?.path || '');
+        const folderName = candidate?.folderName || candidate?.title || folderPath.split('/').filter(Boolean).slice(-1)[0] || '';
+        if (pageContentUsed && localSummary) {
+          details.push(isChinese ? `正文概要：“${localSummary}”` : `Content summary: “${localSummary}”`);
+        }
+        if (pageContentUsed && terms.length > 0) {
+          details.push(isChinese ? `页面正文命中 ${terms.join('、')}` : `Page content matched ${terms.join(', ')}`);
+        }
+        if (sampledCount > 0) {
+          details.push(isChinese
+            ? `与随机抽取的 ${sampledCount} 条目录书签中 ${matchedSampleCount} 条形成正文相似匹配`
+            : `Content matched ${matchedSampleCount} of ${sampledCount} randomly sampled folder bookmarks`);
+        }
+        if (evidence.folderNameMatched && folderName) {
+          details.push(isChinese ? `目录叶子名称命中 ${folderName}` : `The folder leaf name matched ${folderName}`);
+        }
+        const reliableRule = (candidate?.positiveFamilies || []).some(family => ['user_rule', 'curated_domain', 'learned_rule'].includes(family));
+        if (reliableRule) {
+          details.push(isChinese ? '命中已确认的本地规则' : 'Matched a confirmed local rule');
+        }
+        if (terms.length === 0 && matchedSampleCount === 0 && !evidence.folderNameMatched && !reliableRule) {
+          details.push(isChinese ? '该目录候选仍需手动确认' : 'This folder candidate still needs manual confirmation');
+        }
+        return details.join(isChinese ? '；' : '; ') + (details.length > 0 ? (isChinese ? '。' : '.') : '');
+      };
       const localizeRootPath = (path) => {
         if (isChinese) return String(path || '');
         const rootNames = {
@@ -3625,10 +4155,10 @@ async function injectBookmarkConfirmPanel(tabId, state) {
       const newOptionLabel = recommendedPath ? `${copy.newPrefix}${recommendedPath}` : copy.newCategoryLabel;
       const confidenceText = value => copy[value] || copy.low;
       const candidateHtml = folderCandidates.length > 0
-        ? folderCandidates.map(candidate => {
+        ? folderCandidates.map((candidate, candidateIndex) => {
           const path = localizeRootPath(candidate.folderPath || candidate.path || '');
-          const reasons = (candidate.reasons || []).slice(0, 2).join(' · ');
-          return `<button type="button" class="ab-candidate${path === recommendedPath ? ' is-selected' : ''}" data-candidate-path="${esc(path)}" data-candidate-id="${esc(candidate.id || candidate.folderId || '')}" data-candidate-existing="${candidate.exists ? 'true' : 'false'}"><span><strong>${esc(path)}</strong>${reasons ? `<small>${esc(reasons)}</small>` : ''}</span><em class="is-${esc(candidate.confidence || 'low')}">${esc(confidenceText(candidate.confidence))}</em></button>`;
+          const reasons = candidateEvidenceText(candidate);
+          return `<button type="button" class="ab-candidate${path === recommendedPath ? ' is-selected' : ''}" data-candidate-index="${candidateIndex}" data-candidate-path="${esc(path)}" data-candidate-id="${esc(candidate.id || candidate.folderId || '')}" data-candidate-existing="${candidate.exists ? 'true' : 'false'}"><span><strong>${esc(path)}</strong>${reasons ? `<small>${esc(reasons)}</small>` : ''}</span><em class="is-${esc(candidate.confidence || 'low')}">${esc(confidenceText(candidate.confidence))}</em></button>`;
         }).join('')
         : `<div class="ab-abstain">${copy.noRecommendation}</div>`;
       const selectedTagSet = new Set(tags.map(tag => String(tag).toLowerCase()));
@@ -3737,7 +4267,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
             </div>
             <div class="ab-grid"><div><label>${copy.tags}</label><input id="abTagsInput" value="${esc(tags.join(', '))}" placeholder="${copy.tagHint}">${tagCandidateHtml ? `<div class="ab-tag-candidates" role="group" aria-label="${copy.tags}">${tagCandidateHtml}</div>` : ''}</div><div><label>${copy.recommendedPath}</label><input value="${esc(recommendedPath)}" disabled></div></div>
             <label>${copy.summary}</label><textarea id="abSummaryInput" placeholder="${copy.summaryHint}">${esc(panelState.summary || '')}</textarea>
-            <label>${copy.reason}</label><textarea id="abReasonInput" placeholder="${copy.reasonHint}">${esc(panelState.reason || '')}</textarea>
+            <label>${copy.reason}</label><textarea id="abReasonInput" placeholder="${copy.reasonHint}">${esc((isChinese ? panelState.reason : panelState.reasonEn) || panelState.reason || '')}</textarea>
             <div class="ab-content-status">${esc(contentStatusText)}</div>
             <div class="ab-note">${esc(panelState.aiError || (panelState.aiAvailable ? copy.aiReady : (panelState.abstained ? copy.noRecommendation : copy.localReady)))}</div>
             <div class="ab-actions"><button class="ab-secondary" data-act="retry">${copy.retry}</button><button class="ab-secondary" data-act="reject">${copy.reject}</button><button class="ab-secondary" data-act="cancel">${copy.cancel}</button><button class="ab-primary" data-act="confirm">${copy.confirm}</button></div>
@@ -3771,6 +4301,7 @@ async function injectBookmarkConfirmPanel(tabId, state) {
       const folderSearchStatus = root.querySelector('#abFolderSearchStatus');
       const destination = root.querySelector('#abDestination');
       const folderToggle = root.querySelector('#abFolderToggle');
+      const reasonInput = root.querySelector('#abReasonInput');
       const getExistingFolderOptions = () => Array.from(folderSelect?.options || [])
         .filter(opt => opt.value && !opt.value.startsWith('__') && !opt.disabled);
       let selectedExistingFolder = recommendedExists && recommendedPath
@@ -3836,15 +4367,19 @@ async function injectBookmarkConfirmPanel(tabId, state) {
           folderResults.classList.remove('is-open');
           folderResults.innerHTML = '';
         }
+        const matchedCandidate = folderCandidates.find(candidate => (candidate.folderPath || candidate.path || '') === opt.value);
+        if (matchedCandidate && reasonInput) reasonInput.value = candidateClassificationReason(matchedCandidate);
         updateDestination();
       };
       root.querySelectorAll('.ab-candidate').forEach(candidateButton => {
         candidateButton.addEventListener('click', () => {
           const path = candidateButton.dataset.candidatePath || '';
+          const selectedCandidate = folderCandidates[Number(candidateButton.dataset.candidateIndex)] || null;
           const option = getExistingFolderOptions().find(item =>
             (item.dataset?.displayPath || item.value) === path || item.value === path
           );
           root.querySelectorAll('.ab-candidate').forEach(item => item.classList.toggle('is-selected', item === candidateButton));
+          if (selectedCandidate && reasonInput) reasonInput.value = candidateClassificationReason(selectedCandidate);
           if (option) {
             selectExistingFolder(option);
           } else if (folderSearch) {
@@ -4167,7 +4702,7 @@ async function addSingleBookmark(id) {
 
     let contentTask = Promise.resolve(item);
     if (!pending?.contentText && item.url) {
-      contentTask = fetchBookmarkContent(item.url, { forceRefresh: false }).then(async (content) => {
+      contentTask = fetchBookmarkContent(item.url, { forceRefresh: false, renderFallback: false }).then(async (content) => {
         const contentPatch = {
           contentText: content.textContent || '',
           contentTitle: content.title || item.contentTitle || '',
@@ -4272,10 +4807,10 @@ async function enrichClickCounts(bookmarks, concurrency = 5) {
     try {
       const visits = await chrome.history.getVisits({ url: item.url });
       const count = visits ? visits.length : 0;
-      if (count !== (item.clickCount || 0)) {
-        const lastClickedAt = count > 0
-          ? Math.max(...visits.map((visit) => Number(visit.visitTime) || 0))
-          : null;
+      const lastClickedAt = count > 0
+        ? Math.max(...visits.map((visit) => Number(visit.visitTime) || 0))
+        : null;
+      if (count !== (item.clickCount || 0) || lastClickedAt !== (item.lastClickedAt || null)) {
         updated.push({ id: item.id, url: item.url, clickCount: count, lastClickedAt });
       }
     } catch (e) {
@@ -4283,6 +4818,39 @@ async function enrichClickCounts(bookmarks, concurrency = 5) {
     }
   });
   return updated;
+}
+
+function applyClickCountUpdates(bookmarks, updates) {
+  const byId = new Map((updates || []).filter(item => item.id).map(item => [item.id, item]));
+  const byUrl = new Map((updates || []).filter(item => item.url).map(item => [item.url, item]));
+  for (const item of bookmarks || []) {
+    const update = byId.get(item.id) || byUrl.get(item.url);
+    if (!update || update.url !== item.url) continue;
+    item.clickCount = update.clickCount;
+    item.lastClickedAt = update.lastClickedAt;
+  }
+  return bookmarks;
+}
+
+let clickCountRefreshInFlight = null;
+async function refreshStoredClickCounts() {
+  if (!clickCountRefreshInFlight) {
+    clickCountRefreshInFlight = (async () => {
+      const bookmarks = await getStoredBookmarks();
+      const updated = await enrichClickCounts(bookmarks, 10);
+      if (updated.length > 0) {
+        const updatesById = new Map(updated.filter(item => item.id).map(item => [item.id, item]));
+        const updatesByUrl = new Map(updated.filter(item => item.url).map(item => [item.url, item]));
+        await mutateStoredBookmarks((current) => current.map((item) => {
+          const update = updatesById.get(item.id) || updatesByUrl.get(item.url);
+          if (!update || update.url !== item.url) return item;
+          return { ...item, clickCount: update.clickCount, lastClickedAt: update.lastClickedAt };
+        }));
+      }
+      return { updated: updated.length };
+    })().finally(() => { clickCountRefreshInFlight = null; });
+  }
+  return clickCountRefreshInFlight;
 }
 
 // ===== RSS 文章 → 书签 互通 =====
@@ -4998,35 +5566,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     case 'recordClick': {
-      (async () => {
-        const { url } = message;
-        if (!url) { sendResponse({ success: false, error: 'No URL' }); return; }
-        const normalizedUrl = url.replace(/\/+$/, '');
-        let found = false;
-        await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
-          if (found || !item.url || item.url.replace(/\/+$/, '') !== normalizedUrl) return item;
-          found = true;
-          return { ...item, clickCount: (item.clickCount || 0) + 1, lastClickedAt: Date.now() };
-        }));
-        sendResponse(found ? { success: true } : { success: false, error: 'Bookmark not found' });
-      })();
-      return true;
+      // 兼容旧页面：访问次数统一由 Chrome History 提供，不能在这里再次累加。
+      sendResponse({ success: true, deprecated: true, source: 'chrome_history' });
+      return false;
     }
 
     case 'refreshClickCounts': {
-      (async () => {
-        const bookmarks = await getStoredBookmarks();
-        const updated = await enrichClickCounts(bookmarks, 10);
-        if (updated.length > 0) {
-          const updatesById = new Map(updated.map((item) => [item.id, item]));
-          await mutateStoredBookmarks((current) => current.map((item) => {
-            const update = updatesById.get(item.id);
-            if (!update || update.url !== item.url) return item;
-            return { ...item, clickCount: update.clickCount, lastClickedAt: update.lastClickedAt };
-          }));
-        }
-        sendResponse({ success: true, updated: updated.length });
-      })();
+      refreshStoredClickCounts()
+        .then(result => sendResponse({ success: true, ...result }))
+        .catch(error => sendResponse({ success: false, error: error?.message || 'history_refresh_failed' }));
       return true;
     }
 
@@ -5958,6 +6506,11 @@ async function scheduleCheckerAlarm() {
 
 // 闹钟触发时执行后台检测
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === FOLDER_CONTENT_BACKFILL_ALARM) {
+    await processFolderSampleContentBackfill().catch(err => console.warn('Folder sample content backfill failed:', err));
+    return;
+  }
+
   // RSS 订阅定时拉取
   if (alarm.name === RSS_ALARM_NAME) {
     try {
@@ -6260,20 +6813,17 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
-// ===== 点击计数追踪：监听标签页导航 =====
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url && !tab.url.startsWith('chrome-extension://')) {
-    const normalizedUrl = tab.url.replace(/\/+$/, '');
-    mutateStoredBookmarks((bookmarks) => {
-      let updated = false;
-      const clickedAt = Date.now();
-      return bookmarks.map((item) => {
-        if (updated || !item.url || item.url.replace(/\/+$/, '') !== normalizedUrl) return item;
-        updated = true;
-        return { ...item, clickCount: (item.clickCount || 0) + 1, lastClickedAt: clickedAt };
-      });
-    }).catch(() => {});
-  }
+// Chrome History 是访问次数的唯一来源；写入绝对值，避免一次导航被重复累加。
+chrome.history.onVisited.addListener((historyItem) => {
+  if (!historyItem?.url || !Number.isFinite(Number(historyItem.visitCount))) return;
+  const normalizedUrl = historyItem.url.replace(/\/+$/, '');
+  const visitCount = Math.max(0, Number(historyItem.visitCount) || 0);
+  const lastClickedAt = Number(historyItem.lastVisitTime) || null;
+  mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
+    if (!item.url || item.url.replace(/\/+$/, '') !== normalizedUrl) return item;
+    if ((item.clickCount || 0) === visitCount && (item.lastClickedAt || null) === lastClickedAt) return item;
+    return { ...item, clickCount: visitCount, lastClickedAt };
+  })).catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {

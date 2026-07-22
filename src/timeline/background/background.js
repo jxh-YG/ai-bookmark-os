@@ -2268,7 +2268,7 @@ async function failIncrementalClassificationQueue(ids, error) {
   const affected = new Set(ids || []);
   const now = Date.now();
   return mutateIncrementalClassificationQueue((queue) => queue.map((item) => {
-    if (!affected.has(item.id)) return item;
+    if (!affected.has(item.id) || item.status !== 'running') return item;
     const attempts = item.attempts + 1;
     const failed = attempts >= INCREMENTAL_MAX_ATTEMPTS;
     return {
@@ -2292,6 +2292,13 @@ async function retryIncrementalClassificationQueue(ids) {
   const affected = new Set(ids || []);
   return mutateIncrementalClassificationQueue((queue) => queue.map((item) => affected.has(item.id)
     ? { ...item, status: 'pending', attempts: 0, nextAttemptAt: 0, lastError: '' }
+    : item));
+}
+
+async function releaseIncrementalClassificationQueue(ids) {
+  const affected = new Set(ids || []);
+  return mutateIncrementalClassificationQueue((queue) => queue.map((item) => affected.has(item.id) && item.status === 'running'
+    ? { ...item, status: 'pending', nextAttemptAt: 0 }
     : item));
 }
 
@@ -5283,6 +5290,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'incrementalQueueRetry':
       (async () => {
         const queue = await retryIncrementalClassificationQueue(message.ids || []);
+        sendResponse({ success: true, queue });
+      })();
+      return true;
+
+    case 'incrementalQueueRelease':
+      (async () => {
+        const queue = await releaseIncrementalClassificationQueue(message.ids || []);
         sendResponse({ success: true, queue });
       })();
       return true;

@@ -105,6 +105,25 @@ try {
   assert.ok(timerDelays.includes(9000), '正文读取阶段必须继续使用配置的超时计时器');
   assert.equal(getAiRetryCount({ ...settings, aiRetryCount: 2.6 }), 3, '运行时归一化应与设置页显示一致');
   assert.equal(getAiRequestTimeoutMs({ ...settings, aiRequestTimeoutSeconds: 7.6 }), 8000);
+
+  calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return {
+      status: 401,
+      ok: false,
+      text: async () => JSON.stringify({ error: { message: 'invalid token secret-provider-payload' } }),
+    };
+  };
+  await assert.rejects(
+    () => chat(settings, [{ role: 'user', content: 'test' }]),
+    (error) => {
+      assert.match(error.message, /身份验证失败 \(401\)/);
+      assert.doesNotMatch(error.message, /secret-provider-payload/);
+      return true;
+    },
+  );
+  assert.equal(calls, 1, '认证失败属于不可重试错误，不得继续消耗连接次数');
 } finally {
   globalThis.setTimeout = nativeSetTimeout;
   globalThis.clearTimeout = nativeClearTimeout;

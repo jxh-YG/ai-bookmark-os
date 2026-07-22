@@ -53,6 +53,10 @@ globalThis.chrome = {
         incrementalQueue = incrementalQueue.map((item) => message.ids.includes(item.id)
           ? { ...item, status: 'succeeded', completedAt: Date.now(), lastError: '', nextAttemptAt: 0 }
           : item);
+      } else if (message.action === 'incrementalQueueRelease') {
+        incrementalQueue = incrementalQueue.map((item) => message.ids.includes(item.id) && item.status === 'running'
+          ? { ...item, status: 'pending', nextAttemptAt: 0 }
+          : item);
       }
       return { success: true, queue: structuredClone(incrementalQueue) };
     },
@@ -114,6 +118,8 @@ assert.doesNotMatch(background, /if \(config\.allowPageContentForAi === false\)[
 assert.match(background, /case ['"]labelCacheGet['"]:/);
 assert.match(background, /case ['"]labelCacheMerge['"]:/);
 assert.match(background, /case ['"]labelCacheClear['"]:/);
+assert.match(background, /case ['"]incrementalQueueRelease['"]:/);
+assert.match(background, /releaseIncrementalClassificationQueue/);
 
 const labelCacheSource = readFileSync('src/core/cache.ts', 'utf8');
 assert.doesNotMatch(labelCacheSource, /chrome\.storage\.local\.(?:set|remove)\s*\(/);
@@ -138,6 +144,10 @@ await queue.enqueueIncrementalBookmarks([{ id: 'new-1', createdAt: 1 }]);
 assert.equal((await queue.loadIncrementalQueue()).length, 1);
 await queue.markIncrementalQueueFailed(['new-1'], 'network_error');
 assert.equal((await queue.loadIncrementalQueue())[0].lastError, 'network_error');
+incrementalQueue = incrementalQueue.map((item) => ({ ...item, status: 'running', nextAttemptAt: 0 }));
+await queue.releaseIncrementalQueue(['new-1']);
+assert.equal((await queue.loadIncrementalQueue())[0].attempts, 1, '用户取消后重新排队不得清空既有失败次数');
+assert.equal((await queue.loadIncrementalQueue())[0].status, 'pending');
 await queue.completeIncrementalQueue(['new-1']);
 assert.equal((await queue.loadIncrementalQueue())[0].status, 'succeeded');
 

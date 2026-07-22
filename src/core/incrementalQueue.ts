@@ -59,16 +59,20 @@ export async function enqueueIncrementalBookmarks(entries: Array<Pick<Incrementa
   await chrome.runtime.sendMessage({ action: 'incrementalQueueEnqueue', entries });
 }
 
-export async function markIncrementalQueueFailed(ids: string[], error: string): Promise<void> {
-  await queueMessage('incrementalQueueFail', { ids, error: error.slice(0, 240) });
+export async function markIncrementalQueueFailed(ids: string[], error: string): Promise<IncrementalQueueEntry[]> {
+  return queueMessage('incrementalQueueFail', { ids, error: error.slice(0, 240) });
 }
 
-export async function completeIncrementalQueue(ids: string[]): Promise<void> {
-  await queueMessage('incrementalQueueComplete', { ids });
+export async function completeIncrementalQueue(ids: string[]): Promise<IncrementalQueueEntry[]> {
+  return queueMessage('incrementalQueueComplete', { ids });
 }
 
 export async function retryIncrementalQueue(ids: string[]): Promise<void> {
   await queueMessage('incrementalQueueRetry', { ids });
+}
+
+export async function releaseIncrementalQueue(ids: string[]): Promise<void> {
+  await queueMessage('incrementalQueueRelease', { ids });
 }
 
 export async function abandonIncrementalQueue(ids: string[]): Promise<void> {

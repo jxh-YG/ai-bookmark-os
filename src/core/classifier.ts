@@ -11,6 +11,7 @@ import type {
 import { chat, extractJson, getAiRequestTimeoutMs, getAiRetryCount } from './llm';
 import { resolveClassifyPrompts } from '../types';
 import { hashUrl, loadCache, saveCache, type CachedPageContext } from './cache';
+import { collectPlannedBookmarkIds } from './bookmarks';
 
 /** 调用 LLM 并解析 JSON；失败时追加“只输出 JSON”修复提示重试一次 */
 async function chatJson<T>(
@@ -67,6 +68,48 @@ function assignBatchSize(settings: Settings): number {
   return Number.isFinite(v) ? Math.min(100, Math.max(10, Math.floor(v))) : ASSIGN_BATCH_SIZE;
 }
 type ProgressFn = (p: ClassifyProgress) => void;
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('已取消', 'AbortError');
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw abortReason(signal);
+}
+
+async function waitForAbortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw abortReason(signal);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
+async function runClassificationTask<T>(
+  outerSignal: AbortSignal,
+  onProgress: ProgressFn,
+  run: (signal: AbortSignal, reportProgress: ProgressFn) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(abortReason(outerSignal));
+  if (outerSignal.aborted) onAbort();
+  else outerSignal.addEventListener('abort', onAbort, { once: true });
+  const reportProgress: ProgressFn = (progress) => {
+    if (!controller.signal.aborted) onProgress(progress);
+  };
+  try {
+    throwIfAborted(controller.signal);
+    const result = await run(controller.signal, reportProgress);
+    throwIfAborted(controller.signal);
+    return result;
+  } catch (error) {
+    if (!controller.signal.aborted) controller.abort(error);
+    throw error;
+  } finally {
+    outerSignal.removeEventListener('abort', onAbort);
+  }
+}
 
 /** Callers that need to archive the old draft first can defer the legacy storage write. */
 export interface ClassifyRunOptions {
@@ -407,6 +450,7 @@ function bookmarkSignalLine(
 /** Fetch contextual signals for every uncached bookmark once and reuse them across AI stages. */
 async function enrichBookmarks(
   bookmarks: FlatBookmark[],
+  signal: AbortSignal,
 ): Promise<Map<string, PageContext>> {
   const enriched = new Map<string, PageContext>();
   try {
@@ -418,13 +462,18 @@ async function enrichBookmarks(
   let idx = 0;
   const workers = Array.from({ length: META_CONCURRENCY }, async () => {
     while (idx < bookmarks.length) {
+      if (signal.aborted) throw abortReason(signal);
       const b = bookmarks[idx++];
       try {
-        const context = (await chrome.runtime.sendMessage({ type: 'fetchPageContext', url: b.url })) as
+        const context = (await waitForAbortable(
+          chrome.runtime.sendMessage({ type: 'fetchPageContext', url: b.url }),
+          signal,
+        )) as
           | PageContext
           | null;
         if (context) enriched.set(b.id, context);
-      } catch {
+      } catch (error) {
+        if (signal.aborted) throw error;
         /* Page access errors should not block classification. */
       }
     }
@@ -466,7 +515,7 @@ async function labelBookmarks(
 
   // A complete cache hit reuses both the AI label and its source context.
   if (usePageMetadata(settings) && contextPending.length) {
-    const fetchedContexts = await enrichBookmarks(contextPending);
+    const fetchedContexts = await enrichBookmarks(contextPending, signal);
     let cacheChanged = false;
     for (const [id, context] of fetchedContexts) contexts.set(id, context);
     if (cacheEnabled) {
@@ -582,7 +631,7 @@ async function labelBookmarks(
     }
     done += batch.length;
     if (cacheEnabled) await saveCache(cache);
-    onProgress({ phase: 'labeling', done, total, message: undefined });
+    if (!signal.aborted) onProgress({ phase: 'labeling', done, total, message: undefined });
   };
 
   // 并发池（从 settings 读取并发数）
@@ -853,7 +902,7 @@ async function assignBookmarks(
 }
 
 /** 主入口：跑完整分类流程 */
-export async function classify(
+async function classifyTask(
   settings: Settings,
   bookmarks: FlatBookmark[],
   onProgress: ProgressFn,
@@ -882,6 +931,7 @@ export async function classify(
   const assignments = flexibleBookmarks.length
     ? await assignBookmarks(settings, aiTree, flexibleBookmarks, labels, labeled.contexts, onProgress, signal)
     : [];
+  throwIfAborted(signal);
   const tree = mergeTrees(preservedTree, aiTree);
 
   const result: ClassifyResult = {
@@ -891,9 +941,23 @@ export async function classify(
     ...(scope.mode === 'partial' ? { scope } : {}),
     aiResponses: { labels: labeled.responses, ...(built?.response ? { tree: built.response } : {}), assignments },
   };
+  throwIfAborted(signal);
   if (options.persist !== false) await saveClassifyResult(result);
+  throwIfAborted(signal);
   onProgress({ phase: 'done', done: bookmarks.length, total: bookmarks.length });
   return result;
+}
+
+export async function classify(
+  settings: Settings,
+  bookmarks: FlatBookmark[],
+  onProgress: ProgressFn,
+  signal: AbortSignal,
+  scope: ClassificationScope = { mode: 'full' },
+  options: ClassifyRunOptions = {},
+): Promise<ClassifyResult> {
+  return runClassificationTask(signal, onProgress, (taskSignal, reportProgress) =>
+    classifyTask(settings, bookmarks, reportProgress, taskSignal, scope, options));
 }
 
 /**
@@ -1056,7 +1120,7 @@ export async function estimateClassify(
  * 增量归类：把若干新书签打标后归入现有分类树（不重建树）。
  * 返回更新后的 ClassifyResult（已持久化）。
  */
-export async function classifyIncremental(
+async function classifyIncrementalTask(
   settings: Settings,
   newBookmarks: FlatBookmark[],
   existing: ClassifyResult,
@@ -1064,10 +1128,16 @@ export async function classifyIncremental(
   signal: AbortSignal,
   options: ClassifyRunOptions = {},
 ): Promise<ClassifyResult> {
+  const plannedIds = new Set(collectPlannedBookmarkIds(existing.tree));
+  const pendingBookmarks = newBookmarks.filter((bookmark) => !plannedIds.has(bookmark.id));
+  if (!pendingBookmarks.length) {
+    onProgress({ phase: 'done', done: newBookmarks.length, total: newBookmarks.length });
+    return existing;
+  }
   // 路径 + ID 双模式匹配（与 classify 保持一致）
   const preservedPaths = await resolvePreservedFolderPaths(settings);
-  const preservedTree = buildPreservedTree(newBookmarks, preservedPaths);
-  const flexibleBookmarks = newBookmarks.filter((bookmark) => !isInPreservedFolder(bookmark, preservedPaths));
+  const preservedTree = buildPreservedTree(pendingBookmarks, preservedPaths);
+  const flexibleBookmarks = pendingBookmarks.filter((bookmark) => !isInPreservedFolder(bookmark, preservedPaths));
   const labeled = await labelBookmarks(settings, flexibleBookmarks, onProgress, signal);
   const labels = labeled.labels;
   const tree: CategoryNode[] = JSON.parse(JSON.stringify(existing.tree));
@@ -1077,7 +1147,7 @@ export async function classifyIncremental(
   if (flexibleBookmarks.length) {
     await assignBookmarks(settings, tree, flexibleBookmarks, labels, labeled.contexts, onProgress, signal);
   } else {
-    onProgress({ phase: 'assigning', done: newBookmarks.length, total: newBookmarks.length });
+    onProgress({ phase: 'assigning', done: pendingBookmarks.length, total: pendingBookmarks.length });
   }
 
   // ── 增量树失衡检测 ──
@@ -1098,7 +1168,21 @@ export async function classifyIncremental(
     updatedAt: Date.now(),
     ...(incrementalImbalanceWarning ? { incrementalImbalanceWarning: true } : {}),
   };
+  throwIfAborted(signal);
   if (options.persist !== false) await saveClassifyResult(result);
-  onProgress({ phase: 'done', done: newBookmarks.length, total: newBookmarks.length });
+  throwIfAborted(signal);
+  onProgress({ phase: 'done', done: pendingBookmarks.length, total: pendingBookmarks.length });
   return result;
+}
+
+export async function classifyIncremental(
+  settings: Settings,
+  newBookmarks: FlatBookmark[],
+  existing: ClassifyResult,
+  onProgress: ProgressFn,
+  signal: AbortSignal,
+  options: ClassifyRunOptions = {},
+): Promise<ClassifyResult> {
+  return runClassificationTask(signal, onProgress, (taskSignal, reportProgress) =>
+    classifyIncrementalTask(settings, newBookmarks, existing, reportProgress, taskSignal, options));
 }

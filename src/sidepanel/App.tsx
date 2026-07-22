@@ -33,6 +33,7 @@ import {
   getFlatBookmarks,
   getFolderClassificationScope,
   inspectClassificationPlanCompatibility,
+  collectPlannedBookmarkIds,
   planApply,
   undoLatestApply,
   type ApplyResult,
@@ -83,6 +84,7 @@ import {
   isIncrementalQueueNearLimit,
   loadIncrementalQueue,
   markIncrementalQueueFailed,
+  releaseIncrementalQueue,
   retryIncrementalQueue,
   type IncrementalQueueEntry,
 } from '../core/incrementalQueue';
@@ -318,6 +320,7 @@ export function App() {
   const [uiSettings, setUiSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const abortRef = useRef<AbortController | null>(null);
   const classificationLockRef = useRef(false);
+  const classificationRunRef = useRef(0);
   const liveRefreshTimerRef = useRef<number | null>(null);
   const liveRefreshRequestRef = useRef(0);
   const liveSnapshotRef = useRef<BookmarkTreeSnapshot | null>(null);
@@ -403,6 +406,29 @@ export function App() {
   const releaseClassificationLock = useCallback(() => {
     classificationLockRef.current = false;
     setClassificationPending(false);
+  }, []);
+
+  const startClassificationProgress = useCallback(() => {
+    const runId = ++classificationRunRef.current;
+    setProgress({ phase: 'idle', done: 0, total: 0 });
+    return {
+      runId,
+      report: (next: ClassifyProgress) => {
+        if (classificationRunRef.current === runId) setProgress(next);
+      },
+    };
+  }, []);
+
+  const finishClassificationProgress = useCallback((runId: number, next: ClassifyProgress) => {
+    if (classificationRunRef.current !== runId) return;
+    classificationRunRef.current += 1;
+    setProgress(next);
+  }, []);
+
+  useEffect(() => () => {
+    classificationRunRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
   }, []);
 
   const refreshLiveTree = useCallback(async (): Promise<BookmarkTreeSnapshot> => {
@@ -622,8 +648,25 @@ export function App() {
   useEffect(() => {
     let disposed = false;
     let retryTimer: number | null = null;
+    let activeController: AbortController | null = null;
     const refreshQueueState = async () => {
-      const queue = await loadIncrementalQueue();
+      let queue = await loadIncrementalQueue();
+      const currentResult = resultRef.current;
+      const plannedIds = new Set(currentResult?.scope?.mode === 'partial'
+        ? []
+        : collectPlannedBookmarkIds(currentResult?.tree ?? []));
+      const committedQueueIds = queue
+        .filter((entry) => entry.status !== 'succeeded' && plannedIds.has(entry.id))
+        .map((entry) => entry.id);
+      if (committedQueueIds.length) {
+        try {
+          queue = await completeIncrementalQueue(committedQueueIds);
+        } catch {
+          if (retryTimer === null) {
+            retryTimer = window.setTimeout(() => setIncrementalQueueTick((value) => value + 1), 1000);
+          }
+        }
+      }
       if (!disposed) setFailedIncrementalQueue(queue.filter((entry) => entry.status === 'failed'));
       return queue;
     };
@@ -641,6 +684,9 @@ export function App() {
     const runIncremental = async () => {
       let lockHeld = false;
       let ids: string[] = [];
+      let progressRun: ReturnType<typeof startClassificationProgress> | null = null;
+      let committed = false;
+      let classifiedCount = 0;
       try {
         const queue = await refreshQueueState();
         if (
@@ -668,13 +714,31 @@ export function App() {
         const beforeSnapshot = await captureBookmarkSnapshot(FULL_CLASSIFICATION_SCOPE);
         const allBookmarks = await getFlatBookmarks();
         const byId = new Map(allBookmarks.map((bookmark) => [bookmark.id, bookmark]));
-        const pending = ids.map((id) => byId.get(id)).filter((bookmark): bookmark is FlatBookmark => !!bookmark);
-        const missingIds = ids.filter((id) => !byId.has(id));
-        if (missingIds.length) await completeIncrementalQueue(missingIds);
+        const plannedIds = new Set(collectPlannedBookmarkIds(result.tree));
+        const settledIds = ids.filter((id) => !byId.has(id) || plannedIds.has(id));
+        const pending = ids
+          .map((id) => byId.get(id))
+          .filter((bookmark): bookmark is FlatBookmark => !!bookmark && !plannedIds.has(bookmark.id));
+        ids = pending.map((bookmark) => bookmark.id);
+        if (settledIds.length) {
+          try {
+            await completeIncrementalQueue(settledIds);
+          } catch {
+            try { await releaseIncrementalQueue(settledIds); } catch { /* background may be restarting */ }
+            if (retryTimer === null) {
+              retryTimer = window.setTimeout(() => setIncrementalQueueTick((value) => value + 1), 1000);
+            }
+          }
+        }
         if (!pending.length) return;
+        classifiedCount = pending.length;
+        if (!disposed) setError('');
 
         const controller = new AbortController();
-        const incremental = await classifyIncremental(uiSettings, pending, result, setProgress, controller.signal, { persist: false });
+        activeController = controller;
+        abortRef.current = controller;
+        progressRun = startClassificationProgress();
+        const incremental = await classifyIncremental(uiSettings, pending, result, progressRun.report, controller.signal, { persist: false });
         const afterSnapshot = await captureBookmarkSnapshot(FULL_CLASSIFICATION_SCOPE);
         if (beforeSnapshot.fingerprint !== afterSnapshot.fingerprint) {
           throw new Error('bookmarks_changed_during_incremental_classification');
@@ -688,9 +752,9 @@ export function App() {
           application: undefined,
         };
         await saveClassifyResult(next);
-        await completeIncrementalQueue(pending.map((bookmark) => bookmark.id));
+        committed = true;
+        resultRef.current = next;
         if (!disposed) {
-          resultRef.current = next;
           setResult(next);
           const imbalanceNote = next.incrementalImbalanceWarning
             ? ' 增量书签占比较高（≥30%），建议尽快执行全量重分类以优化分类树结构。'
@@ -699,14 +763,74 @@ export function App() {
           const draftsAfterIncrement = await refreshDraftList();
           await refreshDraftStatuses(draftsAfterIncrement, afterSnapshot);
         }
+        let postCommitWarning = '';
+        try {
+          await completeIncrementalQueue(pending.map((bookmark) => bookmark.id));
+        } catch {
+          postCommitWarning = '分类方案已保存，队列确认暂时失败，将在下一次工作台刷新时自动对账。';
+          if (retryTimer === null) {
+            retryTimer = window.setTimeout(() => setIncrementalQueueTick((value) => value + 1), 1000);
+          }
+        }
+        if (!disposed && postCommitWarning) setNotice(postCommitWarning);
+        if (progressRun) {
+          finishClassificationProgress(progressRun.runId, {
+            phase: 'done',
+            done: classifiedCount,
+            total: classifiedCount,
+          });
+        }
       } catch (error) {
-        if (ids.length) {
-          await markIncrementalQueueFailed(ids, (error as Error).message || 'incremental_classification_failed');
+        let exhausted = false;
+        let terminalError = error as Error;
+        if (committed) {
+          if (progressRun) {
+            finishClassificationProgress(progressRun.runId, {
+              phase: 'done',
+              done: classifiedCount,
+              total: classifiedCount,
+            });
+          }
+          if (!disposed) {
+            setNotice(`分类方案已保存，但后续界面刷新未完成：${terminalError.message || '请重新打开分类工作台对账。'}`);
+          }
+          return;
+        } else if (terminalError.name === 'AbortError' && ids.length) {
+          try {
+            await releaseIncrementalQueue(ids);
+            if (!disposed) {
+              setNotice(resolveLang(uiSettings.language) === 'zh'
+                ? '已取消本次增量分类，待处理书签会在下次打开分类工作台时继续。'
+                : 'Incremental classification cancelled. Pending bookmarks will resume next time.');
+            }
+          } catch (queueError) {
+            terminalError = queueError as Error;
+            exhausted = true;
+          }
+        } else if (ids.length) {
+          try {
+            const queue = await markIncrementalQueueFailed(ids, terminalError.message || 'incremental_classification_failed');
+            exhausted = queue.some((entry) => ids.includes(entry.id) && entry.status === 'failed');
+          } catch (queueError) {
+            terminalError = queueError as Error;
+            exhausted = true;
+          }
         } else {
-          console.warn('Incremental queue unavailable:', error);
+          console.warn('Incremental queue unavailable:', terminalError);
+          exhausted = true;
+        }
+        if (progressRun) {
+          finishClassificationProgress(progressRun.runId, exhausted
+            ? { phase: 'error', done: 0, total: 0 }
+            : { phase: 'idle', done: 0, total: 0 });
+        }
+        if (!disposed && exhausted) {
+          setError(`${d.classifyFailed}: ${terminalError.message || 'incremental_classification_failed'}`);
         }
       } finally {
         incrementalRunRef.current = false;
+        if (abortRef.current === activeController) abortRef.current = null;
+        activeController = null;
         if (lockHeld) releaseClassificationLock();
         try { scheduleRetry(await refreshQueueState()); } catch { /* background may be restarting */ }
       }
@@ -714,6 +838,7 @@ export function App() {
     void runIncremental();
     return () => {
       disposed = true;
+      activeController?.abort();
       if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
   }, [
@@ -724,6 +849,8 @@ export function App() {
     refreshDraftStatuses,
     releaseClassificationLock,
     result,
+    finishClassificationProgress,
+    startClassificationProgress,
     uiSettings,
   ]);
 
@@ -735,6 +862,7 @@ export function App() {
       await retryIncrementalQueue(ids);
       setFailedIncrementalQueue([]);
       setIncrementalQueueTick((value) => value + 1);
+      setError('');
       setNotice(resolveLang(uiSettings.language) === 'zh' ? `已重新排队 ${ids.length} 条书签。` : `${ids.length} bookmarks queued for retry.`);
     } catch (queueError) {
       setError((queueError as Error).message || 'incremental_queue_retry_failed');
@@ -752,6 +880,7 @@ export function App() {
     try {
       await abandonIncrementalQueue(ids);
       setFailedIncrementalQueue([]);
+      setError('');
       setNotice(isZh ? `已放弃 ${ids.length} 条失败任务。` : `${ids.length} failed tasks abandoned.`);
     } catch (queueError) {
       setError((queueError as Error).message || 'incremental_queue_abandon_failed');
@@ -760,7 +889,8 @@ export function App() {
     }
   }, [failedIncrementalQueue, uiSettings.language]);
 
-  const running = progress.phase === 'labeling' || progress.phase === 'building' || progress.phase === 'assigning';
+  const runningPhase = progress.phase === 'labeling' || progress.phase === 'building' || progress.phase === 'assigning';
+  const running = classificationPending && runningPhase;
   const operationBusy = running || classificationPending || checkingCompatibility || applying || undoing || savingDraft;
 
   const openAiClassificationSettings = useCallback(() => {
@@ -788,6 +918,9 @@ export function App() {
     setNotice('');
     setEstimate(null);
     let ctrl: AbortController | null = null;
+    const progressRun = startClassificationProgress();
+    let committed = false;
+    let classifiedCount = 0;
     try {
       const settings = await loadSettings();
       if (!settings.apiKey) {
@@ -810,7 +943,8 @@ export function App() {
       const sourceBookmarks = partialScope?.bookmarks ?? await getFlatBookmarks();
       let unique = dedupeByUrl(sourceBookmarks);
       if (limit) unique = unique.slice(0, limit);
-      const r = await classify(settings, unique, setProgress, ctrl.signal, activeScope, { persist: false });
+      classifiedCount = unique.length;
+      const r = await classify(settings, unique, progressRun.report, ctrl.signal, activeScope, { persist: false });
       const expanded: ClassifyResult = {
         ...expandDuplicateBookmarks(r, sourceBookmarks),
         draftId: newDraftId(),
@@ -819,6 +953,8 @@ export function App() {
         application: undefined,
       };
       await saveClassifyResult(expanded);
+      committed = true;
+      resultRef.current = expanded;
       setResult(expanded);
       setSelectedHistoryVersionId('');
       setPendingReuse(null);
@@ -833,12 +969,24 @@ export function App() {
       await refreshDraftStatuses(savedDrafts, currentSnapshot);
       if (limit) setNotice(d.trialNotice(unique.length));
       else if (partialScope) setNotice(partialText.done(partialScope.title, sourceBookmarks.length));
+      finishClassificationProgress(progressRun.runId, {
+        phase: 'done',
+        done: unique.length,
+        total: unique.length,
+      });
     } catch (e) {
-      if ((e as Error).name !== 'AbortError') {
+      if (committed) {
+        finishClassificationProgress(progressRun.runId, {
+          phase: 'done',
+          done: classifiedCount,
+          total: classifiedCount,
+        });
+        setNotice(`分类方案已保存，但后续界面刷新未完成：${(e as Error).message || '请重新打开分类工作台。'}`);
+      } else if ((e as Error).name !== 'AbortError') {
         setError(`${d.classifyFailed}: ${(e as Error).message}`);
-        setProgress({ phase: 'error', done: 0, total: 0 });
+        finishClassificationProgress(progressRun.runId, { phase: 'error', done: 0, total: 0 });
       } else {
-        setProgress({ phase: 'idle', done: 0, total: 0 });
+        finishClassificationProgress(progressRun.runId, { phase: 'idle', done: 0, total: 0 });
       }
     } finally {
       if (abortRef.current === ctrl) abortRef.current = null;
@@ -847,6 +995,7 @@ export function App() {
   }, [
     acquireClassificationLock,
     d,
+    finishClassificationProgress,
     openAiClassificationSettings,
     partialText,
     requestPageMetadataPermission,
@@ -854,6 +1003,7 @@ export function App() {
     refreshDraftStatuses,
     refreshHistoricalVersions,
     releaseClassificationLock,
+    startClassificationProgress,
   ]);
 
   /** 点击分类：先出成本预估确认 */
@@ -1472,7 +1622,9 @@ export function App() {
               ) : null}
             </div>
             <div className="search-actions">
-              {workspaceView === 'live' ? (
+              {running && abortRef.current ? (
+                <button type="button" className="btn btn-danger btn-sm" onClick={cancelClassify}>{d.cancel}</button>
+              ) : workspaceView === 'live' ? (
                 <>
                   <button
                     type="button"
@@ -1499,8 +1651,6 @@ export function App() {
                     {selectedLiveFolder?.kind === 'folder' ? '对所选目录分类' : partialText.action}
                   </button>
                 </>
-              ) : running ? (
-                <button type="button" className="btn btn-danger btn-sm" onClick={cancelClassify}>{d.cancel}</button>
               ) : workspaceView === 'draft' ? (
                 <>
                   <button type="button" className="btn btn-primary btn-sm" onClick={startClassify} disabled={operationBusy}>
@@ -1522,14 +1672,23 @@ export function App() {
           </div>
 
 
-          {(progress.phase === "done" || progress.phase === "error") && !running && (
+          {(progress.phase === "done" || progress.phase === "error") && !classificationPending && (
             <div className={`status-bar ${progress.phase === "error" ? "status-bar--error" : "status-bar--ok"}`}>
               {progress.phase === "done" && d.phaseDone}
               {progress.phase === "error" && d.phaseError}
             </div>
           )}
 
-          {error && <div className="error-msg">{error}</div>}
+          {error && (
+            <div className="error-msg" role="alert">
+              <span>{error}</span>
+              {/API .*(?:401|403)/.test(error) && (
+                <button type="button" className="btn btn-secondary btn-sm" onClick={openAiClassificationSettings}>
+                  {resolveLang(uiSettings.language) === 'zh' ? '检查 AI 设置' : 'Check AI settings'}
+                </button>
+              )}
+            </div>
+          )}
           {notice && <div className="status-bar">{notice}</div>}
           {failedIncrementalQueue.length > 0 && (
             <div className="pending-banner" role="alert">

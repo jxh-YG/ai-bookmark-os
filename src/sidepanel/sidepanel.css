@@ -468,9 +468,15 @@ button:not(.icon-btn):not(.btn):not(.search-clear):not(.pill):not(.nav-item):not
 }
 
 .error-msg {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
   border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   background: var(--danger-light);
   color: var(--danger);
+  overflow-wrap: anywhere;
 }
 
 /* ===== Tree / list ===== */

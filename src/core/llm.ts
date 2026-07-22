@@ -64,7 +64,8 @@ async function fetchWithTimeout(
     ctrl.abort(new DOMException('请求超时', 'TimeoutError'));
   }, timeoutMs);
   const onAbort = () => ctrl.abort(outerSignal?.reason ?? new DOMException('已取消', 'AbortError'));
-  outerSignal?.addEventListener('abort', onAbort, { once: true });
+  if (outerSignal?.aborted) onAbort();
+  else outerSignal?.addEventListener('abort', onAbort, { once: true });
   try {
     const response = await fetch(input, { ...init, signal: ctrl.signal });
     const text = await response.text();
@@ -79,6 +80,29 @@ async function fetchWithTimeout(
     clearTimeout(timeout);
     outerSignal?.removeEventListener('abort', onAbort);
   }
+}
+
+function responseErrorDetail(text: string): string {
+  let value: unknown = text;
+  try {
+    const data = JSON.parse(text) as { error?: unknown; message?: unknown };
+    value = data?.error && typeof data.error === 'object'
+      ? (data.error as { message?: unknown }).message
+      : data?.error ?? data?.message ?? text;
+  } catch {
+    /* Plain-text provider errors are handled below. */
+  }
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 240);
+}
+
+function httpError(status: number, text: string): Error {
+  if (status === 401) return new Error('API 身份验证失败 (401)，请重新登录或更新 API Key 后重试。');
+  if (status === 403) return new Error('API 访问被拒绝 (403)，请检查账号、模型权限和 API Key。');
+  if (status === 408) return new Error('API 408：请求超时，请稍后重试。');
+  if (status === 429) return new Error('API 429：请求过于频繁或额度受限，请稍后重试并检查账户额度。');
+  if (status >= 500) return new Error(`API ${status}：服务暂时不可用，请稍后重试。`);
+  const detail = responseErrorDetail(text);
+  return new Error(`API 请求失败 (${status})${detail ? `：${detail}` : ''}`);
 }
 
 interface RequestSpec {
@@ -203,7 +227,7 @@ export async function chat(
       }, timeoutMs, opts.signal);
 
       if (res.status === 408 || res.status === 429 || res.status >= 500) {
-        lastError = new Error(`API ${res.status}: ${res.text}`);
+        lastError = httpError(res.status, res.text);
         if (attempt < maxRetries) {
           const delayMs = retryDelayMs(attempt);
           opts.onRetry?.({ attempt: attempt + 1, maxRetries, delayMs, reason: lastError.message });
@@ -212,7 +236,7 @@ export async function chat(
         continue;
       }
       if (!res.ok) {
-        throw new Error(`API 请求失败 (${res.status}): ${res.text}`);
+        throw httpError(res.status, res.text);
       }
 
       let data: any;

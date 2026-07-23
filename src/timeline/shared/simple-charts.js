@@ -386,6 +386,16 @@ const SimpleCharts = {
     }
 
     const total = data.reduce((sum, d) => sum + d.value, 0);
+    if (total <= 0) {
+      // 所有值为 0 时 total=0 会让每个扇区角度/百分比变 NaN，路径渲染错乱；显示无数据占位。
+      const text = this.createEl('text', {
+        x: width / 2, y: height / 2,
+        'text-anchor': 'middle', fill: colors.text, 'font-size': '13'
+      });
+      text.textContent = title || 'No data';
+      svg.appendChild(text);
+      return;
+    }
     const cx = width / 2 - 40;
     const cy = height / 2 + topOffset;
     const radius = Math.min(width, height) / 2 - 32;

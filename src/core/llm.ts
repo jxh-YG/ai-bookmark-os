@@ -51,12 +51,84 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     signal?.addEventListener('abort', onAbort, { once: true });
   });
 
+/**
+ * 优先把网络 I/O 代理到 Service Worker 执行：SW 具备 host 权限，不会触发扩展页面
+ * 发起跨域请求时的 CORS 预检（OPTIONS 往返），从而消除"配置页比原生工具慢"的主因。
+ * 返回 null 表示消息通道不可用（如单测环境），调用方回退到页面直连。
+ */
+async function fetchViaServiceWorker(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  outerSignal?: AbortSignal,
+): Promise<{ ok: boolean; status: number; text: string } | null> {
+  const runtime = (globalThis as { chrome?: { runtime?: { sendMessage?: (msg: unknown) => Promise<unknown> } } }).chrome?.runtime;
+  if (!runtime?.sendMessage) return null;
+  if (outerSignal?.aborted) throw outerSignal.reason ?? new DOMException('已取消', 'AbortError');
+
+  const headers: Record<string, string> = {};
+  const rawHeaders = init.headers as Record<string, string> | undefined;
+  if (rawHeaders) for (const key in rawHeaders) headers[key] = rawHeaders[key];
+  const request = {
+    url,
+    method: (init.method as string) || 'POST',
+    headers,
+    body: typeof init.body === 'string' ? init.body : undefined,
+    timeoutMs,
+  };
+
+  const response = await new Promise<{ success?: boolean; ok?: boolean; status?: number; text?: string; error?: string } | null>((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      reject(outerSignal?.reason ?? new DOMException('已取消', 'AbortError'));
+    };
+    if (outerSignal) outerSignal.addEventListener('abort', onAbort, { once: true });
+    runtime.sendMessage!({ action: 'aiProxyFetch', request })
+      .then((res) => {
+        if (settled) return;
+        settled = true;
+        if (outerSignal) outerSignal.removeEventListener('abort', onAbort);
+        resolve(res as { success?: boolean; ok?: boolean; status?: number; text?: string; error?: string } | null);
+      })
+      .catch((err) => {
+        if (settled) return;
+        settled = true;
+        if (outerSignal) outerSignal.removeEventListener('abort', onAbort);
+        reject(err);
+      });
+  });
+
+  // 消息通道存在但 SW 未返回结构化结果时回退直连
+  if (!response || typeof response !== 'object') return null;
+  if (response.success === false) throw new Error(response.error || 'ai_proxy_fetch_failed');
+  // 只有携带代理结果结构（数值 status）才采信为 aiProxyFetch 响应；
+  // 否则说明消息通道被非本代理的处理器接管（如测试桩只处理 labelCache），回退直连。
+  if (typeof response.status !== 'number') return null;
+  return { ok: !!response.ok, status: Number(response.status) || 0, text: String(response.text ?? '') };
+}
+
 async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit,
   timeoutMs: number,
   outerSignal?: AbortSignal,
 ): Promise<{ ok: boolean; status: number; text: string }> {
+  // 先尝试 SW 代理（免 CORS 预检）；通道不可用则回退到页面直连。
+  try {
+    const viaSw = await fetchViaServiceWorker(String(input), init, timeoutMs, outerSignal);
+    if (viaSw) return viaSw;
+  } catch (e) {
+    if (outerSignal?.aborted) throw e;
+    const name = (e as Error).name;
+    // SW 端超时/网络错误按可重试错误上抛，交给 chat() 的重试循环处理
+    if (name === 'TimeoutError' || /超时|timeout/i.test((e as Error).message)) {
+      throw new Error(`API 请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+    }
+    throw e;
+  }
+
   const ctrl = new AbortController();
   let timedOut = false;
   const timeout = setTimeout(() => {
@@ -243,7 +315,14 @@ export async function chat(
       try {
         data = JSON.parse(res.text);
       } catch {
-        throw new Error('API 返回的 JSON 格式无效');
+        // 带上响应体预览，便于区分 HTML 错误页 / SSE 流 / 登录墙等常见配置问题。
+        const preview = String(res.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 160);
+        const hint = /^\s*</.test(res.text ?? '')
+          ? '（返回了 HTML 而非 JSON，通常是 baseUrl 指向了网页而非 API 端点，或被网关/登录页拦截）'
+          : /^\s*data:\s/.test(res.text ?? '')
+            ? '（返回了流式 SSE 响应，请关闭 stream 或改用非流式端点）'
+            : '';
+        throw new Error(`API 返回的 JSON 格式无效${hint}${preview ? `：${preview}` : ''}`);
       }
       let content = normalizeMessageContent(spec.extract(data));
       // 部分兼容网关把文本放在 output / result / data 字段
@@ -426,4 +505,55 @@ export async function listModels(settings: Settings): Promise<string[]> {
     ids = (data?.data ?? []).map((m: any) => String(m.id));
   }
   return [...new Set(ids)].sort();
+}
+
+export interface ProviderDiagnostic {
+  step: string;
+  ok: boolean;
+  detail: string;
+}
+
+/**
+ * Provider Doctor：分环节诊断 AI 供应商配置，返回结构化结果。
+ * 参照 CodexPlusPlus 的 Provider Doctor 思路，逐步检查配置完整性、请求地址形态与实时连通性，
+ * 让用户能精确定位问题出在哪一环，而不是只看到一句笼统的失败。
+ */
+export async function diagnoseProvider(settings: Settings): Promise<ProviderDiagnostic[]> {
+  const results: ProviderDiagnostic[] = [];
+  const style = resolveProvider(settings).apiStyle;
+
+  // 1) 必填字段
+  const missing: string[] = [];
+  if (!settings.apiKey) missing.push('API Key');
+  if (!settings.model) missing.push('模型名');
+  if (settings.provider === 'custom' && !settings.baseUrl) missing.push('Base URL');
+  results.push({
+    step: '配置完整性',
+    ok: missing.length === 0,
+    detail: missing.length ? `缺少：${missing.join('、')}` : '必填字段齐全',
+  });
+  if (missing.length) return results;
+
+  // 2) 请求地址形态
+  const url = resolveRequestUrl(settings);
+  const hasValidUrl = !!url && /^https?:\/\//.test(url);
+  results.push({
+    step: '请求地址',
+    ok: hasValidUrl,
+    detail: url || '无法解析出有效的请求地址',
+  });
+  if (!hasValidUrl) return results;
+
+  // 3) 实时连通性（走与真实分类相同的 chat 路径，即 SW 代理）
+  try {
+    const reply = await chat(settings, [{ role: 'user', content: '回复"OK"两个字母即可。' }], { maxTokens: 16 });
+    results.push({
+      step: '连通性',
+      ok: true,
+      detail: `连接成功 · ${style} · ${settings.model}｜样例：${String(reply).slice(0, 40)}`,
+    });
+  } catch (e) {
+    results.push({ step: '连通性', ok: false, detail: (e as Error).message || String(e) });
+  }
+  return results;
 }

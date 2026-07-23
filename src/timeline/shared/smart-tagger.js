@@ -2777,7 +2777,7 @@ function needsHumanReview(results, bookmark) {
   // 正文信号与标题/规则信号冲突
   const contentTop = results.find(r => (r.signals || []).some(s => s.startsWith('content-tfidf:')));
   const ruleTop = results.find(r => (r.signals || []).some(s =>
-    s === 'folder' || s === 'domain' || s === 'subdomain' || s === 'url-path' ||
+    s === 'folder' || s === 'domain' || s === 'subdomain' || s.startsWith('url-path') ||
     s.startsWith('regex:') || s.startsWith('keyword:') || s.startsWith('ngram:')
   ));
   if (contentTop && ruleTop && contentTop.tag !== ruleTop.tag && (contentTop.score || 0) >= (ruleTop.score || 0) * 0.75) {

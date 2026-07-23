@@ -27,6 +27,9 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
   const [rechecking, setRechecking] = useState<Set<string>>(new Set());
   const [canUndo, setCanUndo] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const runningRef = useRef(false);
+  const mutatingRef = useRef(false);
+  const [mutating, setMutating] = useState(false);
 
   const checking = progress.phase === 'checking';
 
@@ -36,18 +39,29 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
   };
 
   const runDead = async () => {
+    // runningRef 是同步守卫：checking 由 progress.phase 派生，置位滞后于本函数的首个 await，
+    // 仅靠按钮 disabled 无法拦住连点，故在此同步兜底，避免启动两轮扫描并互相覆盖 abortRef。
+    if (runningRef.current) return;
+    runningRef.current = true;
     setMsg('');
-    const ok = (await hasAllUrlsPermission()) || (await requestAllUrlsPermission());
-    if (!ok) {
-      setMsg(d.healthPermDenied);
-      return;
-    }
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
     try {
+      const ok = (await hasAllUrlsPermission()) || (await requestAllUrlsPermission());
+      if (!ok) {
+        setMsg(d.healthPermDenied);
+        return;
+      }
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
       setDead(await findDeadLinks(bookmarks, setProgress, ctrl.signal));
-    } catch {
+    } catch (err) {
       setProgress({ phase: 'idle', done: 0, total: 0 });
+      // 用户主动取消（AbortError）无需提示；真实失败（网络/权限/运行时）必须给出反馈，
+      // 否则界面会悄无声息地退回扫描前状态，让人误以为“没有失效链接”。
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        setMsg(d.healthScanFailed);
+      }
+    } finally {
+      runningRef.current = false;
     }
   };
 
@@ -109,30 +123,46 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
     setSelected(new Set([...(dups ?? []), ...hardDead].map((i) => i.bookmark.id)));
 
   const deleteSelected = async () => {
+    if (mutatingRef.current) return;
     if (!window.confirm(`${d.deleteSelected(selected.size)}?`)) return;
-    const result = await removeBookmarks([...selected]);
-    const removedIds = new Set(result.items.filter((item) => item.status === 'succeeded').map((item) => item.id));
-    setMsg(result.failed || result.conflicts
-      ? `${d.deletedOk(result.succeeded)} (${result.succeeded}/${result.total})`
-      : d.deletedOk(result.succeeded));
-    setCanUndo(result.succeeded > 0);
-    setDups((prev) => prev?.filter((i) => !removedIds.has(i.bookmark.id)) ?? null);
-    setDead((prev) => prev?.filter((i) => !removedIds.has(i.bookmark.id)) ?? null);
-    setSelected((prev) => new Set([...prev].filter((id) => !removedIds.has(id))));
-    if (result.succeeded > 0) onBookmarksChanged();
+    mutatingRef.current = true;
+    setMutating(true);
+    try {
+      const result = await removeBookmarks([...selected]);
+      const removedIds = new Set(result.items.filter((item) => item.status === 'succeeded').map((item) => item.id));
+      setMsg(result.failed || result.conflicts
+        ? `${d.deletedOk(result.succeeded)} (${result.succeeded}/${result.total})`
+        : d.deletedOk(result.succeeded));
+      setCanUndo(result.succeeded > 0);
+      setDups((prev) => prev?.filter((i) => !removedIds.has(i.bookmark.id)) ?? null);
+      setDead((prev) => prev?.filter((i) => !removedIds.has(i.bookmark.id)) ?? null);
+      setSelected((prev) => new Set([...prev].filter((id) => !removedIds.has(id))));
+      if (result.succeeded > 0) onBookmarksChanged();
+    } finally {
+      mutatingRef.current = false;
+      setMutating(false);
+    }
   };
 
   const handleUndoDelete = async () => {
-    const result = await undoRemoveBookmarks();
-    if (result.succeeded > 0) {
-      setMsg(result.failed || result.conflicts
-        ? `${d.undoDeleteOk(result.succeeded)} (${result.succeeded}/${result.total})`
-        : d.undoDeleteOk(result.succeeded));
-      setCanUndo(result.failed + result.conflicts > 0);
-      onBookmarksChanged();
-    } else {
-      setMsg(d.undoDeleteFail);
-      setCanUndo(result.failed + result.conflicts > 0);
+    if (mutatingRef.current) return;
+    mutatingRef.current = true;
+    setMutating(true);
+    try {
+      const result = await undoRemoveBookmarks();
+      if (result.succeeded > 0) {
+        setMsg(result.failed || result.conflicts
+          ? `${d.undoDeleteOk(result.succeeded)} (${result.succeeded}/${result.total})`
+          : d.undoDeleteOk(result.succeeded));
+        setCanUndo(result.failed + result.conflicts > 0);
+        onBookmarksChanged();
+      } else {
+        setMsg(d.undoDeleteFail);
+        setCanUndo(result.failed + result.conflicts > 0);
+      }
+    } finally {
+      mutatingRef.current = false;
+      setMutating(false);
     }
   };
 
@@ -274,11 +304,11 @@ export function HealthPanel({ d, bookmarks, onBack, onBookmarksChanged }: Health
         <div className="toolbar">
           <button onClick={selectSafe}>{d.selectSafe}</button>
           <button onClick={selectAll}>{d.selectAll}</button>
-          <button className="danger" disabled={selected.size === 0} onClick={deleteSelected}>
+          <button className="danger" disabled={selected.size === 0 || mutating} onClick={deleteSelected}>
             {d.deleteSelected(selected.size)}
           </button>
           {canUndo && (
-            <button onClick={handleUndoDelete}>{d.undoDelete}</button>
+            <button disabled={mutating} onClick={handleUndoDelete}>{d.undoDelete}</button>
           )}
         </div>
       )}

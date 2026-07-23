@@ -1331,17 +1331,17 @@ function testUiContracts() {
   );
   assert.match(
     background,
-    /bookmarks\.onMoved\.addListener[\s\S]{0,1800}parentId:\s*moveInfo\.parentId/,
+    /async function handleSingleBookmarkMoved[\s\S]{0,1200}parentId:\s*moveInfo\.parentId/,
     '原生书签移动后必须更新本地镜像的 parentId',
   );
   assert.match(
     background,
-    /bookmarks\.onMoved\.addListener[\s\S]{0,2200}folderName,\s*folderPath/,
+    /async function handleSingleBookmarkMoved[\s\S]{0,1200}folderName,\s*folderPath/,
     '原生书签移动后必须更新本地镜像的 folderPath',
   );
   assert.match(
     background,
-    /bookmarks\.onMoved\.addListener[\s\S]{0,2600}action:\s*['"]bookmarksUpdated['"]/,
+    /async function handleSingleBookmarkMoved[\s\S]{0,1400}action:\s*['"]bookmarksUpdated['"]/,
     '原生书签移动后必须广播页面刷新',
   );
   assert.match(popup, /message\.action\s*===\s*['"]bookmarksDeleted['"]/, '弹窗必须响应删除广播');

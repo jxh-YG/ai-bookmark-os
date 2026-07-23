@@ -77,6 +77,9 @@ let results = [];
 let selectedResultIds = new Set();
 let recheckingResultIds = new Set();
 let isChecking = false;
+// 同步再入锁：从点击到 isChecking 置位之间存在 await 窗口（权限申请 / 加载书签），
+// 该标志在同步阶段立即置位，避免双击启动两轮扫描互相覆盖 activeRunId / results。
+let checkStarting = false;
 let activeRunId = '';
 let checkedCount = 0;
 let totalCount = 0;
@@ -434,13 +437,19 @@ async function recheckItem(item) {
 
 async function recheckSelectedItems() {
   const items = selectedReviewItems();
-  if (!items.length || isChecking || recheckingResultIds.size > 0) return;
-  if (!await requestCheckerPermission()) {
-    showToast(i18n('checkerPermissionRequired'), 'info');
-    return;
+  if (!items.length || isChecking || startingCheck || recheckingResultIds.size > 0) return;
+  startingCheck = true;
+  let settings;
+  try {
+    if (!await requestCheckerPermission()) {
+      showToast(i18n('checkerPermissionRequired'), 'info');
+      return;
+    }
+    settings = await getCheckSettings();
+  } finally {
+    startingCheck = false;
   }
 
-  const settings = await getCheckSettings();
   const runId = `checker-recheck-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   let next = 0;
   let completed = 0;
@@ -501,22 +510,28 @@ async function requestCheckerPermission() {
 }
 
 async function startCheck() {
-  if (isChecking || recheckingResultIds.size > 0) return;
-  if (!await requestCheckerPermission()) {
-    showToast(i18n('checkerPermissionRequired'), 'info');
-    return;
-  }
+  // startingCheck 是同步守卫：覆盖权限申请与数据加载的 await 窗口，避免连点启动两轮扫描。
+  if (isChecking || startingCheck || recheckingResultIds.size > 0) return;
+  startingCheck = true;
   let settings;
   let bookmarks;
   try {
-    [settings, bookmarks] = await Promise.all([getCheckSettings(), loadAllBookmarks()]);
-  } catch (_) {
-    showToast(i18n('checkerReasonNetworkError'), 'error');
-    return;
-  }
-  if (!bookmarks.length) {
-    showToast(i18n('checkerNoBookmarks'), 'info');
-    return;
+    if (!await requestCheckerPermission()) {
+      showToast(i18n('checkerPermissionRequired'), 'info');
+      return;
+    }
+    try {
+      [settings, bookmarks] = await Promise.all([getCheckSettings(), loadAllBookmarks()]);
+    } catch (_) {
+      showToast(i18n('checkerReasonNetworkError'), 'error');
+      return;
+    }
+    if (!bookmarks.length) {
+      showToast(i18n('checkerNoBookmarks'), 'info');
+      return;
+    }
+  } finally {
+    startingCheck = false;
   }
 
   const runId = `checker-${Date.now()}-${Math.random().toString(36).slice(2)}`;

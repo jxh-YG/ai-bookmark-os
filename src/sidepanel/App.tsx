@@ -79,14 +79,13 @@ import {
 } from '../core/classificationPlanArchive';
 import {
   abandonIncrementalQueue,
-  claimIncrementalQueue,
   completeIncrementalQueue,
   isIncrementalQueueNearLimit,
   loadIncrementalQueue,
-  markIncrementalQueueFailed,
-  releaseIncrementalQueue,
+  openIncrementalQueueLease,
   retryIncrementalQueue,
   type IncrementalQueueEntry,
+  type IncrementalQueueLease,
 } from '../core/incrementalQueue';
 
 /** 应用外观设置到根元素 CSS 变量 + 颜色模式 */
@@ -332,6 +331,7 @@ export function App() {
   const draftStatusRequestRef = useRef(0);
   const draftSaveLockRef = useRef(false);
   const incrementalRunRef = useRef(false);
+  const uiSettingsRef = useRef<Settings>(DEFAULT_SETTINGS);
   const closePartialModal = useCallback(() => setShowPartialModal(false), []);
   const closeApplyModal = useCallback(() => {
     setPendingReuse(null);
@@ -646,6 +646,10 @@ export function App() {
   }, [activeDraftKey, result]);
 
   useEffect(() => {
+    uiSettingsRef.current = uiSettings;
+  }, [uiSettings]);
+
+  useEffect(() => {
     let disposed = false;
     let retryTimer: number | null = null;
     let activeController: AbortController | null = null;
@@ -681,22 +685,30 @@ export function App() {
         Math.max(250, nextAttemptAt - Date.now()),
       );
     };
+    const scheduleTickRetry = () => {
+      if (disposed || retryTimer !== null) return;
+      retryTimer = window.setTimeout(() => setIncrementalQueueTick((value) => value + 1), 1000);
+    };
     const runIncremental = async () => {
       let lockHeld = false;
       let ids: string[] = [];
       let progressRun: ReturnType<typeof startClassificationProgress> | null = null;
       let committed = false;
       let classifiedCount = 0;
+      let lease: IncrementalQueueLease | null = null;
+      // 读取实时设置引用：分类循环不再把整个 uiSettings 作为 effect 依赖，
+      // 避免主题/字体/语言等无关设置变更导致 effect 重建并中止进行中的分类。
+      const settings = uiSettingsRef.current;
       try {
         const queue = await refreshQueueState();
         if (
           !result
           || result.scope?.mode === 'partial'
-          || !uiSettings.incrementalClassificationEnabled
-          || !uiSettings.apiKey
+          || !settings.incrementalClassificationEnabled
+          || !settings.apiKey
           || incrementalRunRef.current
         ) return;
-        if (isIncrementalQueueNearLimit(queue)) setNotice(d.incrementalQueueNearLimit);
+        if (isIncrementalQueueNearLimit(queue)) setNotice(t(settings.language).incrementalQueueNearLimit);
         const hasReadyEntry = queue.some((entry) => (
           entry.status === 'pending'
           || (entry.status === 'retryable' && entry.nextAttemptAt <= Date.now())
@@ -707,7 +719,10 @@ export function App() {
           return;
         }
         lockHeld = true;
-        const claimed = await claimIncrementalQueue();
+        // 通过 port 租约认领队列：租约携带 ownerId 与心跳，断线时后台会自动把 running 项退回 pending，
+        // 避免服务工作线程休眠或侧栏关闭后队列条目永久卡在 running。
+        lease = openIncrementalQueueLease(scheduleTickRetry);
+        const claimed = await lease.claim();
         if (!claimed.length) return;
         incrementalRunRef.current = true;
         ids = claimed.map((entry) => entry.id);
@@ -722,12 +737,10 @@ export function App() {
         ids = pending.map((bookmark) => bookmark.id);
         if (settledIds.length) {
           try {
-            await completeIncrementalQueue(settledIds);
+            await lease.complete(settledIds);
           } catch {
-            try { await releaseIncrementalQueue(settledIds); } catch { /* background may be restarting */ }
-            if (retryTimer === null) {
-              retryTimer = window.setTimeout(() => setIncrementalQueueTick((value) => value + 1), 1000);
-            }
+            try { await lease.release(settledIds); } catch { /* background may be restarting */ }
+            scheduleTickRetry();
           }
         }
         if (!pending.length) return;
@@ -738,7 +751,7 @@ export function App() {
         activeController = controller;
         abortRef.current = controller;
         progressRun = startClassificationProgress();
-        const incremental = await classifyIncremental(uiSettings, pending, result, progressRun.report, controller.signal, { persist: false });
+        const incremental = await classifyIncremental(settings, pending, result, progressRun.report, controller.signal, { persist: false });
         const afterSnapshot = await captureBookmarkSnapshot(FULL_CLASSIFICATION_SCOPE);
         if (beforeSnapshot.fingerprint !== afterSnapshot.fingerprint) {
           throw new Error('bookmarks_changed_during_incremental_classification');
@@ -765,12 +778,10 @@ export function App() {
         }
         let postCommitWarning = '';
         try {
-          await completeIncrementalQueue(pending.map((bookmark) => bookmark.id));
+          await lease.complete(pending.map((bookmark) => bookmark.id));
         } catch {
           postCommitWarning = '分类方案已保存，队列确认暂时失败，将在下一次工作台刷新时自动对账。';
-          if (retryTimer === null) {
-            retryTimer = window.setTimeout(() => setIncrementalQueueTick((value) => value + 1), 1000);
-          }
+          scheduleTickRetry();
         }
         if (!disposed && postCommitWarning) setNotice(postCommitWarning);
         if (progressRun) {
@@ -795,11 +806,11 @@ export function App() {
             setNotice(`分类方案已保存，但后续界面刷新未完成：${terminalError.message || '请重新打开分类工作台对账。'}`);
           }
           return;
-        } else if (terminalError.name === 'AbortError' && ids.length) {
+        } else if (terminalError.name === 'AbortError' && ids.length && lease) {
           try {
-            await releaseIncrementalQueue(ids);
+            await lease.release(ids);
             if (!disposed) {
-              setNotice(resolveLang(uiSettings.language) === 'zh'
+              setNotice(resolveLang(settings.language) === 'zh'
                 ? '已取消本次增量分类，待处理书签会在下次打开分类工作台时继续。'
                 : 'Incremental classification cancelled. Pending bookmarks will resume next time.');
             }
@@ -807,9 +818,9 @@ export function App() {
             terminalError = queueError as Error;
             exhausted = true;
           }
-        } else if (ids.length) {
+        } else if (ids.length && lease) {
           try {
-            const queue = await markIncrementalQueueFailed(ids, terminalError.message || 'incremental_classification_failed');
+            const queue = await lease.fail(ids, terminalError.message || 'incremental_classification_failed');
             exhausted = queue.some((entry) => ids.includes(entry.id) && entry.status === 'failed');
           } catch (queueError) {
             terminalError = queueError as Error;
@@ -833,6 +844,8 @@ export function App() {
         activeController = null;
         if (lockHeld) releaseClassificationLock();
         try { scheduleRetry(await refreshQueueState()); } catch { /* background may be restarting */ }
+        // 关闭租约：断线时后台会把仍处于 running 的遗留条目退回 pending，作为兜底。
+        lease?.close();
       }
     };
     void runIncremental();
@@ -843,7 +856,6 @@ export function App() {
     };
   }, [
     acquireClassificationLock,
-    d.incrementalQueueNearLimit,
     incrementalQueueTick,
     refreshDraftList,
     refreshDraftStatuses,
@@ -851,7 +863,10 @@ export function App() {
     result,
     finishClassificationProgress,
     startClassificationProgress,
-    uiSettings,
+    // 仅依赖开关与凭据两个门控项；主题/字体/语言等外观设置的变化通过 uiSettingsRef
+    // 读取，不再触发本 effect 重建，避免误中止正在进行的增量分类（H1）。
+    uiSettings.incrementalClassificationEnabled,
+    uiSettings.apiKey,
   ]);
 
   const retryFailedIncrementalQueue = useCallback(async () => {
@@ -913,7 +928,15 @@ export function App() {
     scope: ClassificationScope = FULL_CLASSIFICATION_SCOPE,
     limit?: number,
   ) => {
-    if (!acquireClassificationLock()) return;
+    // 锁被占用（如后台增量分类进行中）时，务必先关闭成本预估弹窗——弹窗按钮都受
+    // classificationPending 禁用，若不关闭会让用户卡在无法操作的灰按钮弹窗里（症状①）。
+    if (!acquireClassificationLock()) {
+      setEstimate(null);
+      setNotice(resolveLang(uiSettings.language) === 'zh'
+        ? '已有分类任务进行中，请等待其完成后再试。'
+        : 'A classification task is already running. Please wait for it to finish.');
+      return;
+    }
     setError('');
     setNotice('');
     setEstimate(null);
@@ -1008,7 +1031,12 @@ export function App() {
 
   /** 点击分类：先出成本预估确认 */
   const startClassify = useCallback(async () => {
-    if (!acquireClassificationLock()) return;
+    if (!acquireClassificationLock()) {
+      setNotice(resolveLang(uiSettings.language) === 'zh'
+        ? '已有分类任务进行中，请等待其完成后再试。'
+        : 'A classification task is already running; please wait for it to finish.');
+      return;
+    }
     setError('');
     try {
       const settings = await loadSettings();

@@ -7,7 +7,7 @@
 (function (global) {
   'use strict';
 
-  const ICON = 'icons/icon128.png';
+  const ICON = '../icons/icon128.png';
 
   // 更新 popup 图标 badge 未读数
   async function updateBadge() {

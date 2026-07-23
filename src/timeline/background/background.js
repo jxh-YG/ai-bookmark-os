@@ -360,6 +360,14 @@ const RECOMMENDATION_MAX_SNAPSHOTS = 200;
 const RECOMMENDATION_MAX_FEEDBACK = 5000;
 const RECOMMENDATION_MAX_REVIEWS = 200;
 const programmaticBookmarkMoves = new Map();
+// 导入期间由 upsertImportedBookmark 负责写入镜像。批量导入若走 onCreated → addSingleBookmark，
+// 会对 N 条书签各触发一次网络抓正文 / 推荐 / 增量入队的扇出。用深度计数在导入期间关闭该扇出，
+// onCreated 直接跳过（镜像写入由 upsertImportedBookmark 负责）。用计数而非布尔以兼容并发/重入导入。
+// 注意：id 级标记会与 onCreated 竞态（事件可能早于 create() 的 Promise resolve），故用全局开关。
+let programmaticImportDepth = 0;
+function beginProgrammaticImport() { programmaticImportDepth += 1; }
+function endProgrammaticImport() { programmaticImportDepth = Math.max(0, programmaticImportDepth - 1); }
+function isProgrammaticImportActive() { return programmaticImportDepth > 0; }
 const LABEL_CACHE_KEY = 'labelCache';
 const LABEL_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LABEL_CACHE_MAX_ENTRIES = 1000;
@@ -1297,12 +1305,99 @@ function isSafeExternalUrl(value) {
   }
 }
 
+/**
+ * 在 Service Worker 中代理执行 AI 请求。SW 拥有 host 权限，跨域请求不触发浏览器
+ * CORS 预检（OPTIONS），从根本上消除扩展页面直接 fetch 的"慢/报错"问题。
+ * 仅接受 https/http 的 POST；返回 { ok, status, text }，解析仍由调用方负责。
+ */
+async function aiProxyFetch(request) {
+  if (!request || typeof request !== 'object') throw new Error('invalid_ai_request');
+  const url = typeof request.url === 'string' ? request.url : '';
+  if (!isSafeExternalUrl(url) || !/^https?:$/.test(new URL(url).protocol)) {
+    throw new Error('invalid_ai_request_url');
+  }
+  const headers = (request.headers && typeof request.headers === 'object') ? request.headers : {};
+  const body = typeof request.body === 'string' ? request.body : '';
+  const timeoutMs = Math.min(600000, Math.max(1000, Number(request.timeoutMs) || 90000));
+
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body,
+      signal: controller.signal,
+    });
+    const contentType = String(resp.headers.get('content-type') || '').toLowerCase();
+    const rawText = await resp.text();
+    // 流式（SSE）响应：把各家的增量 delta 聚合成完整文本，让上层解析与非流式一致。
+    // 触发条件：Content-Type 为 event-stream，或响应体本身是 SSE 帧（data: 前缀）。
+    const looksLikeSse = contentType.includes('text/event-stream')
+      || /^\s*data:\s/.test(rawText);
+    const text = (resp.ok && looksLikeSse) ? aggregateSseText(rawText) : rawText;
+    return { ok: resp.ok, status: resp.status, text };
+  } catch (err) {
+    if (timedOut) {
+      const e = new Error(`API 请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+      e.name = 'TimeoutError';
+      throw e;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 聚合 SSE 流式响应为完整文本。兼容三种主流增量格式：
+ *  - OpenAI: data:{choices:[{delta:{content}}]}，以 data:[DONE] 结束
+ *  - Anthropic: event: content_block_delta，data:{delta:{text}}
+ *  - Gemini streamGenerateContent: data:{candidates:[{content:{parts:[{text}]}}]}
+ * 返回拼接后的纯文本；分类侧的 extractJson 可像非流式一样从中提取 JSON。
+ */
+function aggregateSseText(rawText) {
+  let output = '';
+  const consumeChunk = (dataStr) => {
+    const trimmed = dataStr.trim();
+    if (!trimmed || trimmed === '[DONE]') return;
+    let json;
+    try { json = JSON.parse(trimmed); } catch { return; }
+    // OpenAI 兼容
+    const openaiDelta = json?.choices?.[0]?.delta?.content
+      ?? json?.choices?.[0]?.delta?.reasoning_content
+      ?? json?.choices?.[0]?.message?.content;
+    if (typeof openaiDelta === 'string') { output += openaiDelta; return; }
+    // Anthropic
+    const anthropicDelta = json?.delta?.text ?? (json?.type === 'content_block_delta' ? json?.delta?.text : undefined);
+    if (typeof anthropicDelta === 'string') { output += anthropicDelta; return; }
+    // Gemini
+    const geminiParts = json?.candidates?.[0]?.content?.parts;
+    if (Array.isArray(geminiParts)) {
+      for (const part of geminiParts) if (typeof part?.text === 'string') output += part.text;
+    }
+  };
+  // aiProxyFetch 已 await resp.text() 拿到完整响应体，这里按 SSE 行解析 data: 帧即可。
+  for (const line of String(rawText || '').split(/\r?\n/)) {
+    const m = /^data:\s?(.*)$/.exec(line.trim());
+    if (m) consumeChunk(m[1]);
+  }
+  return output;
+}
+
 function hasValidStringList(value, maxItems = 50, maxLength = 120) {
   return Array.isArray(value) && value.length <= maxItems && value.every((item) => typeof item === 'string' && item.trim().length > 0 && item.length <= maxLength);
 }
 
 function validateRuntimeMessage(message) {
   if (message.action !== undefined && typeof message.action !== 'string') return 'invalid_action';
+  if (message.ownerId !== undefined && (
+    typeof message.ownerId !== 'string'
+    || message.ownerId.length < 16
+    || message.ownerId.length > 128
+    || !/^[a-zA-Z0-9-]+$/.test(message.ownerId)
+  )) return 'invalid_owner_id';
   if (message.id !== undefined && (typeof message.id !== 'string' || message.id.length > 256)) return 'invalid_id';
   if (message.bookmarkId !== undefined && (typeof message.bookmarkId !== 'string' || message.bookmarkId.length > 256)) return 'invalid_bookmark_id';
   if (message.reviewId !== undefined && (typeof message.reviewId !== 'string' || message.reviewId.length > 256)) return 'invalid_review_id';
@@ -1313,6 +1408,15 @@ function validateRuntimeMessage(message) {
   if (message.title !== undefined && (typeof message.title !== 'string' || message.title.length > 512)) return 'invalid_title';
   if (message.error !== undefined && (typeof message.error !== 'string' || message.error.length > 512)) return 'invalid_error';
   if (message.url !== undefined && !isSafeExternalUrl(message.url)) return 'invalid_url';
+  if (message.request !== undefined) {
+    const r = message.request;
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return 'invalid_request';
+    if (!isSafeExternalUrl(r.url)) return 'invalid_request';
+    if (r.method !== undefined && !['GET', 'POST'].includes(r.method)) return 'invalid_request';
+    if (r.headers !== undefined && (typeof r.headers !== 'object' || r.headers === null || Array.isArray(r.headers) || Object.keys(r.headers).length > 40)) return 'invalid_request';
+    const bodyStr = typeof r.body === 'string' ? r.body : (r.body !== undefined ? JSON.stringify(r.body) : '');
+    if (bodyStr.length > 5 * 1024 * 1024) return 'invalid_request';
+  }
   if (message.ids !== undefined && !hasValidStringList(message.ids, 500, 256)) return 'invalid_ids';
   if (message.entries !== undefined && (
     !Array.isArray(message.entries)
@@ -1847,40 +1951,46 @@ async function importBookmarksV2(message) {
     operation.invalid = plan.invalid;
 
     const folders = new Map();
-    for (const folder of plan.folders) {
-      try {
-        const createdFolder = await findOrCreateFolderPath(folder.key, operation.createdFolders);
-        if (!createdFolder || !createdFolder.id) throw new Error('folder_create_failed');
-        folders.set(folder.key, createdFolder);
-      } catch (error) {
-        operation.failed.push({ folderKey: folder.key, error: error.message || 'folder_create_failed' });
+    // 关闭 onCreated 扇出：导入自己负责写镜像与元数据，无需再逐条抓正文/推荐/增量入队。
+    beginProgrammaticImport();
+    try {
+      for (const folder of plan.folders) {
+        try {
+          const createdFolder = await findOrCreateFolderPath(folder.key, operation.createdFolders);
+          if (!createdFolder || !createdFolder.id) throw new Error('folder_create_failed');
+          folders.set(folder.key, createdFolder);
+        } catch (error) {
+          operation.failed.push({ folderKey: folder.key, error: error.message || 'folder_create_failed' });
+        }
       }
-    }
 
-    for (const entry of plan.create) {
-      const folder = folders.get(entry.folderKey);
-      if (!folder) {
-        operation.failed.push({ title: entry.metadata.title, url: entry.metadata.url, error: 'destination_folder_unavailable' });
-        continue;
+      for (const entry of plan.create) {
+        const folder = folders.get(entry.folderKey);
+        if (!folder) {
+          operation.failed.push({ title: entry.metadata.title, url: entry.metadata.url, error: 'destination_folder_unavailable' });
+          continue;
+        }
+        try {
+          const created = await chrome.bookmarks.create({
+            parentId: folder.id,
+            title: entry.metadata.title,
+            url: entry.metadata.url,
+          });
+          const metadata = { ...entry.metadata, folderName: folder.title || entry.metadata.folderName, folderPath: entry.folderKey };
+          await upsertImportedBookmark(created, metadata);
+          operation.created.push({
+            id: created.id,
+            parentId: created.parentId,
+            title: created.title || metadata.title,
+            url: created.url || metadata.url,
+          });
+        } catch (error) {
+          operation.failed.push({ title: entry.metadata.title, url: entry.metadata.url, error: error.message || 'bookmark_create_failed' });
+        }
+        await saveImportOperation(operation);
       }
-      try {
-        const created = await chrome.bookmarks.create({
-          parentId: folder.id,
-          title: entry.metadata.title,
-          url: entry.metadata.url,
-        });
-        const metadata = { ...entry.metadata, folderName: folder.title || entry.metadata.folderName, folderPath: entry.folderKey };
-        await upsertImportedBookmark(created, metadata);
-        operation.created.push({
-          id: created.id,
-          parentId: created.parentId,
-          title: created.title || metadata.title,
-          url: created.url || metadata.url,
-        });
-      } catch (error) {
-        operation.failed.push({ title: entry.metadata.title, url: entry.metadata.url, error: error.message || 'bookmark_create_failed' });
-      }
-      await saveImportOperation(operation);
+    } finally {
+      endProgrammaticImport();
     }
 
     const alreadyCreatedIds = new Set(operation.created.map((item) => item.id));
@@ -2215,25 +2325,44 @@ const pendingQuickBookmarks = new Map();
 const INCREMENTAL_CLASSIFY_QUEUE_KEY = 'incrementalClassificationQueue';
 const INCREMENTAL_MAX_ATTEMPTS = 3;
 const INCREMENTAL_RETRY_BASE_MS = 30 * 1000;
+const INCREMENTAL_CLASSIFY_PORT_PREFIX = 'incremental-classification:';
+const activeIncrementalClassificationOwners = new Set();
+
+function getIncrementalClassificationPortOwner(port) {
+  if (port.sender?.id && port.sender.id !== chrome.runtime.id) return '';
+  if (typeof port.name !== 'string' || !port.name.startsWith(INCREMENTAL_CLASSIFY_PORT_PREFIX)) return '';
+  const ownerId = port.name.slice(INCREMENTAL_CLASSIFY_PORT_PREFIX.length);
+  return ownerId.length >= 16 && ownerId.length <= 128 && /^[a-zA-Z0-9-]+$/.test(ownerId) ? ownerId : '';
+}
+
+function clearIncrementalQueueLease(item, updates = {}) {
+  const { ownerId: _ownerId, leaseUpdatedAt: _leaseUpdatedAt, ...rest } = item;
+  return { ...rest, ...updates };
+}
 
 function normalizeIncrementalQueue(raw, now = Date.now()) {
   const queue = Array.isArray(raw) ? raw : [];
   const normalized = queue.filter((item) => item && typeof item.id === 'string' && item.id).map((item) => {
     const attempts = Math.max(0, Number(item.attempts) || 0);
+    const ownerId = typeof item.ownerId === 'string' ? item.ownerId : '';
+    const leaseUpdatedAt = Number(item.leaseUpdatedAt) || 0;
     let status = ['pending', 'running', 'retryable', 'failed', 'succeeded'].includes(item.status)
       ? item.status
       : (item.lastError ? (attempts >= INCREMENTAL_MAX_ATTEMPTS ? 'failed' : 'retryable') : 'pending');
-    if (status === 'running' && now - (Number(item.lastAttemptAt) || 0) > 10 * 60 * 1000) status = 'retryable';
-    return {
+    if (status === 'running' && (!ownerId || !activeIncrementalClassificationOwners.has(ownerId))) status = 'pending';
+    const normalizedItem = {
       id: item.id,
       createdAt: Number(item.createdAt) || now,
       attempts,
       status,
-      nextAttemptAt: Number(item.nextAttemptAt) || 0,
+      nextAttemptAt: status === 'pending' && item.status === 'running' ? 0 : (Number(item.nextAttemptAt) || 0),
       ...(item.lastAttemptAt ? { lastAttemptAt: Number(item.lastAttemptAt) } : {}),
       ...(item.completedAt ? { completedAt: Number(item.completedAt) } : {}),
       ...(item.lastError ? { lastError: String(item.lastError).slice(0, 240) } : {}),
     };
+    return status === 'running'
+      ? { ...normalizedItem, ownerId, leaseUpdatedAt: leaseUpdatedAt || now }
+      : normalizedItem;
   }).filter((item) => item.status !== 'succeeded' || now - (item.completedAt || now) < 24 * 60 * 60 * 1000);
   return [...new Map(normalized.map((item) => [item.id, item])).values()]
     .sort((left, right) => left.createdAt - right.createdAt)
@@ -2253,52 +2382,70 @@ async function mutateIncrementalClassificationQueue(updater) {
   return mutateStorageResource(INCREMENTAL_CLASSIFY_QUEUE_KEY, (current) => updater(normalizeIncrementalQueue(current)));
 }
 
-async function claimIncrementalClassificationQueue() {
+async function claimIncrementalClassificationQueue(ownerId) {
   const claimed = [];
   const now = Date.now();
   await mutateIncrementalClassificationQueue((queue) => queue.map((item) => {
     if (!['pending', 'retryable'].includes(item.status) || item.nextAttemptAt > now) return item;
-    claimed.push({ ...item, status: 'running', lastAttemptAt: now });
+    claimed.push({ ...item, status: 'running', lastAttemptAt: now, ownerId, leaseUpdatedAt: now });
     return claimed[claimed.length - 1];
   }));
   return claimed;
 }
 
-async function failIncrementalClassificationQueue(ids, error) {
+async function heartbeatIncrementalClassificationQueue(ownerId) {
+  const now = Date.now();
+  return mutateIncrementalClassificationQueue((queue) => queue.map((item) => item.status === 'running' && item.ownerId === ownerId
+    ? { ...item, leaseUpdatedAt: now }
+    : item));
+}
+
+async function failIncrementalClassificationQueue(ids, error, ownerId) {
   const affected = new Set(ids || []);
   const now = Date.now();
   return mutateIncrementalClassificationQueue((queue) => queue.map((item) => {
-    if (!affected.has(item.id) || item.status !== 'running') return item;
+    if (!affected.has(item.id) || item.status !== 'running' || item.ownerId !== ownerId) return item;
     const attempts = item.attempts + 1;
     const failed = attempts >= INCREMENTAL_MAX_ATTEMPTS;
-    return {
-      ...item,
+    return clearIncrementalQueueLease(item, {
       attempts,
       status: failed ? 'failed' : 'retryable',
       lastError: String(error || 'incremental_classification_failed').slice(0, 240),
       nextAttemptAt: failed ? 0 : now + INCREMENTAL_RETRY_BASE_MS * (2 ** (attempts - 1)),
-    };
+    });
   }));
 }
 
-async function completeIncrementalClassificationQueue(ids) {
+async function completeIncrementalClassificationQueue(ids, ownerId) {
   const affected = new Set(ids || []);
-  return mutateIncrementalClassificationQueue((queue) => queue.map((item) => affected.has(item.id)
-    ? { ...item, status: 'succeeded', completedAt: Date.now(), nextAttemptAt: 0, lastError: '' }
-    : item));
+  return mutateIncrementalClassificationQueue((queue) => queue.map((item) => {
+    if (!affected.has(item.id)) return item;
+    if (ownerId && (item.status !== 'running' || item.ownerId !== ownerId)) return item;
+    return clearIncrementalQueueLease(item, {
+      status: 'succeeded', completedAt: Date.now(), nextAttemptAt: 0, lastError: '',
+    });
+  }));
 }
 
 async function retryIncrementalClassificationQueue(ids) {
   const affected = new Set(ids || []);
   return mutateIncrementalClassificationQueue((queue) => queue.map((item) => affected.has(item.id)
-    ? { ...item, status: 'pending', attempts: 0, nextAttemptAt: 0, lastError: '' }
+    ? clearIncrementalQueueLease(item, { status: 'pending', attempts: 0, nextAttemptAt: 0, lastError: '' })
     : item));
 }
 
-async function releaseIncrementalClassificationQueue(ids) {
+async function releaseIncrementalClassificationQueue(ids, ownerId) {
   const affected = new Set(ids || []);
-  return mutateIncrementalClassificationQueue((queue) => queue.map((item) => affected.has(item.id) && item.status === 'running'
-    ? { ...item, status: 'pending', nextAttemptAt: 0 }
+  return mutateIncrementalClassificationQueue((queue) => queue.map((item) => affected.has(item.id)
+    && item.status === 'running'
+    && item.ownerId === ownerId
+    ? clearIncrementalQueueLease(item, { status: 'pending', nextAttemptAt: 0 })
+    : item));
+}
+
+async function releaseIncrementalClassificationOwner(ownerId) {
+  return mutateIncrementalClassificationQueue((queue) => queue.map((item) => item.status === 'running' && item.ownerId === ownerId
+    ? clearIncrementalQueueLease(item, { status: 'pending', nextAttemptAt: 0 })
     : item));
 }
 
@@ -4768,7 +4915,7 @@ async function addSingleBookmark(id) {
       if (settings.notificationEnabled) {
         chrome.notifications.create({
           type: 'basic',
-          iconUrl: 'icons/icon128.png',
+          iconUrl: '../icons/icon128.png',
           title: item.title || 'Bookmark Saved',
           message: (item.tags && item.tags.length > 0)
             ? `已保存，标签：${item.tags.join(', ')}`
@@ -4957,6 +5104,68 @@ async function saveRssArticleAsBookmark(item, feed, settings) {
 self.saveRssArticleAsBookmark = saveRssArticleAsBookmark;
 
 // ===== 消息监听 =====
+chrome.runtime.onConnect.addListener((port) => {
+  const ownerId = getIncrementalClassificationPortOwner(port);
+  if (!ownerId) {
+    port.disconnect();
+    return;
+  }
+
+  let disconnected = false;
+  let operation = Promise.resolve();
+  activeIncrementalClassificationOwners.add(ownerId);
+
+  const respond = (payload) => {
+    if (disconnected) return;
+    try { port.postMessage(payload); } catch { /* the disconnect handler owns cleanup */ }
+  };
+  port.onMessage.addListener((message) => {
+    if (disconnected || !message || typeof message !== 'object') return;
+    const action = message.action;
+    const requestId = message.requestId;
+    const validationError = validateRuntimeMessage(message);
+    const supported = ['claim', 'heartbeat', 'fail', 'complete', 'release'].includes(action);
+    const needsIds = ['fail', 'complete', 'release'].includes(action);
+    const requestError = validationError
+      || (!supported ? 'invalid_action' : '')
+      || (action !== 'heartbeat' && typeof requestId !== 'string' ? 'invalid_request_id' : '')
+      || (needsIds && !Array.isArray(message.ids) ? 'invalid_ids' : '')
+      || (action === 'fail' && typeof message.error !== 'string' ? 'invalid_error' : '');
+    if (requestError) {
+      if (typeof requestId === 'string') respond({ requestId, success: false, error: requestError });
+      return;
+    }
+
+    if (action === 'heartbeat') {
+      operation = operation
+        .then(() => heartbeatIncrementalClassificationQueue(ownerId))
+        .catch((error) => console.warn('增量分类租约心跳失败:', error));
+      return;
+    }
+
+    operation = operation.then(async () => {
+      let queue;
+      if (action === 'claim') queue = await claimIncrementalClassificationQueue(ownerId);
+      else if (action === 'fail') queue = await failIncrementalClassificationQueue(message.ids, message.error, ownerId);
+      else if (action === 'complete') queue = await completeIncrementalClassificationQueue(message.ids, ownerId);
+      else queue = await releaseIncrementalClassificationQueue(message.ids, ownerId);
+      respond({ requestId, success: true, queue });
+    }).catch((error) => {
+      respond({ requestId, success: false, error: String(error?.message || error || 'incremental_queue_unavailable').slice(0, 240) });
+    });
+  });
+
+  port.onDisconnect.addListener(() => {
+    if (disconnected) return;
+    disconnected = true;
+    activeIncrementalClassificationOwners.delete(ownerId);
+    operation = operation
+      .catch(() => undefined)
+      .then(() => releaseIncrementalClassificationOwner(ownerId))
+      .catch((error) => console.warn('增量分类租约断线释放失败:', error));
+  });
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object' || (sender?.id && sender.id !== chrome.runtime.id)) {
     sendResponse({ success: false, error: 'invalid_message_sender' });
@@ -5103,12 +5312,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'scheduleChecker':
       scheduleCheckerAlarm().then(() => {
         sendResponse({ success: true });
+      }).catch((err) => {
+        sendResponse({ success: false, error: err?.message || 'schedule_checker_failed' });
       });
       return true;
 
     case 'getCheckerSettings':
       getCheckSettings().then((settings) => {
         sendResponse({ success: true, settings });
+      }).catch((err) => {
+        sendResponse({ success: false, error: err?.message || 'get_checker_settings_failed' });
       });
       return true;
 
@@ -5265,10 +5478,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })();
       return true;
 
-    case 'incrementalQueueClaim':
-      (async () => sendResponse({ success: true, queue: await claimIncrementalClassificationQueue() }))();
-      return true;
-
     case 'incrementalQueueEnqueue':
       (async () => sendResponse({ success: true, queue: await enqueueIncrementalClassificationEntries(message.entries) }))();
       return true;
@@ -5304,6 +5513,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'incrementalQueueAbandon':
       (async () => {
         const queue = await abandonIncrementalClassificationQueue(message.ids || []);
+        sendResponse({ success: true, queue });
+      })();
+      return true;
+
+    case 'incrementalQueueReleaseOwner':
+      // 客户端在端口意外断开时补发的显式释放；正常情况下端口 onDisconnect 已释放，
+      // 此处作为兜底，把该 owner 仍占用的 running 项退回 pending。
+      (async () => {
+        const queue = await releaseIncrementalClassificationOwner(message.ownerId);
         sendResponse({ success: true, queue });
       })();
       return true;
@@ -5485,6 +5703,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         const stats = await getPreviewCacheStats();
         sendResponse({ success: true, stats });
+      })();
+      return true;
+    }
+
+    // ===== AI 请求代理：在 SW 内执行网络 I/O，规避扩展页面的 CORS 预检开销 =====
+    // 页面（sidepanel/settings）把已构造好的请求交给 SW 发出；SW 具备 host 权限，
+    // 对已授权源不触发浏览器 OPTIONS 预检，从而消除“配置页比 AI 工具慢/报错”的主要来源。
+    // 仅代理网络传输，分类的批次编排/降级/解析仍留在页面。
+    case 'aiProxyFetch': {
+      (async () => {
+        try {
+          const result = await aiProxyFetch(message.request || {});
+          sendResponse({ success: true, ...result });
+        } catch (e) {
+          sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+        }
       })();
       return true;
     }
@@ -6301,11 +6535,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })();
       return true;
     }
+
+    default:
+      // 未识别的 action：立即回执错误，避免通道悬挂导致调用方 await 永久挂起
+      // 或以 undefined 决议（读取 resp.success 时抛错）。
+      sendResponse({ success: false, error: 'unknown_action' });
+      return false;
   }
 });
 
 // ===== 书签事件监听 =====
 chrome.bookmarks.onCreated.addListener((id, bookmark) => {
+  // 导入进行中：镜像与元数据由 importBookmarksV2 负责，跳过逐条抓正文/推荐/增量入队的扇出。
+  if (isProgrammaticImportActive()) return;
   if (bookmark.url) {
     addSingleBookmark(id).then((result) => {
       if (result?.item) {
@@ -6330,38 +6572,83 @@ chrome.bookmarks.onChanged.addListener((id, changeInfo) => {
 
 let bookmarkMoveUpdateQueue = Promise.resolve();
 
-// 监听书签移动：同步本地镜像；来源不可信的移动仅进入待复核观察。
+// 单个书签移动：更新镜像的 parentId/folderName/folderPath；来源不可信的移动进入待复核观察。
+async function handleSingleBookmarkMoved(id, node, moveInfo) {
+  const parent = await chrome.bookmarks.get(moveInfo.parentId);
+  if (!parent || !parent[0]) return;
+  const parentTitle = parent[0].title || '';
+  const folderName = isBrowserBookmarkRoot(parentTitle) ? '' : parentTitle;
+  const folderOptions = await loadBookmarkFolderOptions();
+  const folderPath = folderOptions.find((folder) => folder.id === moveInfo.parentId)?.path || '';
+
+  let updated = false;
+  let previousFolderPath = '';
+  await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
+    if (item.id !== id) return item;
+    updated = true;
+    previousFolderPath = item.folderPath || '';
+    return { ...item, parentId: moveInfo.parentId, folderName, folderPath };
+  }));
+  if (updated) {
+    chrome.runtime.sendMessage({ action: 'bookmarksUpdated', ids: [id] }).catch(() => {});
+  }
+
+  if (updated && !consumeProgrammaticBookmarkMove(id, moveInfo.parentId)
+    && normalizeBookmarkFolderPath(previousFolderPath) !== normalizeBookmarkFolderPath(folderPath)) {
+    await queueBookmarkMoveObservation({ ...node, id }, previousFolderPath, moveInfo.parentId, folderPath);
+  }
+}
+
+// 文件夹移动：Chrome 只对该文件夹节点触发一次 onMoved，其下所有书签的 folderName/folderPath
+// 都要按新位置重算，否则镜像会长期保留旧目录（仅在下次全量同步时才纠正）。
+async function handleFolderMoved(folderId) {
+  const subtree = await chrome.bookmarks.getSubTree(folderId).catch(() => null);
+  if (!subtree || !subtree[0]) return;
+  const folderOptions = await loadBookmarkFolderOptions();
+  const pathById = new Map(folderOptions.map((folder) => [folder.id, folder.path]));
+  const infoById = new Map();
+  const walk = (folderNode) => {
+    for (const child of folderNode.children || []) {
+      if (child.url) {
+        const parentTitle = folderNode.title || '';
+        infoById.set(child.id, {
+          parentId: folderNode.id,
+          folderName: isBrowserBookmarkRoot(parentTitle) ? '' : parentTitle,
+          folderPath: pathById.get(folderNode.id) || '',
+        });
+      } else {
+        walk(child);
+      }
+    }
+  };
+  walk(subtree[0]);
+  if (!infoById.size) return;
+
+  const updatedIds = [];
+  await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
+    const info = infoById.get(item.id);
+    if (!info) return item;
+    if (item.parentId === info.parentId && item.folderName === info.folderName && item.folderPath === info.folderPath) {
+      return item;
+    }
+    updatedIds.push(item.id);
+    return { ...item, parentId: info.parentId, folderName: info.folderName, folderPath: info.folderPath };
+  }));
+  if (updatedIds.length) {
+    chrome.runtime.sendMessage({ action: 'bookmarksUpdated', ids: updatedIds }).catch(() => {});
+  }
+}
+
+// 监听书签移动：单个书签与文件夹分别处理。
 chrome.bookmarks.onMoved.addListener((id, moveInfo) => {
   bookmarkMoveUpdateQueue = bookmarkMoveUpdateQueue.then(async () => {
     try {
       const bookmark = await chrome.bookmarks.get(id);
-      if (!bookmark || !bookmark[0] || !bookmark[0].url) return;
-      const b = bookmark[0];
-      const parent = await chrome.bookmarks.get(moveInfo.parentId);
-      if (!parent || !parent[0]) return;
-      const parentTitle = parent[0].title || '';
-      const folderName = isBrowserBookmarkRoot(parentTitle) ? '' : parentTitle;
-      const folderOptions = await loadBookmarkFolderOptions();
-      const folderPath = folderOptions.find((folder) => folder.id === moveInfo.parentId)?.path || '';
-
-      let updated = false;
-      let previousFolderPath = '';
-      await mutateStoredBookmarks((bookmarks) => bookmarks.map((item) => {
-        if (item.id !== id) return item;
-        updated = true;
-        previousFolderPath = item.folderPath || '';
-        return { ...item, parentId: moveInfo.parentId, folderName, folderPath };
-      }));
-      if (updated) {
-        chrome.runtime.sendMessage({
-          action: 'bookmarksUpdated',
-          ids: [id],
-        }).catch(() => {});
-      }
-
-      if (updated && !consumeProgrammaticBookmarkMove(id, moveInfo.parentId)
-        && normalizeBookmarkFolderPath(previousFolderPath) !== normalizeBookmarkFolderPath(folderPath)) {
-        await queueBookmarkMoveObservation({ ...b, id }, previousFolderPath, moveInfo.parentId, folderPath);
+      if (!bookmark || !bookmark[0]) return;
+      if (bookmark[0].url) {
+        await handleSingleBookmarkMoved(id, bookmark[0], moveInfo);
+      } else {
+        await handleFolderMoved(id);
       }
     } catch (e) {
       // 静默失败，不影响书签移动
@@ -6369,19 +6656,35 @@ chrome.bookmarks.onMoved.addListener((id, moveInfo) => {
   }).catch(() => {});
 });
 
+// 从被删节点收集其下所有含 url 的书签（含被删文件夹的整棵子树）。
+function collectRemovedBookmarkNodes(node) {
+  const results = [];
+  const walk = (current) => {
+    if (!current) return;
+    if (current.url) { results.push(current); return; }
+    for (const child of current.children || []) walk(child);
+  };
+  walk(node);
+  return results;
+}
+
 chrome.bookmarks.onRemoved.addListener((id, removeInfo) => {
-  // 从存储中移除并写入 tombstone
+  // 从存储中移除并写入 tombstone。删除文件夹时 Chrome 只触发一次 onRemoved，
+  // removeInfo.node 携带整棵子树，需据此把其下所有书签一并下线并生成 tombstone。
   (async () => {
-    let target = null;
+    const removedNodes = collectRemovedBookmarkNodes(removeInfo?.node);
+    const removedIds = removedNodes.length ? removedNodes.map((node) => node.id) : [id];
+    const removedIdSet = new Set(removedIds);
+    let targets = [];
     await mutateStoredBookmarks((bookmarks) => {
-      target = bookmarks.find((item) => item.id === id) || null;
-      return target ? bookmarks.filter((item) => item.id !== id) : bookmarks;
+      targets = bookmarks.filter((item) => removedIdSet.has(item.id));
+      return targets.length ? bookmarks.filter((item) => !removedIdSet.has(item.id)) : bookmarks;
     });
-    if (target) await addTombstone(target);
+    for (const target of targets) await addTombstone(target);
     chrome.runtime.sendMessage({
       action: 'bookmarksDeleted',
-      ids: [id],
-      urls: removeInfo?.node?.url ? [removeInfo.node.url] : [],
+      ids: removedIds,
+      urls: removedNodes.filter((node) => node.url).map((node) => node.url),
     }).catch(() => {});
   })().catch(() => {});
 });

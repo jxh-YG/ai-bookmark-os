@@ -53,6 +53,8 @@ async function chatJson<T>(
 const BATCH_SIZE = 40;
 const CONCURRENCY = 2;
 const ASSIGN_BATCH_SIZE = 60;
+/** 批次内个别书签缺失时的精准补偿重试轮数（仅重跑缺失项，不重跑整批） */
+const MAX_LABEL_COMPENSATE_DEPTH = 2;
 
 /** 从 settings 读取批次大小和并发数（带安全范围夹拢） */
 function batchSize(settings: Settings): number {
@@ -166,6 +168,11 @@ export async function saveClassifyResult(result: ClassifyResult): Promise<void> 
 function retryMessage(attempt: number, maxRetries: number, delayMs: number, timeoutSeconds: number): string {
   const seconds = Number((delayMs / 1000).toFixed(1));
   return `当前批次 AI 连接失败，${seconds} 秒后重连（该批次第 ${attempt}/${maxRetries} 次重连；单次连接超时 ${timeoutSeconds} 秒）`;
+}
+
+/** 打标前抓取页面正文的进度提示：让进度条在长时间抓取阶段仍有可见反馈。 */
+function fetchMessage(fetched: number, total: number): string {
+  return `正在读取页面内容（${fetched}/${total}）…`;
 }
 
 /** 是否参照原有书签夹（默认开启） */
@@ -451,6 +458,7 @@ function bookmarkSignalLine(
 async function enrichBookmarks(
   bookmarks: FlatBookmark[],
   signal: AbortSignal,
+  onFetched?: (fetched: number, total: number) => void,
 ): Promise<Map<string, PageContext>> {
   const enriched = new Map<string, PageContext>();
   try {
@@ -460,6 +468,7 @@ async function enrichBookmarks(
     return enriched;
   }
   let idx = 0;
+  let fetched = 0;
   const workers = Array.from({ length: META_CONCURRENCY }, async () => {
     while (idx < bookmarks.length) {
       if (signal.aborted) throw abortReason(signal);
@@ -475,6 +484,10 @@ async function enrichBookmarks(
       } catch (error) {
         if (signal.aborted) throw error;
         /* Page access errors should not block classification. */
+      } finally {
+        fetched += 1;
+        // 抓取正文可能耗时数十秒；逐条上报进度，避免打标前进度条长时间停滞。
+        if (!signal.aborted) onFetched?.(fetched, bookmarks.length);
       }
     }
   });
@@ -515,7 +528,14 @@ async function labelBookmarks(
 
   // A complete cache hit reuses both the AI label and its source context.
   if (usePageMetadata(settings) && contextPending.length) {
-    const fetchedContexts = await enrichBookmarks(contextPending, signal);
+    const fetchedContexts = await enrichBookmarks(contextPending, signal, (fetched, fetchTotal) => {
+      onProgress({
+        phase: 'labeling',
+        done,
+        total,
+        message: fetchMessage(fetched, fetchTotal),
+      });
+    });
     let cacheChanged = false;
     for (const [id, context] of fetchedContexts) contexts.set(id, context);
     if (cacheEnabled) {
@@ -575,35 +595,52 @@ async function labelBookmarks(
   };
 
   /**
-   * 批次运行：若 LLM 返回结果不完整，自动拆成两个半批次重试（最多拆分一次）。
-   * 这样避免因单次 token 截断直接 fatal，同时保持大批次的效率优势。
+   * 批次运行：整批打标；当解析失败（如 token 截断导致无法提取 JSON）或结果不完整时，
+   * 对大批次（>10）拆成两半递归重试。这样最常见的“输出被截断”场景也能降级而非直接 fatal，
+   * 只有拆到 ≤10 条仍失败时才取消本次分类。abort 错误始终直接上抛，不进入降级。
    */
   const runBatch = async (batch: FlatBookmark[]) => {
     const byId = new Map(batch.map((b) => [b.id, b]));
-    let parsed: BookmarkLabel[];
-    try {
-      parsed = await labelOneBatch(batch);
-    } catch (err) {
-      // 非不完整结果的错误直接上浮
-      if (!(err instanceof Error) || !err.message.includes('不完整')) throw err;
-      parsed = [];
-    }
 
-    const returnedIds = new Set(parsed.map((item) => String(item.id)));
-    const isComplete = returnedIds.size === batch.length && batch.every((b) => returnedIds.has(b.id));
+    const tryLabel = async (group: FlatBookmark[], depth = 0): Promise<BookmarkLabel[]> => {
+      let parsed: BookmarkLabel[] = [];
+      let parseError: Error | null = null;
+      try {
+        parsed = await labelOneBatch(group);
+      } catch (err) {
+        if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) throw err;
+        parseError = err instanceof Error ? err : new Error(String(err));
+      }
+      const groupIds = new Set(group.map((b) => b.id));
+      // 仅保留本组请求过的 id，避免模型串号污染
+      const kept = parsed.filter((item) => groupIds.has(String(item.id)));
+      const returnedIds = new Set(kept.map((item) => String(item.id)));
+      const isComplete = !parseError
+        && returnedIds.size === group.length
+        && group.every((b) => returnedIds.has(b.id));
+      if (isComplete) return kept;
 
-    if (!isComplete && batch.length > 10) {
-      // 降级：拆成两半分别重试
-      const half = Math.ceil(batch.length / 2);
-      const [firstHalf, secondHalf] = [batch.slice(0, half), batch.slice(half)];
-      const [parsedA, parsedB] = await Promise.all([
-        labelOneBatch(firstHalf),
-        labelOneBatch(secondHalf),
-      ]);
-      parsed = [...parsedA, ...parsedB];
-    } else if (!isComplete) {
+      // 精准补偿：解析成功但仅个别书签缺失时，只对缺失项重打一次，而非重跑整批或直接 fatal。
+      // 这样“40 条里缺 2 条”只补那 2 条；补偿后合并，若仍缺才走拆半降级。
+      const missing = group.filter((b) => !returnedIds.has(b.id));
+      if (!parseError && missing.length && missing.length < group.length && depth < MAX_LABEL_COMPENSATE_DEPTH) {
+        const compensated = await tryLabel(missing, depth + 1);
+        return [...kept, ...compensated];
+      }
+
+      if (group.length > 10) {
+        const half = Math.ceil(group.length / 2);
+        const [parsedA, parsedB] = await Promise.all([
+          tryLabel(group.slice(0, half), depth + 1),
+          tryLabel(group.slice(half), depth + 1),
+        ]);
+        return [...parsedA, ...parsedB];
+      }
+      if (parseError) throw parseError;
       throw new Error('AI 标签结果不完整，已取消本次分类，未写入书签分类结果。');
-    }
+    };
+
+    const parsed = await tryLabel(batch);
 
     const finalIds = new Set(parsed.map((item) => String(item.id)));
     if (finalIds.size !== batch.length || !batch.every((bookmark) => finalIds.has(bookmark.id))) {
@@ -778,9 +815,10 @@ async function assignBookmarks(
   };
   walk(tree, []);
 
-  // 确保兜底分类存在
+  // 确保兜底分类存在（按叶子段名精确匹配，避免“其他工具”等被误判为已存在兜底）
   const FALLBACK = '其他';
-  if (!nodeByPath.has(FALLBACK) && ![...nodeByPath.keys()].some((p) => p.startsWith(FALLBACK))) {
+  const hasFallbackLeaf = [...nodeByPath.keys()].some((p) => p.split('/').pop() === FALLBACK);
+  if (!nodeByPath.has(FALLBACK) && !hasFallbackLeaf) {
     const fallbackNode: CategoryNode = { name: FALLBACK };
     tree.push(fallbackNode);
     nodeByPath.set(FALLBACK, fallbackNode);
@@ -829,20 +867,20 @@ async function assignBookmarks(
     return response.data;
   };
 
-  for (let i = 0; i < bookmarks.length; i += assignBatchSize(settings)) {
-    if (signal.aborted) throw new DOMException('已取消', 'AbortError');
-    const batch = bookmarks.slice(i, i + assignBatchSize(settings));
-    const assignments: { id: string; cat: number }[] = [];
-
-    let aiAssignments: { id: string; cat: number }[];
+  /**
+   * 批次分配：整批分配；当解析失败（如 token 截断）或结果不完整时，对大批次（>10）
+   * 拆成两半递归重试，只有拆到 ≤10 条仍失败才取消。abort 错误始终直接上抛。
+   * 返回该组去重后的 id→cat 映射（仅含合法 cat）。
+   */
+  const tryAssign = async (group: FlatBookmark[]): Promise<Map<string, number>> => {
+    let aiAssignments: { id: string; cat: number }[] = [];
+    let parseError: Error | null = null;
     try {
-      aiAssignments = await assignOneBatch(batch);
+      aiAssignments = await assignOneBatch(group);
     } catch (err) {
-      if (!(err instanceof Error) || !err.message.includes('不完整')) throw err;
-      aiAssignments = [];
+      if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) throw err;
+      parseError = err instanceof Error ? err : new Error(String(err));
     }
-
-    // 如果结果不完整且批次足够大，降级到半批次重试
     const assignmentById = new Map<string, number>();
     for (const a of aiAssignments) {
       const idStr = String(a.id);
@@ -850,25 +888,28 @@ async function assignBookmarks(
         assignmentById.set(idStr, a.cat);
       }
     }
-    const isComplete = assignmentById.size === batch.length && batch.every((b) => assignmentById.has(b.id));
-
-    if (!isComplete && batch.length > 10) {
-      // 降级：拆成两半分别重试
-      const half = Math.ceil(batch.length / 2);
-      const [firstHalf, secondHalf] = [batch.slice(0, half), batch.slice(half)];
-      const [assignedA, assignedB] = await Promise.all([
-        assignOneBatch(firstHalf),
-        assignOneBatch(secondHalf),
+    const isComplete = !parseError
+      && assignmentById.size === group.length
+      && group.every((b) => assignmentById.has(b.id));
+    if (isComplete) return assignmentById;
+    if (group.length > 10) {
+      const half = Math.ceil(group.length / 2);
+      const [mapA, mapB] = await Promise.all([
+        tryAssign(group.slice(0, half)),
+        tryAssign(group.slice(half)),
       ]);
-      for (const a of [...assignedA, ...assignedB]) {
-        const idStr = String(a.id);
-        if (!assignmentById.has(idStr) && Number.isInteger(a.cat) && paths[a.cat]) {
-          assignmentById.set(idStr, a.cat);
-        }
-      }
-    } else if (!isComplete) {
-      throw new Error('AI 分配结果不完整，已取消本次分类，未写入书签分类结果。');
+      return new Map([...mapA, ...mapB]);
     }
+    if (parseError) throw parseError;
+    throw new Error('AI 分配结果不完整，已取消本次分类，未写入书签分类结果。');
+  };
+
+  for (let i = 0; i < bookmarks.length; i += assignBatchSize(settings)) {
+    if (signal.aborted) throw new DOMException('已取消', 'AbortError');
+    const batch = bookmarks.slice(i, i + assignBatchSize(settings));
+    const assignments: { id: string; cat: number }[] = [];
+
+    const assignmentById = await tryAssign(batch);
 
     if (assignmentById.size !== batch.length || !batch.every((bookmark) => assignmentById.has(bookmark.id))) {
       throw new Error('AI 分配结果不完整，已取消本次分类，未写入书签分类结果。');

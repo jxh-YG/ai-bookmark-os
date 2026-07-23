@@ -139,6 +139,30 @@
       }
     });
 
+    // 图片加载失败的兜底处理（事件委托，捕获阶段——error 事件不冒泡）。
+    // Manifest V3 默认 CSP 禁止内联 onerror，故集中在此按 data-fallback 类型处理。
+    document.addEventListener('error', (e) => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement)) return;
+      const fallback = img.dataset.fallback;
+      if (fallback === 'feed-icon') {
+        const span = document.createElement('span');
+        span.className = 'sa-rss-feed-icon';
+        span.innerHTML = SVG_RSS;
+        img.replaceWith(span);
+      } else if (fallback === 'hide') {
+        img.style.display = 'none';
+      } else if (fallback === 'thumb') {
+        const thumb = img.parentElement;
+        if (thumb) thumb.style.display = 'none';
+        const article = img.closest('.sa-feed-article');
+        if (article) {
+          article.classList.remove('has-image');
+          article.classList.add('no-image');
+        }
+      }
+    }, true);
+
     await loadFeedsAndRender();
     wireSidebarActions();
   }
@@ -352,7 +376,7 @@
 
     let iconHtml = '';
     if (opts.favicon) {
-      iconHtml = `<img class="sa-rss-feed-favicon" src="${esc(opts.favicon)}" draggable="false" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'sa-rss-feed-icon',innerHTML:'${SVG_RSS.replace(/"/g, '&quot;')}'}))">`;
+      iconHtml = `<img class="sa-rss-feed-favicon" src="${esc(opts.favicon)}" draggable="false" data-fallback="feed-icon">`;
     } else {
       iconHtml = `<span class="sa-rss-feed-icon">${opts.icon || SVG_RSS}</span>`;
     }
@@ -735,7 +759,7 @@
 
     // 卡片头部
     const faviconHtml = favicon
-      ? `<img class="sa-feed-overview-favicon" src="${esc(favicon)}" draggable="false" onerror="this.style.display='none'">`
+      ? `<img class="sa-feed-overview-favicon" src="${esc(favicon)}" draggable="false" data-fallback="hide">`
       : `<span class="sa-feed-overview-favicon-placeholder">${SVG_RSS}</span>`;
 
     const unreadHtml = unread > 0
@@ -991,7 +1015,7 @@
     const openBtn = `<button class="sa-feed-article-action" data-act="open" title="${esc(t('rssOpenOriginal'))}">${SVG_EXTERNAL}</button>`;
 
     const sourceHtml = sourceFavicon
-      ? `<img src="${esc(sourceFavicon)}" onerror="this.style.display='none'">`
+      ? `<img src="${esc(sourceFavicon)}" data-fallback="hide">`
       : '';
     const sourceLine = sourceName
       ? `<span class="sa-feed-article-source">${sourceHtml}${esc(sourceName)}</span><span class="sa-feed-article-dot">·</span>`
@@ -999,7 +1023,7 @@
 
     // 缩略图（有图时渲染，加载失败自动隐藏）
     const thumbHtml = hasImage
-      ? `<div class="sa-feed-article-thumb"><img src="${esc(item.imageUrl)}" loading="lazy" onerror="this.parentElement.style.display='none';this.closest('.sa-feed-article').classList.remove('has-image');this.closest('.sa-feed-article').classList.add('no-image');"></div>`
+      ? `<div class="sa-feed-article-thumb"><img src="${esc(item.imageUrl)}" loading="lazy" data-fallback="thumb"></div>`
       : '';
 
     card.innerHTML = `

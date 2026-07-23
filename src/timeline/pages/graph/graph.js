@@ -810,13 +810,13 @@ canvas:active { cursor: grabbing; }
 <canvas id="c"></canvas>
 <div class="legend">
   <div class="legend-title">${clusterSelect.value === 'domain' ? 'Domains' : clusterSelect.value === 'tag' ? 'Tags' : 'Folders'}</div>
-  ${legendData.map(l => `<div class="legend-item"><span class="legend-dot" style="background:${l.color}"></span><span class="legend-label">${l.label}</span><span class="legend-count">${l.count}</span></div>`).join('')}
+  ${legendData.map(l => `<div class="legend-item"><span class="legend-dot" style="background:${escapeHtml(l.color)}"></span><span class="legend-label">${escapeHtml(l.label)}</span><span class="legend-count">${escapeHtml(l.count)}</span></div>`).join('')}
 </div>
 <div class="tooltip" id="tip"><div class="tooltip-title" id="tipTitle"></div><div class="tooltip-meta" id="tipMeta"></div></div>
 <div class="stats">${nodesData.length} nodes · ${edgesData.length} edges · ${clusterMap.size} clusters</div>
 <script>
-const nodes = ${JSON.stringify(nodesData)};
-const edges = ${JSON.stringify(edgesData)};
+const nodes = ${jsonForScript(nodesData)};
+const edges = ${jsonForScript(edgesData)};
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const tip = document.getElementById('tip');
@@ -1067,6 +1067,15 @@ function renderLegend() {
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 将数据序列化为可安全内联进 <script> 块的 JSON：转义 < 以防 </script> 提前闭合，
+// 并转义行分隔符 U+2028/U+2029（在 JS 字符串字面量中会被当作换行导致语法错误）。
+function jsonForScript(value) {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
 }
 
 // ===== 统计信息 =====

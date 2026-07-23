@@ -2547,39 +2547,32 @@ async function testTreeConnection() {
     return;
   }
 
-  const req = buildTreeChatRequest(settings, '回复"OK"两个字母即可。');
-  if (!req.url) {
-    setTreeStatus('API 地址无效', 'err');
-    if (typeof showToast === 'function') showToast('API 地址无效', 'error');
-    return;
-  }
-
   const originalText = treeTestBtn.textContent;
   treeTestBtn.disabled = true;
-  treeTestBtn.textContent = (typeof i18n === 'function' ? (i18n('aiTesting') || '测试中...') : '测试中...');
-  setTreeStatus('测试中...');
+  treeTestBtn.textContent = (typeof i18n === 'function' ? (i18n('aiTesting') || '诊断中...') : '诊断中...');
+  setTreeStatus('诊断中…');
 
   try {
-    const { response: res, text } = await fetchTreeTestWithRetry(req, settings, (info) => {
-      const seconds = Number((info.delayMs / 1000).toFixed(1));
-      setTreeStatus(`连接失败，${seconds} 秒后重连（第 ${info.attempt}/${info.maxRetries} 次；单次超时 ${Math.round(info.timeoutMs / 1000)} 秒）`);
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${text.slice(0, 180)}`);
-    }
+    // Provider Doctor：分环节诊断（配置完整性 → 请求地址 → 连通性），
+    // 连通性走与真实分类相同的 chat 路径（SW 代理），让失败能精确定位到某一环。
+    const steps = await diagnoseProvider(settings);
+    const allOk = steps.every((s) => s.ok);
+    const summary = steps.map((s) => `${s.ok ? '✅' : '❌'} ${s.step}：${s.detail}`).join('\n');
 
-    const sample = extractTreeTestSample(style, text);
-    await chrome.storage.local.set({ settings });
-    await saveTreeSyncSettings(settings);
-
-    setTreeStatus(`连接成功 · ${getTreeProvider(settings.provider).label} · ${settings.model}`, 'ok');
-    if (typeof showToast === 'function') {
-      showToast(sample ? `连接成功：${sample.slice(0, 40)}` : '连接成功', 'success');
+    if (allOk) {
+      await chrome.storage.local.set({ settings });
+      await saveTreeSyncSettings(settings);
+      setTreeStatus(`诊断通过 · ${getTreeProvider(settings.provider).label} · ${settings.model}\n${summary}`, 'ok');
+      if (typeof showToast === 'function') showToast('诊断通过，连接正常', 'success');
+    } else {
+      const failed = steps.find((s) => !s.ok);
+      setTreeStatus(summary, 'err');
+      if (typeof showToast === 'function') showToast(`诊断失败（${failed ? failed.step : '未知'}）：${failed ? failed.detail : ''}`.slice(0, 80), 'error');
     }
   } catch (e) {
     const readable = (e && e.message) || String(e);
-    setTreeStatus(`连接失败：${readable}`, 'err');
-    if (typeof showToast === 'function') showToast(`连接失败：${readable}`, 'error');
+    setTreeStatus(`诊断失败：${readable}`, 'err');
+    if (typeof showToast === 'function') showToast(`诊断失败：${readable}`, 'error');
   } finally {
     treeTestBtn.disabled = false;
     treeTestBtn.textContent = originalText || (typeof i18n === 'function' ? (i18n('aiTest') || '测试连接') : '测试连接');

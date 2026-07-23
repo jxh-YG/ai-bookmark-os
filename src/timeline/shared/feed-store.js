@@ -97,7 +97,9 @@
 
   async function removeFeed(id) {
     await mutateStorage(FEEDS_KEY, (stored) => (stored || []).filter(f => f.id !== id));
-    await mutateStorage(ITEMS_KEY_PREFIX + id, () => []);
+    // 经队列串行化后彻底删除条目 key，避免残留空的 rss_items_<id>（旧实现写入 [] 只是清空未删除）。
+    await mutateStorage(ITEMS_KEY_PREFIX + id, () => undefined);
+    await chrome.storage.local.remove(ITEMS_KEY_PREFIX + id);
     return { success: true };
   }
 
@@ -146,6 +148,10 @@
       }
       existing.sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
       const limit = maxItems || 100; if (existing.length > limit) existing.length = limit;
+      // 只把截断后仍留存的条目视为"新增"：否则达上限时收到的旧日期(publishedAt=0)新条目
+      // 会被排序挤出存储却仍返回给调用方，导致对永不落库的条目反复通知/建书签。
+      const survivingIds = new Set(existing.map(i => i.id));
+      added = added.filter(i => survivingIds.has(i.id));
       return existing;
     });
     return added;

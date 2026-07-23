@@ -88,7 +88,7 @@ assert.match(background.slice(rssStart, rssEnd), /await recommendTagsForBookmark
 assert.match(background, /topTag\?\.confidence === 'high'/, 'RSS may only apply the high-confidence first tag');
 assert.doesNotMatch(background, /function maybeBackfillAIForItem\s*\(/, 'legacy AI tag overwrite path must stay removed');
 
-const movedStart = background.indexOf('chrome.bookmarks.onMoved.addListener');
+const movedStart = background.indexOf('async function handleSingleBookmarkMoved');
 const movedEnd = background.indexOf('chrome.bookmarks.onRemoved.addListener', movedStart);
 const movedSource = background.slice(movedStart, movedEnd);
 assert.match(movedSource, /queueBookmarkMoveObservation/);

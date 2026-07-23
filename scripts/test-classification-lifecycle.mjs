@@ -129,7 +129,7 @@ assert.match(app, /const running = classificationPending && runningPhase;/, '运
 assert.match(app, /classificationRunRef\.current === runId/, '进度回调必须校验当前任务归属');
 assert.match(app, /useEffect\(\(\) => \(\) => \{[\s\S]{0,180}abortRef\.current\?\.abort\(\)/, '侧栏卸载时必须中止仍在执行的分类任务');
 assert.match(app, /running && abortRef\.current[\s\S]{0,180}cancelClassify/, '运行时取消入口必须优先于工作区分支');
-assert.match(app, /markIncrementalQueueFailed[\s\S]{0,900}finishClassificationProgress/, '增量分类失败必须写入明确终态');
+assert.match(app, /lease\.fail\(ids,[\s\S]{0,900}finishClassificationProgress/, '增量分类失败必须写入明确终态');
 assert.match(
   app,
   /if \(committed\) \{[\s\S]{0,700}phase: 'done'[\s\S]{0,700}return;[\s\S]{0,100}\} else if/,
@@ -142,7 +142,7 @@ assert.match(
 );
 assert.match(
   app,
-  /await completeIncrementalQueue\(settledIds\);[\s\S]{0,180}releaseIncrementalQueue\(settledIds\)[\s\S]{0,220}setIncrementalQueueTick/,
+  /await lease\.complete\(settledIds\);[\s\S]{0,180}lease\.release\(settledIds\)[\s\S]{0,220}scheduleTickRetry/,
   '已删除或已提交条目的队列确认失败后必须释放并安排重试',
 );
 assert.match(

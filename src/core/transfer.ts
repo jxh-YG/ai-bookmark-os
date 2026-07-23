@@ -84,24 +84,32 @@ export async function importBundle(json: string): Promise<ImportResult> {
     throw new Error('INVALID_JSON');
   }
   // 使用 validator 做严格格式和版本校验，防止损坏数据包覆盖本地数据
-  const { validateExportBundle } = await import('./validators');
+  const { validateExportBundle, normalizeImportedClassifyResult, normalizeImportedLabelCache } = await import('./validators');
   validateExportBundle(bundle);
 
+  // 载荷同样不可信：分类结果树/标签缓存都要在写入前规范化，非法条目丢弃，
+  // 整体非法则拒绝，避免损坏或手改的数据包污染本地 storage。
+  const normalizedCache = normalizeImportedLabelCache(bundle.labelCache);
+  if (normalizedCache === null) throw new Error('INVALID_BUNDLE');
+  const normalizedResult = normalizeImportedClassifyResult(bundle.classifyResult);
+
   const existing = await chrome.storage.local.get(['labelCache']);
-  const mergedCache = { ...(existing.labelCache ?? {}), ...(bundle.labelCache ?? {}) };
+  const mergedCache = { ...(existing.labelCache ?? {}), ...normalizedCache };
 
   const writes: Record<string, unknown> = { labelCache: mergedCache };
-  if (bundle.classifyResult) writes.classifyResult = bundle.classifyResult;
+  if (normalizedResult) writes.classifyResult = normalizedResult;
   await chrome.storage.local.set(writes);
 
-  // 设置合并：保留本机 apiKey
-  if (bundle.settings) {
+  // 设置合并：仅接受对象类型，保留本机 apiKey；validateSettings 做范围/枚举校验
+  if (bundle.settings && typeof bundle.settings === 'object' && !Array.isArray(bundle.settings)) {
+    const { validateSettings } = await import('./validators');
     const current = await loadSettings();
-    await saveSettings({ ...current, ...bundle.settings, apiKey: current.apiKey });
+    const safe = validateSettings({ ...current, ...bundle.settings, apiKey: current.apiKey });
+    await saveSettings(safe);
   }
 
   return {
-    cacheEntries: Object.keys(bundle.labelCache ?? {}).length,
-    hasResult: !!bundle.classifyResult,
+    cacheEntries: Object.keys(normalizedCache).length,
+    hasResult: !!normalizedResult,
   };
 }

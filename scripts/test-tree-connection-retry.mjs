@@ -8,12 +8,10 @@ const end = source.indexOf('async function testTreeConnection(', start);
 assert.ok(start >= 0 && end > start, 'tree connection retry helpers should be present');
 
 const timerDelays = [];
-let fetchImpl = async () => { throw new Error('fetch mock not configured'); };
+let proxyFetchImpl = async () => { throw new Error('proxy mock not configured'); };
+const proxyRequests = [];
 const context = {
-  AbortController,
-  DOMException,
   Error,
-  JSON,
   Math,
   Number,
   Promise,
@@ -24,8 +22,14 @@ const context = {
     const number = Number(value);
     return Math.min(max, Math.max(min, Math.round(Number.isFinite(number) ? number : fallback)));
   },
-  clearTimeout,
-  fetch: (...args) => fetchImpl(...args),
+  chrome: {
+    runtime: {
+      sendMessage: (message) => {
+        proxyRequests.push(message);
+        return proxyFetchImpl(message);
+      },
+    },
+  },
   setTimeout(callback, delay, ...args) {
     timerDelays.push(Number(delay));
     return setTimeout(callback, Math.min(Number(delay) || 0, 2), ...args);
@@ -38,10 +42,10 @@ const { fetchTreeTestWithRetry } = context.helpers;
 const req = { url: 'https://api.test/chat', headers: {}, body: { message: 'OK' } };
 
 let calls = 0;
-fetchImpl = async () => {
+proxyFetchImpl = async () => {
   calls += 1;
-  if (calls < 3) return { status: 500, ok: false, text: async () => 'temporary' };
-  return { status: 200, ok: true, text: async () => 'OK' };
+  if (calls < 3) return { success: true, status: 500, ok: false, text: 'temporary' };
+  return { success: true, status: 200, ok: true, text: 'OK' };
 };
 const retries = [];
 const result = await fetchTreeTestWithRetry(
@@ -55,34 +59,34 @@ assert.deepEqual(retries.map(item => [item.attempt, item.maxRetries, item.delayM
   [1, 2, 1500],
   [2, 2, 3000],
 ]);
-assert.equal(timerDelays.filter(delay => delay === 37000).length, 3, '测试连接每次尝试都应使用配置超时');
+assert.equal(proxyRequests.length, 3);
+assert.ok(proxyRequests.every((message) => (
+  message.action === 'aiProxyFetch'
+  && message.request.timeoutMs === 37000
+  && message.request.url === req.url
+  && message.request.body === JSON.stringify(req.body)
+)), '测试连接必须通过 SW 代理，并传递每次尝试的超时设置');
 
 calls = 0;
-fetchImpl = async () => {
+proxyFetchImpl = async () => {
   calls += 1;
-  return { status: 401, ok: false, text: async () => 'unauthorized' };
+  return { success: true, status: 401, ok: false, text: 'unauthorized' };
 };
 const unauthorized = await fetchTreeTestWithRetry(req, { aiRetryCount: 5, aiRequestTimeoutSeconds: 12 });
-assert.equal(unauthorized.response.status, 401);
+assert.equal(unauthorized.status, 401);
 assert.equal(calls, 1, '不可恢复的 4xx 错误不得重连');
 
 timerDelays.length = 0;
 calls = 0;
-fetchImpl = async (_url, options) => {
+proxyFetchImpl = async () => {
   calls += 1;
-  return {
-    status: 200,
-    ok: true,
-    text: () => new Promise((_resolve, reject) => {
-      options.signal.addEventListener('abort', () => reject(new DOMException('body aborted', 'AbortError')), { once: true });
-    }),
-  };
+  return { success: false, error: 'API 请求超时（7 秒）' };
 };
 await assert.rejects(
   () => fetchTreeTestWithRetry(req, { aiRetryCount: 0, aiRequestTimeoutSeconds: 7 }),
   /7 秒|timeout/i,
 );
 assert.equal(calls, 1);
-assert.ok(timerDelays.includes(7000), '测试连接读取响应正文时仍应受配置超时限制');
+assert.equal(proxyRequests.at(-1).request.timeoutMs, 7000, '测试连接应把单次超时交给 SW 代理执行');
 
 console.log('tree connection retry tests passed');

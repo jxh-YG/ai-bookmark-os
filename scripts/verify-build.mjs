@@ -103,6 +103,22 @@ if (!bg.includes('ai-sw-bridge.js')) {
 } else {
   console.log('OK bridge import');
 }
+const checkerBridge = readFileSync(join(dist, 'background/ai-sw-bridge.js'), 'utf8');
+const checkerPage = readFileSync(join(dist, 'pages/checker/checker.js'), 'utf8');
+if (
+  !checkerBridge.includes('ownsRuntimeMessage')
+  || !checkerBridge.includes("msg.type === 'checkUrl'")
+  || !checkerBridge.includes('sendResponse({ success: true, result })')
+  || !bg.includes('AIBookmarkBridge?.ownsRuntimeMessage?.(message)')
+  || !checkerPage.includes("requestProbe('checkUrl'")
+  || !checkerPage.includes('let checkStarting = false;')
+  || /\bstartingCheck\b/.test(checkerPage)
+) {
+  console.error('link checker bridge ownership or start guard missing from build');
+  ok = false;
+} else {
+  console.log('OK link checker runtime message ownership');
+}
 
 // Full AI sidepanel bundle should include the complete i18n/runtime payload
 const aiAssets = existsSync(join(dist, 'ai/assets')) ? readdirSync(join(dist, 'ai/assets')) : [];
@@ -195,6 +211,14 @@ for (const page of ['checker', 'graph']) {
   } else {
     console.log('OK page router navigation', page);
   }
+}
+const graphJs = readFileSync(join(dist, 'pages/graph/graph.js'), 'utf8');
+const graphWheelSensitivity = Number(/wheelSensitivity:\s*([\d.]+)/.exec(graphJs)?.[1]);
+if (graphWheelSensitivity < 0.4 || graphWheelSensitivity > 0.55) {
+  console.error('graph wheel zoom sensitivity must remain responsive without jumping:', graphWheelSensitivity);
+  ok = false;
+} else {
+  console.log('OK graph wheel zoom sensitivity');
 }
 
 // Ensure no old product names in user-facing popup banner

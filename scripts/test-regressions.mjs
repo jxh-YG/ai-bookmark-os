@@ -1263,8 +1263,14 @@ function testUiContracts() {
   const settingsScript = read('src/timeline/pages/settings/settings.js');
   const settingsStyle = read('src/timeline/pages/settings/settings.css');
   const background = read('src/timeline/background/background.js');
+  const graph = read('src/timeline/pages/graph/graph.js');
   const sidepanel = read('src/sidepanel/App.tsx');
 
+  const wheelSensitivity = Number(/wheelSensitivity:\s*([\d.]+)/.exec(graph)?.[1]);
+  assert.ok(
+    wheelSensitivity >= 0.4 && wheelSensitivity <= 0.55,
+    `图谱滚轮缩放灵敏度应兼顾跟手和平滑，当前为 ${wheelSensitivity}`,
+  );
   assert.match(sidepanel, /getBookmarkFolders\(\)/, 'partial classification must offer a folder picker');
   assert.match(sidepanel, /getFolderClassificationScope\(selectedDirectoryId\)/, 'the selected folder must define the partial scope');
   assert.match(sidepanel, /runClassify\(estimate\.scope\)/, 'the confirmation must run the selected scope');

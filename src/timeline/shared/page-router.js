@@ -7,6 +7,7 @@
     graph: 'pages/graph/graph.html',
     settings: 'pages/settings/settings.html',
   };
+  const RELOAD_ON_FOCUS_PATHS = new Set([ROUTES.graph]);
 
   function cleanPath(path) {
     return String(path || '').replace(/^\/+/, '').split(/[?#]/)[0];
@@ -41,11 +42,17 @@
     const tabs = await chrome.tabs.query({});
     const existing = tabs.find((tab) => getTabPath(tab.url) === targetPath);
     if (existing) {
+      const shouldReload = existing.url === targetUrl && RELOAD_ON_FOCUS_PATHS.has(targetPath);
       await focusTab(existing, targetUrl);
+      if (shouldReload) await chrome.tabs.reload(existing.id, { bypassCache: true });
       return existing;
     }
 
-    return chrome.tabs.create({ url: targetUrl });
+    const created = await chrome.tabs.create({ url: targetUrl });
+    if (created?.id != null && RELOAD_ON_FOCUS_PATHS.has(targetPath)) {
+      await chrome.tabs.reload(created.id, { bypassCache: true });
+    }
+    return created;
   }
 
   async function openAiClassificationPanel() {

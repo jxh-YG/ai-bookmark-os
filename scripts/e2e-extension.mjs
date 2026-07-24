@@ -1,11 +1,34 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
-const extensionPath = resolve('dist');
+const extensionSourcePath = resolve('dist');
+const extensionTempPath = mkdtempSync(join(tmpdir(), 'ai-bookmark-os-e2e-extension-'));
+const extensionPath = join(extensionTempPath, 'extension');
+
+function copyDirectory(source, destination) {
+  mkdirSync(destination, { recursive: true });
+  for (const name of readdirSync(source)) {
+    const sourcePath = join(source, name);
+    const destinationPath = join(destination, name);
+    if (statSync(sourcePath).isDirectory()) copyDirectory(sourcePath, destinationPath);
+    else copyFileSync(sourcePath, destinationPath);
+  }
+}
+
+copyDirectory(extensionSourcePath, extensionPath);
+const e2eManifestPath = join(extensionPath, 'manifest.json');
+const e2eManifest = JSON.parse(readFileSync(e2eManifestPath, 'utf8'));
+e2eManifest.host_permissions = Array.from(new Set([
+  ...(e2eManifest.host_permissions || []),
+  '<all_urls>',
+]));
+e2eManifest.optional_host_permissions = (e2eManifest.optional_host_permissions || [])
+  .filter((origin) => origin !== '<all_urls>');
+writeFileSync(e2eManifestPath, JSON.stringify(e2eManifest, null, 2));
 const artifactsPath = resolve('tmp-ui-shots');
 mkdirSync(artifactsPath, { recursive: true });
 
@@ -40,7 +63,7 @@ async function openExtensionPage(context, extensionId, path, errors) {
   return page;
 }
 
-const requests = { ai: 0, rss: 0 };
+const requests = { ai: 0, rss: 0, checker: 0 };
 const mockServer = createServer((request, response) => {
   response.setHeader('Access-Control-Allow-Origin', '*');
   response.setHeader('Access-Control-Allow-Headers', '*');
@@ -62,6 +85,12 @@ const mockServer = createServer((request, response) => {
       model: 'mock-model',
       choices: [{ message: { content: JSON.stringify({ tags: [{ tag: '前端开发', confidence: 0.96 }] }) } }],
     }));
+    return;
+  }
+  if (request.url === '/health-check') {
+    requests.checker += 1;
+    response.setHeader('Content-Type', 'text/html; charset=utf-8');
+    response.end(request.method === 'HEAD' ? '' : '<title>Available bookmark</title><main>Healthy fixture</main>');
     return;
   }
   response.writeHead(404);
@@ -97,6 +126,7 @@ try {
     await chrome.bookmarks.create({ parentId: folder.id, title: 'Synthetic React', url: 'https://example.test/react' });
     await chrome.bookmarks.create({ parentId: folder.id, title: 'Synthetic Design', url: 'https://example.test/design' });
     await chrome.bookmarks.create({ parentId: folder.id, title: 'Synthetic Operations', url: 'https://example.test/ops' });
+    await chrome.bookmarks.create({ parentId: folder.id, title: 'Synthetic Healthy Link', url: `http://127.0.0.1:${fixturePort}/health-check` });
     await chrome.storage.local.set({
       ai_classifier_config: {
         enabled: true,
@@ -129,8 +159,10 @@ try {
     const timeline = await chrome.storage.local.get('bookmark_timeline_data');
     const bookmarks = timeline.bookmark_timeline_data || [];
     if (!bookmarks.length) throw new Error('synthetic bookmarks were not mirrored');
-    bookmarks[0] = {
-      ...bookmarks[0],
+    const taggedBookmarkIndex = bookmarks.findIndex((bookmark) => bookmark.title === 'Synthetic React');
+    if (taggedBookmarkIndex < 0) throw new Error('synthetic tag fixture was not mirrored');
+    bookmarks[taggedBookmarkIndex] = {
+      ...bookmarks[taggedBookmarkIndex],
       tags: ['E2E Unified Tag'],
       tagsAuto: ['E2E Unified Tag'],
       contentText: 'private cached body',
@@ -302,12 +334,84 @@ try {
     ['graph', 'pages/graph/graph.html', /图谱|Graph/i],
   ];
   for (const [label, path, textPattern] of pages) {
-    const page = await openExtensionPage(context, extensionId, path, pageErrors);
+    if (label === 'bookmark navigation') {
+      await worker.evaluate(async () => {
+        const state = await chrome.storage.local.get('bookmark_timeline_data');
+        const bookmarks = state.bookmark_timeline_data || [];
+        const bookmark = bookmarks.find((item) => item.title === 'Synthetic React');
+        if (!bookmark) throw new Error('unified tag fixture was not found');
+        bookmark.tags = ['E2E Unified Tag'];
+        bookmark.tagsAuto = ['E2E Unified Tag'];
+        await chrome.storage.local.set({
+          bookmark_timeline_data: bookmarks,
+          tag_colors: { 'E2E Unified Tag': '#123456' },
+        });
+      });
+    }
+    if (label === 'health checker') {
+      await worker.evaluate(async () => {
+        const state = await chrome.storage.local.get('bookmark_timeline_data');
+        const healthyBookmark = (state.bookmark_timeline_data || [])
+          .find((bookmark) => bookmark.title === 'Synthetic Healthy Link');
+        if (!healthyBookmark) throw new Error('healthy checker fixture was not found');
+        await chrome.storage.local.set({
+          bookmark_timeline_data: [healthyBookmark],
+          checkerTimeout: 4000,
+          checkerConcurrency: 1,
+          checkerRetries: 0,
+          checkerBackoffBase: 0,
+          checkerBackoffMax: 0,
+        });
+      });
+    }
+    let page;
+    if (label === 'graph') {
+      const popup = await openExtensionPage(context, extensionId, 'pages/popup/popup.html', pageErrors);
+      await popup.locator('#footerMenuBtn').click();
+      const graphPagePromise = context.waitForEvent('page');
+      await popup.locator('#menuGraphBtn').click();
+      page = await graphPagePromise;
+      page.on('pageerror', (error) => pageErrors.push(`${path}: ${error.message}`));
+      await page.waitForFunction(() => document.body && document.body.innerText.trim().length > 0);
+    } else {
+      page = await openExtensionPage(context, extensionId, path, pageErrors);
+    }
     await page.locator('body').filter({ hasText: textPattern }).waitFor({ timeout: 10000 });
     await assertNoHorizontalOverflow(page, label);
     if (label === 'graph') {
       await page.locator('#graphLoading').waitFor({ state: 'hidden', timeout: 10000 });
-      assert.ok(await page.locator('#cy canvas').count() > 0, 'graph rendered no canvas');
+      const graphCanvas = page.locator('#cy canvas').first();
+      await graphCanvas.waitFor({ state: 'visible', timeout: 10000 });
+      await page.waitForTimeout(1000);
+      const zoomBefore = Number.parseFloat(await page.locator('#zoomLevel').innerText());
+      const graphBox = await graphCanvas.boundingBox();
+      assert.ok(graphBox, 'graph canvas has no interactive bounds');
+      await page.mouse.move(graphBox.x + graphBox.width / 2, graphBox.y + graphBox.height / 2);
+      for (let index = 0; index < 20; index += 1) {
+        await page.mouse.wheel(0, -100);
+      }
+      await page.waitForFunction(
+        (previousZoom) => Number.parseFloat(document.querySelector('#zoomLevel')?.textContent || '') > previousZoom,
+        zoomBefore,
+      );
+      const zoomAfter = Number.parseFloat(await page.locator('#zoomLevel').innerText());
+      const wheelZoomRatio = zoomAfter / zoomBefore;
+      assert.ok(
+        wheelZoomRatio >= 1.25 && wheelZoomRatio <= 1.8,
+        `graph wheel zoom must be responsive without jumping: ${zoomBefore}% -> ${zoomAfter}%`,
+      );
+    }
+    if (label === 'health checker') {
+      const checkerRequestsBefore = requests.checker;
+      await page.locator('#startCheckBtn').click();
+      await page.waitForFunction(() => {
+        const match = /^(\d+)\/(\d+)/.exec(document.querySelector('#progressText')?.textContent || '');
+        return match && Number(match[2]) > 0 && Number(match[1]) === Number(match[2]);
+      }, undefined, { timeout: 30000 });
+      assert.ok(requests.checker > checkerRequestsBefore, 'link checker did not request the bookmarked URL');
+      assert.ok(await page.locator('.result-item--ok').count() >= 1, 'reachable bookmark was not classified as reachable');
+      const resultDetails = await page.locator('.result-status-text').allInnerTexts();
+      assert.doesNotMatch(resultDetails.join('\n'), /检测响应无效|Invalid check response/i);
     }
     if (label === 'bookmark navigation') {
       const unifiedTag = page.locator('.bookmark-card__tag', { hasText: 'E2E Unified Tag' });
@@ -360,4 +464,5 @@ try {
   if (context) await context.close();
   await closeServer(mockServer);
   rmSync(profilePath, { recursive: true, force: true });
+  rmSync(extensionTempPath, { recursive: true, force: true });
 }

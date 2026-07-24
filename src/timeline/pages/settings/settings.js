@@ -807,10 +807,83 @@ async function refreshAIStatus() {
   }
 }
 
+function getApiPermissionDetails(endpoint) {
+  try {
+    const url = new URL(String(endpoint || '').trim());
+    if (!/^https?:$/.test(url.protocol) || !url.hostname) return null;
+    return {
+      origin: `${url.protocol}//${url.hostname}/*`,
+      host: url.host,
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+const AI_PROVIDER_PERMISSION_ENDPOINTS = {
+  agnes: 'https://apihub.agnes-ai.com/',
+  openrouter: 'https://openrouter.ai/',
+  openai: 'https://api.openai.com/',
+  claude: 'https://api.anthropic.com/',
+  gemini: 'https://generativelanguage.googleapis.com/',
+  deepseek: 'https://api.deepseek.com/',
+  zhipu: 'https://open.bigmodel.cn/',
+  google: 'https://generativelanguage.googleapis.com/',
+  tongyi: 'https://dashscope.aliyuncs.com/',
+};
+
+function getAIConnectionPermissionEndpoint(config) {
+  return config.provider === 'custom'
+    ? config.customEndpoint
+    : AI_PROVIDER_PERMISSION_ENDPOINTS[config.provider] || '';
+}
+
+async function ensureApiHostPermission(endpoint) {
+  const details = getApiPermissionDetails(endpoint);
+  if (!details) return { granted: false, error: 'API 请求地址无效' };
+  if (typeof chrome === 'undefined' || !chrome.permissions) {
+    return { granted: false, error: '浏览器不支持站点访问授权' };
+  }
+  try {
+    const granted = await chrome.permissions.request({ origins: [details.origin] });
+    return granted
+      ? { granted: true }
+      : { granted: false, error: `未授予 ${details.host} 的访问权限` };
+  } catch (_) {
+    return { granted: false, error: `无法申请 ${details.host} 的访问权限` };
+  }
+}
+
 async function testAIConnection() {
   const config = buildAIConfigFromUI();
   if (!config.apiKey) {
     showToast(i18n('aiStatusNoKey') || '请填写 API Key', 'error');
+    return;
+  }
+
+  try {
+    const permissionEndpoint = getAIConnectionPermissionEndpoint(config);
+    if (permissionEndpoint) {
+      const permission = await ensureApiHostPermission(permissionEndpoint);
+      if (!permission.granted) {
+        showToast(permission.error, 'error');
+        return;
+      }
+    }
+    const endpointResult = await chrome.runtime.sendMessage({ action: 'getAIConnectionEndpoint', config });
+    if (!endpointResult?.success || !endpointResult.endpoint) {
+      showToast('API 服务商配置无效，请检查地址和协议', 'error');
+      return;
+    }
+    if (!permissionEndpoint) {
+      const permission = await ensureApiHostPermission(endpointResult.endpoint);
+      if (!permission.granted) {
+        showToast(permission.error, 'error');
+        return;
+      }
+    }
+  } catch (_) {
+    showToast(i18n('aiTestFailed') || '连接失败', 'error');
     return;
   }
 
@@ -2024,14 +2097,24 @@ function setTreeStatus(text, kind) {
   if (kind === 'err') treeStatusDesc.classList.add('tree-status-err');
 }
 
-function normalizeTreeEndpointBase(url) {
-  let value = String(url || '').trim().replace(/\/+$/, '');
+function normalizeTreeEndpointBase(url, preserveFullUrl = false) {
+  let value = String(url || '').trim();
   if (!value) return '';
+  if (preserveFullUrl) return value;
+  value = value.replace(/\/+$/, '');
   value = value
     .replace(/\/chat\/completions$/i, '')
     .replace(/\/v1\/messages$/i, '/v1')
     .replace(/\/messages$/i, '');
   return value.replace(/\/+$/, '');
+}
+
+function resolveGeminiRequestUrl(baseUrl, model) {
+  const raw = String(baseUrl || '').trim().replace(/\/+$/, '');
+  if (!raw) return '';
+  if (raw.includes('{model}')) return raw.replace('{model}', encodeURIComponent(model));
+  if (/\/models\/[^/]+:generateContent$/i.test(raw)) return raw;
+  return `${raw}/models/${encodeURIComponent(model)}:generateContent`;
 }
 
 function resolveTreeRequestUrl(settings) {
@@ -2040,21 +2123,26 @@ function resolveTreeRequestUrl(settings) {
   const style = provider === 'custom'
     ? (settings.customApiStyle || 'openai')
     : (p.apiStyle || 'openai');
-  const raw = String(settings.baseUrl || p.baseUrl || '').trim().replace(/\/+$/, '');
-  if (!raw) return '';
+  const rawValue = String(settings.baseUrl || p.baseUrl || '').trim();
+  if (!rawValue) return '';
+  if (provider === 'custom' && settings.customFullUrl) return rawValue;
+  const raw = rawValue.replace(/\/+$/, '');
+  const model = settings.model || p.defaultModel;
 
   if (provider !== 'custom') {
     if (style === 'openai') return /\/chat\/completions$/i.test(raw) ? raw : `${raw}/chat/completions`;
     if (style === 'anthropic') return /\/messages$/i.test(raw) ? raw : `${raw}/messages`;
+    if (style === 'gemini') return resolveGeminiRequestUrl(raw, model);
     return raw;
   }
 
-  if (settings.customFullUrl) return raw;
   if (style === 'openai') return /\/chat\/completions$/i.test(raw) ? raw : `${raw}/chat/completions`;
   if (style === 'anthropic') {
-    if (/\/v1\/messages$/i.test(raw) || /\/messages$/i.test(raw)) return raw;
+    if (/\/messages$/i.test(raw)) return raw;
+    if (/\/v1$/i.test(raw)) return `${raw}/messages`;
     return `${raw}/v1/messages`;
   }
+  if (style === 'gemini') return resolveGeminiRequestUrl(raw, model);
   return raw;
 }
 
@@ -2216,8 +2304,9 @@ function readTreeSettingsFromUI(prev) {
     buildTree: treePromptBuild && treePromptBuild.value,
     assign: treePromptAssign && treePromptAssign.value,
   });
+  const customFullUrl = provider === 'custom' ? !!(treeFullUrlToggle && treeFullUrlToggle.checked) : false;
   const baseUrl = provider === 'custom'
-    ? normalizeTreeEndpointBase((treeBaseUrlInput && treeBaseUrlInput.value) || '')
+    ? normalizeTreeEndpointBase((treeBaseUrlInput && treeBaseUrlInput.value) || '', customFullUrl)
     : p.baseUrl;
 
   return {
@@ -2230,7 +2319,7 @@ function readTreeSettingsFromUI(prev) {
     customApiStyle: provider === 'custom'
       ? ((treeApiStyleSelect && treeApiStyleSelect.value) || 'openai')
       : (p.apiStyle || 'openai'),
-    customFullUrl: provider === 'custom' ? !!(treeFullUrlToggle && treeFullUrlToggle.checked) : false,
+    customFullUrl,
     classifyPrompts: prompts,
     respectExistingFolders: treeRespectFoldersToggle ? !!treeRespectFoldersToggle.checked : true,
     preservedFolderPaths: getSelectedPreservedFolders(),
@@ -2276,14 +2365,14 @@ async function loadTreeSettings() {
       treeModelInput.placeholder = p.defaultModel || 'model-name';
     }
     if (treeBaseUrlInput) {
-      treeBaseUrlInput.value = provider === 'custom' ? normalizeTreeEndpointBase(s.baseUrl || '') : '';
+      treeBaseUrlInput.value = provider === 'custom' ? normalizeTreeEndpointBase(s.baseUrl || '', !!s.customFullUrl) : '';
     }
 
     _treeProviderInputCache = {
       [provider]: {
         apiKey: s.apiKey || '',
         model: s.model || '',
-        endpoint: provider === 'custom' ? normalizeTreeEndpointBase(s.baseUrl || '') : '',
+        endpoint: provider === 'custom' ? normalizeTreeEndpointBase(s.baseUrl || '', !!s.customFullUrl) : '',
         apiStyle: s.customApiStyle || p.apiStyle || 'openai',
         fullUrl: !!s.customFullUrl,
       }
@@ -2410,9 +2499,8 @@ function buildTreeChatRequest(settings, userText) {
   }
 
   if (style === 'gemini') {
-    const base = String(settings.baseUrl || getTreeProvider(settings.provider).baseUrl || '').replace(/\/$/, '');
     return {
-      url: `${base}/models/${encodeURIComponent(model)}:generateContent`,
+      url: requestUrl,
       headers: {
         'content-type': 'application/json',
         'x-goog-api-key': settings.apiKey,
@@ -2438,26 +2526,34 @@ function buildTreeChatRequest(settings, userText) {
   };
 }
 
-function extractTreeTestSample(style, payloadText) {
+function parseTreeTestResponse(style, payloadText) {
   try {
     const data = JSON.parse(payloadText);
+    const providerError = data?.error;
+    if (providerError) {
+      const detail = typeof providerError === 'string' ? providerError : providerError.message || JSON.stringify(providerError);
+      return { ok: false, error: `API 返回错误：${String(detail).slice(0, 160)}` };
+    }
+    let sample = '';
     if (style === 'anthropic') {
       const parts = data?.content;
       if (Array.isArray(parts)) {
-        return parts.map((p) => p?.text || '').join('').trim();
+        sample = parts.map((p) => p?.text || '').join('').trim();
+      } else {
+        sample = String(data?.content || '').trim();
       }
-      return String(data?.content || '').trim();
-    }
-    if (style === 'gemini') {
+    } else if (style === 'gemini') {
       const parts = data?.candidates?.[0]?.content?.parts;
       if (Array.isArray(parts)) {
-        return parts.map((p) => p?.text || '').join('').trim();
+        sample = parts.map((p) => p?.text || '').join('').trim();
       }
-      return '';
+    } else {
+      sample = String(data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '').trim();
     }
-    return String(data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '').trim();
+    if (!sample) return { ok: false, error: `响应不符合 ${style} 协议或未包含回复内容` };
+    return { ok: true, sample };
   } catch (_) {
-    return '';
+    return { ok: false, error: '响应不是有效 JSON' };
   }
 }
 
@@ -2473,30 +2569,19 @@ function isRetryableTreeTestError(error) {
 }
 
 async function fetchTreeTestAttempt(req, timeoutMs) {
-  const controller = new AbortController();
-  let timedOut = false;
-  const timeoutId = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
-  try {
-    const response = await fetch(req.url, {
-      method: 'POST',
+  const response = await chrome.runtime.sendMessage({
+    action: 'aiProxyFetch',
+    request: {
+      url: req.url,
       headers: req.headers,
       body: JSON.stringify(req.body),
-      signal: controller.signal,
-    });
-    return { response, text: await response.text() };
-  } catch (error) {
-    if (timedOut) {
-      const timeoutError = new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
-      timeoutError.name = 'TimeoutError';
-      throw timeoutError;
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
+      timeoutMs,
+    },
+  });
+  if (!response || response.success === false) {
+    throw new Error(response?.error || '后台代理请求失败');
   }
+  return { ok: !!response.ok, status: Number(response.status) || 0, text: String(response.text || '') };
 }
 
 async function fetchTreeTestWithRetry(req, settings, onRetry) {
@@ -2508,7 +2593,7 @@ async function fetchTreeTestWithRetry(req, settings, onRetry) {
     try {
       const result = await fetchTreeTestAttempt(req, timeoutMs);
       lastResult = result;
-      const retryableStatus = result.response.status === 408 || result.response.status === 429 || result.response.status >= 500;
+      const retryableStatus = result.status === 408 || result.status === 429 || result.status >= 500;
       if (!retryableStatus || attempt >= maxRetries) return result;
     } catch (error) {
       lastError = error;
@@ -2525,8 +2610,8 @@ async function fetchTreeTestWithRetry(req, settings, onRetry) {
 async function testTreeConnection() {
   if (!treeTestBtn) return;
 
-  const data = await chrome.storage.local.get('settings');
-  const settings = readTreeSettingsFromUI(data.settings || {});
+  // 使用当前表单值，让权限弹窗始终由测试按钮的用户手势直接触发。
+  const settings = readTreeSettingsFromUI(DEFAULT_TREE_SETTINGS);
   const style = settings.provider === 'custom'
     ? (settings.customApiStyle || 'openai')
     : (getTreeProvider(settings.provider).apiStyle || 'openai');
@@ -2547,15 +2632,55 @@ async function testTreeConnection() {
     return;
   }
 
+  const request = buildTreeChatRequest(settings, '回复"OK"两个字母即可。');
+  const permission = await ensureApiHostPermission(request.url);
+  if (!permission.granted) {
+    setTreeStatus(`诊断失败：${permission.error}`, 'err');
+    if (typeof showToast === 'function') showToast(permission.error, 'error');
+    return;
+  }
+
   const originalText = treeTestBtn.textContent;
   treeTestBtn.disabled = true;
   treeTestBtn.textContent = (typeof i18n === 'function' ? (i18n('aiTesting') || '诊断中...') : '诊断中...');
   setTreeStatus('诊断中…');
 
   try {
-    // Provider Doctor：分环节诊断（配置完整性 → 请求地址 → 连通性），
-    // 连通性走与真实分类相同的 chat 路径（SW 代理），让失败能精确定位到某一环。
-    const steps = await diagnoseProvider(settings);
+    // Provider Doctor：分环节诊断（配置完整性 → 请求地址 → 连通性）。
+    // 连通性走 SW 代理（与真实分类同路径），避免页面直连触发 CORS 预检导致慢/报错。
+    const steps = [];
+
+    // 1) 配置完整性
+    const missing = [];
+    if (!settings.apiKey) missing.push('API Key');
+    if (!settings.model) missing.push('模型名');
+    if (settings.provider === 'custom' && !settings.baseUrl) missing.push('Base URL');
+    steps.push({ step: '配置完整性', ok: missing.length === 0, detail: missing.length ? `缺少：${missing.join('、')}` : '必填字段齐全' });
+
+    // 2) 请求地址
+    const requestUrl = request.url;
+    const hasValidUrl = !!requestUrl && /^https?:\/\//.test(requestUrl);
+    steps.push({ step: '请求地址', ok: hasValidUrl, detail: requestUrl || '无法解析出有效的请求地址' });
+
+    // 3) 连通性（经 SW 代理发一次极小的 chat 请求）
+    if (hasValidUrl) {
+      try {
+        const result = await fetchTreeTestWithRetry(request, settings, ({ attempt, maxRetries }) => {
+          setTreeStatus(`连接波动，正在进行第 ${attempt}/${maxRetries} 次重试…`);
+        });
+        if (!result.ok) {
+          steps.push({ step: '连通性', ok: false, detail: `HTTP ${result.status}：${result.text.slice(0, 120)}` });
+        } else {
+          const parsed = parseTreeTestResponse(style, result.text);
+          steps.push(parsed.ok
+            ? { step: '连通性', ok: true, detail: `连接成功 · ${style} · ${settings.model}｜样例：${parsed.sample.slice(0, 40)}` }
+            : { step: '连通性', ok: false, detail: parsed.error });
+        }
+      } catch (error) {
+        steps.push({ step: '连通性', ok: false, detail: (error && error.message) || String(error) });
+      }
+    }
+
     const allOk = steps.every((s) => s.ok);
     const summary = steps.map((s) => `${s.ok ? '✅' : '❌'} ${s.step}：${s.detail}`).join('\n');
 

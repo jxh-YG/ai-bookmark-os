@@ -318,7 +318,8 @@ for (const body of [
 
 {
   const bridgeSource = readFileSync('src/bridge/ai-sw-bridge.js', 'utf8');
-  let messageListener;
+  const backgroundSource = readFileSync('src/timeline/background/background.js', 'utf8');
+  const messageListeners = [];
   let probeCalls = 0;
   const context = vm.createContext({
     self: {
@@ -352,7 +353,7 @@ for (const body of [
     chrome: {
       sidePanel: { setPanelBehavior: () => Promise.resolve() },
       runtime: {
-        onMessage: { addListener: (listener) => { messageListener = listener; } },
+        onMessage: { addListener: (listener) => { messageListeners.push(listener); } },
         onInstalled: { addListener: () => {} },
         getManifest: () => ({ version: '1.0.2' }),
       },
@@ -363,12 +364,56 @@ for (const body of [
     },
   });
   vm.runInContext(bridgeSource, context, { filename: 'ai-sw-bridge.js' });
-  const dispatch = (message) => new Promise((resolve) => messageListener(message, {}, resolve));
+  const ownsRuntimeMessage = context.self.AIBookmarkBridge?.ownsRuntimeMessage;
+  assert.equal(typeof ownsRuntimeMessage, 'function');
+  for (const message of [
+    { type: 'probeUrl' },
+    { type: 'checkUrl' },
+    { type: 'recheckUrlWithSession' },
+    { type: 'cancelLinkCheckRun' },
+    { type: 'fetchMeta' },
+    { type: 'fetchPageContext' },
+    { type: 'openSidePanel' },
+    { action: 'fetchMeta' },
+    { action: 'openAiSidePanel' },
+  ]) {
+    assert.equal(ownsRuntimeMessage(message), true);
+  }
+  assert.equal(ownsRuntimeMessage({ action: 'getBookmarks' }), false);
+
+  const listenerPrefix = 'chrome.runtime.onMessage.addListener(';
+  const listenerStart = backgroundSource.indexOf(listenerPrefix) + listenerPrefix.length;
+  const listenerTail = backgroundSource.slice(listenerStart);
+  const listenerEndMatch = /(\r?\n})\);\r?\n\r?\n\/\/ ===== 书签事件监听/.exec(listenerTail);
+  const listenerEnd = listenerEndMatch
+    ? listenerStart + listenerEndMatch.index + listenerEndMatch[1].length
+    : -1;
+  assert.ok(listenerStart >= listenerPrefix.length && listenerEnd > listenerStart, 'main runtime listener not found');
+  const backgroundListener = vm.runInNewContext(
+    `(${backgroundSource.slice(listenerStart, listenerEnd)})`,
+    { self: context.self, validateRuntimeMessage: () => null },
+  );
+  messageListeners.push(backgroundListener);
+
+  const dispatch = (message) => new Promise((resolve) => {
+    let responded = false;
+    const sendResponse = (response) => {
+      if (responded) return;
+      responded = true;
+      resolve(response);
+    };
+    for (const listener of messageListeners) listener(message, {}, sendResponse);
+  });
+
+  const normal = await dispatch({ type: 'checkUrl', url: 'https://example.test/available', runId: 'normal-run' });
+  assert.equal(normal.success, true, 'main listener must not preempt the async checker bridge response');
+  assert.equal(normal.result.reason, 'http-success');
+  assert.equal(probeCalls, 1);
 
   await dispatch({ type: 'cancelLinkCheckRun', runId: 'cancelled-run' });
   const response = await dispatch({ type: 'checkUrl', url: 'https://example.test/queued', runId: 'cancelled-run' });
   assert.equal(response.result.reason, 'aborted');
-  assert.equal(probeCalls, 0);
+  assert.equal(probeCalls, 1);
 }
 
 {

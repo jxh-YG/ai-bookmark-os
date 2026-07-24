@@ -558,7 +558,7 @@ function initCytoscape(elements) {
     },
     minZoom: 0.2,
     maxZoom: 5,
-    wheelSensitivity: 0.3,
+    wheelSensitivity: 0.45,
     boxSelectionEnabled: false,
     selectionType: 'single'
   });

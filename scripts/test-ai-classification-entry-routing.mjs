@@ -4,7 +4,7 @@ import vm from 'node:vm';
 
 const sharedRouterSource = fs.readFileSync('src/timeline/shared/page-router.js', 'utf8');
 
-function loadSharedRouter({ direct = 'success', bridgeResponse = { ok: false } } = {}) {
+function loadSharedRouter({ direct = 'success', bridgeResponse = { ok: false }, tabs = [] } = {}) {
   const calls = [];
   const chrome = {
     runtime: {
@@ -19,18 +19,25 @@ function loadSharedRouter({ direct = 'success', bridgeResponse = { ok: false } }
         calls.push(['getCurrent']);
         return { id: 7 };
       },
-      update: async () => {},
+      update: async (windowId, options) => {
+        calls.push(['updateWindow', windowId, options]);
+      },
     },
     tabs: {
       query: async () => {
         calls.push(['queryTabs']);
-        return [];
+        return tabs;
       },
       create: async (options) => {
         calls.push(['createTab', options]);
         return { id: 8, ...options };
       },
-      update: async () => {},
+      update: async (tabId, options) => {
+        calls.push(['updateTab', tabId, options]);
+      },
+      reload: async (tabId, options) => {
+        calls.push(['reloadTab', tabId, options]);
+      },
     },
   };
   if (direct !== 'unavailable') {
@@ -52,6 +59,35 @@ function loadSharedRouter({ direct = 'success', bridgeResponse = { ok: false } }
   };
   vm.runInNewContext(sharedRouterSource, context, { filename: 'page-router.js' });
   return { calls, router: context.window.AIBookmarkPageRouter };
+}
+
+async function testGraphTabsAlwaysLoadTheCurrentBundle() {
+  const graphUrl = 'chrome-extension://test/pages/graph/graph.html';
+  const graph = loadSharedRouter({
+    tabs: [{ id: 12, windowId: 7, url: graphUrl }],
+  });
+
+  await graph.router.openOrFocusExtensionPage('pages/graph/graph.html');
+  assert.deepEqual(JSON.parse(JSON.stringify(graph.calls)), [
+    ['queryTabs'],
+    ['updateTab', 12, { active: true }],
+    ['updateWindow', 7, { focused: true }],
+    ['reloadTab', 12, { bypassCache: true }],
+  ]);
+
+  const newGraph = loadSharedRouter();
+  await newGraph.router.openOrFocusExtensionPage('pages/graph/graph.html');
+  assert.deepEqual(JSON.parse(JSON.stringify(newGraph.calls)), [
+    ['queryTabs'],
+    ['createTab', { url: graphUrl }],
+    ['reloadTab', 8, { bypassCache: true }],
+  ]);
+
+  const settings = loadSharedRouter({
+    tabs: [{ id: 13, windowId: 7, url: 'chrome-extension://test/pages/settings/settings.html' }],
+  });
+  await settings.router.openOrFocusExtensionPage('pages/settings/settings.html');
+  assert.equal(settings.calls.some(([name]) => name === 'reloadTab'), false);
 }
 
 async function testSharedRouterUsesTheSameFallbackChain() {
@@ -108,6 +144,7 @@ function testEveryMenuDelegatesToTheSharedOpener() {
 }
 
 await testSharedRouterUsesTheSameFallbackChain();
+await testGraphTabsAlwaysLoadTheCurrentBundle();
 testEveryMenuDelegatesToTheSharedOpener();
 
 console.log('AI classification entry routing checks passed');

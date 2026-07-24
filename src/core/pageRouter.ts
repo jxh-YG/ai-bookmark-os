@@ -1,3 +1,5 @@
+const RELOAD_ON_FOCUS_PATHS = new Set(['pages/graph/graph.html']);
+
 function cleanPath(path: string) {
   return path.replace(/^\/+/, '').split(/[?#]/)[0];
 }
@@ -31,9 +33,20 @@ export async function openOrFocusExtensionPage(path: string) {
 
   const tabs = await chrome.tabs.query({});
   const existing = tabs.find((tab) => getExtensionTabPath(tab.url) === targetPath);
-  if (existing && await focusExtensionTab(existing, targetUrl)) return;
+  if (existing) {
+    const shouldReload = existing.url === targetUrl && RELOAD_ON_FOCUS_PATHS.has(targetPath);
+    if (await focusExtensionTab(existing, targetUrl)) {
+      if (shouldReload && existing.id != null) {
+        await chrome.tabs.reload(existing.id, { bypassCache: true });
+      }
+      return;
+    }
+  }
 
-  await chrome.tabs.create({ url: targetUrl });
+  const created = await chrome.tabs.create({ url: targetUrl });
+  if (created.id != null && RELOAD_ON_FOCUS_PATHS.has(targetPath)) {
+    await chrome.tabs.reload(created.id, { bypassCache: true });
+  }
 }
 
 /** Opens the AI classifier consistently from React extension pages. */

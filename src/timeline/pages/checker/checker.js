@@ -437,8 +437,8 @@ async function recheckItem(item) {
 
 async function recheckSelectedItems() {
   const items = selectedReviewItems();
-  if (!items.length || isChecking || startingCheck || recheckingResultIds.size > 0) return;
-  startingCheck = true;
+  if (!items.length || isChecking || checkStarting || recheckingResultIds.size > 0) return;
+  checkStarting = true;
   let settings;
   try {
     if (!await requestCheckerPermission()) {
@@ -447,7 +447,7 @@ async function recheckSelectedItems() {
     }
     settings = await getCheckSettings();
   } finally {
-    startingCheck = false;
+    checkStarting = false;
   }
 
   const runId = `checker-recheck-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -510,9 +510,9 @@ async function requestCheckerPermission() {
 }
 
 async function startCheck() {
-  // startingCheck 是同步守卫：覆盖权限申请与数据加载的 await 窗口，避免连点启动两轮扫描。
-  if (isChecking || startingCheck || recheckingResultIds.size > 0) return;
-  startingCheck = true;
+  // checkStarting 是同步守卫：覆盖权限申请与数据加载的 await 窗口，避免连点启动两轮扫描。
+  if (isChecking || checkStarting || recheckingResultIds.size > 0) return;
+  checkStarting = true;
   let settings;
   let bookmarks;
   try {
@@ -531,7 +531,7 @@ async function startCheck() {
       return;
     }
   } finally {
-    startingCheck = false;
+    checkStarting = false;
   }
 
   const runId = `checker-${Date.now()}-${Math.random().toString(36).slice(2)}`;

@@ -10,5 +10,7 @@ assert.match(checker, /不会携带登录态/);
 assert.match(checker, /requestProbe\('checkUrl'/);
 assert.match(checker, /type:\s*'cancelLinkCheckRun'/);
 assert.match(checker, /async function startCheck\(\)[\s\S]{0,700}await requestCheckerPermission\(\)/);
+assert.match(checker, /let checkStarting = false;/);
+assert.doesNotMatch(checker, /\bstartingCheck\b/);
 
 console.log('checker optional permission regression checks passed');

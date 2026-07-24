@@ -21,6 +21,26 @@
     : [];
   const checkRuns = new Map();
   const cancelledRuns = new Map();
+  const ownedMessageTypes = new Set([
+    'probeUrl',
+    'checkUrl',
+    'recheckUrlWithSession',
+    'cancelLinkCheckRun',
+    'fetchMeta',
+    'fetchPageContext',
+    'openSidePanel',
+  ]);
+  const ownedMessageActions = new Set(['fetchMeta', 'openAiSidePanel']);
+
+  function ownsRuntimeMessage(message) {
+    return Boolean(
+      message
+      && typeof message === 'object'
+      && (ownedMessageTypes.has(message.type) || ownedMessageActions.has(message.action)),
+    );
+  }
+
+  self.AIBookmarkBridge = { ownsRuntimeMessage };
 
   function controllerForRun(runId) {
     if (!runId) return null;
@@ -149,7 +169,7 @@
   } catch (_) {}
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (!msg || typeof msg !== 'object') return;
+    if (!ownsRuntimeMessage(msg)) return;
     if (msg.type === 'probeUrl' && typeof msg.url === 'string') {
       probeUrl(msg.url).then(sendResponse);
       return true;

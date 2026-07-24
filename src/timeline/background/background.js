@@ -5171,6 +5171,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: false, error: 'invalid_message_sender' });
     return false;
   }
+  // 桥接器与主后台共享同一 Service Worker；桥接器负责的消息不能被通用 action 分发抢先回包。
+  if (self.AIBookmarkBridge?.ownsRuntimeMessage?.(message)) return false;
   const validationError = validateRuntimeMessage(message);
   if (validationError) {
     sendResponse({ success: false, error: validationError });
@@ -5750,6 +5752,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       })();
       return true;
+    }
+
+    case 'getAIConnectionEndpoint': {
+      const resolved = resolveProvider(message.config || {});
+      if (!resolved?.endpoint) {
+        sendResponse({ success: false, error: 'invalid_ai_provider_config' });
+      } else {
+        sendResponse({ success: true, endpoint: resolved.endpoint });
+      }
+      return false;
     }
 
     case 'testAIConnection': {

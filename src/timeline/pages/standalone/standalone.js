@@ -433,15 +433,8 @@ async function updateBookmark(id, changes) {
 }
 
 // ===== 标签系统 =====
-async function getTagColor(tag) {
-  if (typeof SmartTagger !== 'undefined' && SmartTagger.getTagColor) {
-    return SmartTagger.getTagColor(tag);
-  }
-  let hash = 0;
-  for (let i = 0; i < tag.length; i++) hash = tag.charCodeAt(i) + ((hash << 5) - hash);
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 65%, 50%)`;
-}
+// getTagColor 复用 smart-tagger.js 的全局实现（读 tag_colors 存储 → DOMAIN_RULES 预设色 →
+// 求和哈希 hsl(h,60%,50%)），与 popup 等页面共用同一套取色逻辑，保证同标签跨页面颜色一致。
 
 async function collectAllTags() {
   allTags.clear();

@@ -58,8 +58,7 @@ const API_FORMATS = {
     name: 'Anthropic Messages',
     buildHeaders: (apiKey) => ({
       'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'messages-2023-12-15'
+      'anthropic-version': '2023-06-01'
     }),
     buildBody: (prompt, model) => ({
       model,
@@ -69,8 +68,9 @@ const API_FORMATS = {
     parseResponse: (json) => json.content?.[0]?.text,
     normalizeEndpoint: (baseUrl) => {
       let url = baseUrl.replace(/\/+$/, '');
-      if (!url.endsWith('/v1/messages')) url += '/v1/messages';
-      return url;
+      if (/\/messages$/i.test(url)) return url;
+      if (/\/v1$/i.test(url)) return `${url}/messages`;
+      return `${url}/v1/messages`;
     }
   },
 
@@ -82,7 +82,12 @@ const API_FORMATS = {
       contents: [{ parts: [{ text: prompt }] }]
     }),
     parseResponse: (json) => json.candidates?.[0]?.content?.parts?.[0]?.text,
-    normalizeEndpoint: (baseUrl, model) => baseUrl.replace('{model}', encodeURIComponent(model))
+    normalizeEndpoint: (baseUrl, model) => {
+      const url = baseUrl.replace(/\/+$/, '');
+      if (url.includes('{model}')) return url.replace('{model}', encodeURIComponent(model));
+      if (/\/models\/[^/]+:generateContent$/i.test(url)) return url;
+      return `${url}/models/${encodeURIComponent(model)}:generateContent`;
+    }
   }
 };
 
@@ -174,14 +179,15 @@ function resolveProvider(config) {
     const formatType = (config.customFormat === 'gemini' || config.customFormat === 'google') ? 'google' : (config.customFormat || 'openai');
     const format = API_FORMATS[formatType];
     if (!format) return null;
-    const rawUrl = (config.customEndpoint || '').replace(/\/+$/, '');
+    const rawUrl = String(config.customEndpoint || '').trim();
     if (!rawUrl) return null;
+    const model = config.model || 'gpt-4o-mini';
 
     // 用户勾选了“使用完整 URL”则直接使用，否则按格式拼接路径
-    const endpoint = config.customFullUrl ? rawUrl : format.normalizeEndpoint(rawUrl);
+    const endpoint = config.customFullUrl ? rawUrl : format.normalizeEndpoint(rawUrl, model);
     return {
       name: '自定义',
-      model: config.model || 'gpt-4o-mini',
+      model,
       endpoint,
       buildHeaders: format.buildHeaders,
       buildBody: format.buildBody,
